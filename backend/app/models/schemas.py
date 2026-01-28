@@ -96,6 +96,23 @@ class SummaryStatistics(BaseModel):
     sample_size: int
 
 
+class BacktestResult(BaseModel):
+    """Results from backtesting a trading strategy."""
+
+    total_trades: int
+    winning_trades: int
+    losing_trades: int
+    win_rate: float
+    total_return: float
+    average_return: float
+    sharpe_ratio: float
+    max_drawdown: float
+    profit_factor: float
+    average_trade_duration: float  # in minutes
+    start_date: datetime
+    end_date: datetime
+
+
 class WebSocketMessage(BaseModel):
     """WebSocket message format."""
 

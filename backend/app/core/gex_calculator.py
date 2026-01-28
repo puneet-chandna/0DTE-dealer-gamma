@@ -1,5 +1,13 @@
-"""0DTE GEX Backend - GEX Calculator Engine."""
+"""0DTE GEX Backend - GEX Calculator Engine.
 
+CRITICAL: Dealer positioning assumptions:
+- Dealers are SHORT calls (customers buy calls) → Negative GEX
+- Dealers are LONG puts (customers buy puts) → Positive GEX
+
+GEX Formula: GEX_i = OI_i × Γ_i × 100 × S²
+"""
+
+import logging
 from datetime import datetime
 from typing import Dict, Tuple
 
@@ -7,8 +15,19 @@ import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
+from app.core.constants import (
+    CONTRACT_MULTIPLIER,
+    MIN_IV,
+    MAX_IV,
+    RISK_FREE_RATE,
+    SPX_DIVIDEND_YIELD,
+    SHORT_GAMMA_THRESHOLD,
+    LONG_GAMMA_THRESHOLD,
+)
 from app.core.greeks import BlackScholesGreeks
 from app.models.schemas import GEXSnapshot
+
+logger = logging.getLogger(__name__)
 
 
 class GEXCalculator:
@@ -21,14 +40,17 @@ class GEXCalculator:
     - Dealers are SHORT calls (customers buy calls) → Negative GEX
     - Dealers are LONG puts (customers buy puts) → Positive GEX
 
-    Net GEX = Σ(GEX_puts) - Σ(GEX_calls)
+    Net GEX = Σ(GEX_puts) + Σ(GEX_calls)  [calls are already negative]
     """
 
-    CONTRACT_MULTIPLIER = 100  # Standard US options multiplier
-
-    def __init__(self, risk_free_rate: float = 0.05):
-        """Initialize with risk-free rate."""
+    def __init__(
+        self,
+        risk_free_rate: float = RISK_FREE_RATE,
+        dividend_yield: float = SPX_DIVIDEND_YIELD,
+    ):
+        """Initialize with risk-free rate and dividend yield."""
         self.risk_free_rate = risk_free_rate
+        self.dividend_yield = dividend_yield
 
     def calculate_gex_from_chain(
         self,
@@ -40,15 +62,42 @@ class GEXCalculator:
         Calculate GEX from options chain DataFrame.
 
         Expected columns: strike, type, open_interest, implied_vol, expiration
+
+        Returns GEXSnapshot with all GEX metrics.
         """
+        if options_df.empty:
+            logger.warning("Empty options chain received, returning zero GEX")
+            return self._create_empty_snapshot(spot_price, timestamp)
+
+        # Create a copy to avoid modifying original
+        df = options_df.copy()
+
+        # Filter out invalid data
+        initial_count = len(df)
+        df = self._filter_valid_contracts(df)
+        filtered_count = len(df)
+
+        if filtered_count < initial_count:
+            logger.info(
+                f"Filtered {initial_count - filtered_count} invalid contracts "
+                f"({filtered_count} remaining)"
+            )
+
+        if df.empty:
+            logger.warning("No valid contracts after filtering, returning zero GEX")
+            return self._create_empty_snapshot(spot_price, timestamp)
+
         # Convert to numpy arrays for vectorized calculation
-        strikes = options_df["strike"].values.astype(np.float64)
-        option_types = options_df["type"].values
-        open_interest = options_df["open_interest"].values.astype(np.float64)
-        implied_vol = options_df["implied_vol"].values.astype(np.float64)
+        strikes = df["strike"].values.astype(np.float64)
+        option_types = df["type"].values
+        open_interest = df["open_interest"].values.astype(np.float64)
+        implied_vol = df["implied_vol"].values.astype(np.float64)
 
         # Calculate time to expiration in years
-        expiration = pd.to_datetime(options_df["expiration"])
+        expiration = pd.to_datetime(df["expiration"])
+        # Handle timezone-aware timestamps
+        if timestamp.tzinfo is not None:
+            expiration = expiration.dt.tz_localize(timestamp.tzinfo)
         T = ((expiration - timestamp).dt.total_seconds() / (365.25 * 24 * 3600)).values
 
         # Ensure T is positive (filter out expired)
@@ -57,11 +106,13 @@ class GEXCalculator:
         # Vectorized spot price
         S = np.full_like(strikes, spot_price)
 
-        # Calculate gamma for all contracts
-        gammas = BlackScholesGreeks.gamma(S, strikes, T, self.risk_free_rate, implied_vol)
+        # Calculate gamma for all contracts WITH dividend yield
+        gammas = BlackScholesGreeks.gamma(
+            S, strikes, T, self.risk_free_rate, implied_vol, q=self.dividend_yield
+        )
 
         # Calculate GEX per contract: OI × Γ × 100 × S²
-        gex_raw = open_interest * gammas * self.CONTRACT_MULTIPLIER * (spot_price**2)
+        gex_raw = open_interest * gammas * CONTRACT_MULTIPLIER * (spot_price**2)
 
         # Apply dealer positioning: calls negative, puts positive
         is_call = option_types == "call"
@@ -78,8 +129,21 @@ class GEXCalculator:
         # Find zero gamma level
         zero_gamma_level = self._find_zero_gamma_level(gex_by_strike, spot_price)
 
-        # Find dominant strike
-        dominant_strike = max(gex_by_strike.keys(), key=lambda k: abs(gex_by_strike[k]))
+        # Find dominant strike (highest absolute GEX)
+        if gex_by_strike:
+            dominant_strike = max(gex_by_strike.keys(), key=lambda k: abs(gex_by_strike[k]))
+        else:
+            dominant_strike = spot_price
+
+        # Calculate additional metrics
+        metrics = self._calculate_metrics(
+            net_gex=net_gex,
+            total_call_gex=total_call_gex,
+            total_put_gex=total_put_gex,
+            spot_price=spot_price,
+            zero_gamma_level=zero_gamma_level,
+            gex_by_strike=gex_by_strike,
+        )
 
         return GEXSnapshot(
             timestamp=timestamp,
@@ -90,11 +154,56 @@ class GEXCalculator:
             zero_gamma_level=zero_gamma_level,
             gex_by_strike=gex_by_strike,
             dominant_strike=dominant_strike,
+            metrics=metrics,
+        )
+
+    def _filter_valid_contracts(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Filter out invalid contracts.
+
+        Removes contracts with:
+        - OI = 0 (no exposure)
+        - IV outside valid bounds
+        - NaN values in critical columns
+        """
+        original_len = len(df)
+
+        # Filter OI = 0
+        df = df[df["open_interest"] > 0]
+        if len(df) < original_len:
+            logger.debug(f"Removed {original_len - len(df)} contracts with OI=0")
+
+        # Filter NaN implied_vol
+        df = df[df["implied_vol"].notna()]
+
+        # Filter IV bounds
+        df = df[(df["implied_vol"] >= MIN_IV) & (df["implied_vol"] <= MAX_IV)]
+
+        # Filter NaN in other critical columns
+        df = df.dropna(subset=["strike", "type", "expiration"])
+
+        return df
+
+    def _create_empty_snapshot(
+        self,
+        spot_price: float,
+        timestamp: datetime,
+    ) -> GEXSnapshot:
+        """Create an empty GEX snapshot for edge cases."""
+        return GEXSnapshot(
+            timestamp=timestamp,
+            spot_price=spot_price,
+            total_call_gex=0.0,
+            total_put_gex=0.0,
+            net_gex=0.0,
+            zero_gamma_level=spot_price,
+            gex_by_strike={},
+            dominant_strike=spot_price,
             metrics={
-                "gex_billions": net_gex / 1e9,
-                "call_put_ratio": abs(total_call_gex / total_put_gex)
-                if total_put_gex != 0
-                else 0,
+                "gex_billions": 0.0,
+                "call_put_ratio": 0.0,
+                "regime_code": 0.0,  # neutral
+                "num_strikes": 0.0,
             },
         )
 
@@ -104,6 +213,9 @@ class GEXCalculator:
         gex_values: NDArray[np.float64],
     ) -> Dict[float, float]:
         """Aggregate GEX values by strike price."""
+        if len(strikes) == 0:
+            return {}
+
         unique_strikes = np.unique(strikes)
         gex_by_strike: Dict[float, float] = {}
 
@@ -122,13 +234,26 @@ class GEXCalculator:
         Find the Zero Gamma Level using linear interpolation.
 
         The ZGL is where the cumulative GEX curve crosses zero.
+        If no crossing is found, returns spot price.
         """
         if not gex_by_strike:
             return spot_price
 
         # Sort strikes
         sorted_strikes = sorted(gex_by_strike.keys())
-        cumulative_gex = np.cumsum([gex_by_strike[k] for k in sorted_strikes])
+
+        if len(sorted_strikes) < 2:
+            return spot_price
+
+        # Calculate cumulative GEX from lowest to highest strike
+        gex_values = np.array([gex_by_strike[k] for k in sorted_strikes])
+        cumulative_gex = np.cumsum(gex_values)
+
+        # Check if all positive or all negative (no crossing possible)
+        if np.all(cumulative_gex >= 0) or np.all(cumulative_gex <= 0):
+            # Return strike with GEX closest to zero
+            closest_idx = np.argmin(np.abs(cumulative_gex))
+            return sorted_strikes[closest_idx]
 
         # Find zero crossing
         for i in range(len(cumulative_gex) - 1):
@@ -136,11 +261,51 @@ class GEXCalculator:
                 # Linear interpolation
                 x1, x2 = sorted_strikes[i], sorted_strikes[i + 1]
                 y1, y2 = cumulative_gex[i], cumulative_gex[i + 1]
+
+                # Avoid division by zero
+                if y2 - y1 == 0:
+                    continue
+
                 zero_level = x1 - y1 * (x2 - x1) / (y2 - y1)
                 return float(zero_level)
 
-        # No crossing found, return spot price
+        # No crossing found (shouldn't reach here given above check)
         return spot_price
+
+    def _calculate_metrics(
+        self,
+        net_gex: float,
+        total_call_gex: float,
+        total_put_gex: float,
+        spot_price: float,
+        zero_gamma_level: float,
+        gex_by_strike: Dict[float, float],
+    ) -> Dict[str, float]:
+        """Calculate additional GEX metrics."""
+        # Safe division for ratios
+        if total_put_gex != 0:
+            call_put_ratio = abs(total_call_gex / total_put_gex)
+        else:
+            call_put_ratio = 0.0
+
+        # Distance from spot to zero gamma level
+        zgl_distance = zero_gamma_level - spot_price
+        zgl_distance_pct = (zgl_distance / spot_price * 100) if spot_price != 0 else 0.0
+
+        # Regime determination
+        regime, _, _ = self.determine_regime(net_gex)
+
+        # Map regime to numeric code for the float-only metrics dict
+        regime_code = {"short_gamma": -1.0, "neutral": 0.0, "long_gamma": 1.0}.get(regime, 0.0)
+
+        return {
+            "gex_billions": net_gex / 1e9,
+            "call_put_ratio": call_put_ratio,
+            "zgl_distance": zgl_distance,
+            "zgl_distance_pct": zgl_distance_pct,
+            "regime_code": regime_code,  # -1=short, 0=neutral, 1=long
+            "num_strikes": float(len(gex_by_strike)),
+        }
 
     def determine_regime(
         self,
@@ -172,3 +337,35 @@ class GEXCalculator:
                 "Neutral positioning",
                 "yellow",
             )
+
+    def calculate_gex_contribution(
+        self,
+        gex_by_strike: Dict[float, float],
+        spot_price: float,
+        n_top: int = 5,
+    ) -> Dict[str, list]:
+        """
+        Get the top contributing strikes to GEX.
+
+        Returns dict with 'positive' and 'negative' lists of top strikes.
+        """
+        if not gex_by_strike:
+            return {"positive": [], "negative": []}
+
+        sorted_by_gex = sorted(gex_by_strike.items(), key=lambda x: x[1])
+
+        # Top negative (most negative GEX)
+        negative = [
+            {"strike": k, "gex": v, "distance": k - spot_price}
+            for k, v in sorted_by_gex[:n_top]
+            if v < 0
+        ]
+
+        # Top positive (most positive GEX)
+        positive = [
+            {"strike": k, "gex": v, "distance": k - spot_price}
+            for k, v in sorted_by_gex[-n_top:][::-1]
+            if v > 0
+        ]
+
+        return {"positive": positive, "negative": negative}
