@@ -1,6 +1,6 @@
 ---
 trigger: model_decision
-description: whenever the model is working on the frontend of the project.
+description: Use this skill when the user asks to build web components, pages, or applications. Generates creative, polished code that avoids generic AI aesthetics.
 globs: frontend, react, nextjs  frontend files
 ---
 

@@ -1,6 +1,6 @@
 ---
 trigger: model_decision
-description: this rule should be almost aplied always other then when working with frontend design.
+description: when working with backend and core functionality of the system.
 ---
 
 # 0DTE Dealer GEX - Cursor Rules
