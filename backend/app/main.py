@@ -1,5 +1,6 @@
 """0DTE GEX Backend - FastAPI Application Entry Point."""
 
+import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -9,6 +10,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routes import analytics, data, gex
 from app.api.websocket import router as ws_router
 from app.config import get_settings
+from app.services.background import start_background_tasks, stop_background_tasks
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 settings = get_settings()
 
@@ -17,14 +26,22 @@ settings = get_settings()
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager for startup/shutdown events."""
     # Startup: Initialize resources
-    print("🚀 Starting 0DTE GEX API Server...")
-    # TODO: Initialize database connection pool
-    # TODO: Start background data fetching tasks
+    logger.info("🚀 Starting 0DTE GEX API Server...")
+
+    # Start background tasks (data fetching, cache warming)
+    await start_background_tasks()
+
+    logger.info("✅ 0DTE GEX API Server ready")
+
     yield
+
     # Shutdown: Cleanup resources
-    print("👋 Shutting down 0DTE GEX API Server...")
-    # TODO: Close database connections
-    # TODO: Stop background tasks
+    logger.info("👋 Shutting down 0DTE GEX API Server...")
+
+    # Stop background tasks
+    await stop_background_tasks()
+
+    logger.info("🛑 0DTE GEX API Server stopped")
 
 
 app = FastAPI(

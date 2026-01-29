@@ -1,9 +1,47 @@
 """0DTE GEX Backend - Pydantic Schemas for API Models."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
+
+
+# ============================================================================
+# Request Models
+# ============================================================================
+
+
+class GEXCurrentRequest(BaseModel):
+    """Request parameters for current GEX endpoint."""
+
+    symbol: str = Field(default="SPX", description="Underlying symbol")
+    include_greeks: bool = Field(default=True, description="Include Greeks in response")
+
+
+class GEXHistoricalRequest(BaseModel):
+    """Request parameters for historical GEX query."""
+
+    start_date: date = Field(..., description="Start date for historical data")
+    end_date: date = Field(..., description="End date for historical data")
+    interval: Literal["5m", "15m", "1h", "1d"] = Field(
+        default="1h", description="Data interval"
+    )
+
+
+class MarketStatusResponse(BaseModel):
+    """Response model for market status endpoint."""
+
+    is_open: bool = Field(..., description="Whether market is currently open")
+    status: Literal["open", "pre_market", "after_hours", "closed_weekend"] = Field(
+        ..., description="Detailed market status"
+    )
+    next_open: Optional[str] = Field(None, description="When market opens next")
+    current_time_et: str = Field(..., description="Current time in Eastern Time")
+
+
+# ============================================================================
+# Data Models
+# ============================================================================
 
 
 class OptionContract(BaseModel):
