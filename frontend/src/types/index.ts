@@ -35,6 +35,11 @@ export interface GEXByStrike {
  */
 export type RegimeType = 'short_gamma' | 'long_gamma' | 'neutral';
 
+/**
+ * WebSocket connection state.
+ */
+export type ConnectionState = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
+
 export interface RegimeData {
   regime: RegimeType;
   description: string;
@@ -97,9 +102,13 @@ export interface WebSocketMessage {
  */
 export interface GEXUpdate {
   net_gex: number;
+  net_gex_billions: number;
   zero_gamma_level: number;
   spot_price: number;
-  timestamp: string;
+  regime: RegimeType;
+  is_mock?: boolean;
+  is_stale?: boolean;
+  timestamp?: string;
 }
 
 /**
@@ -109,6 +118,16 @@ export interface GEXChartDataPoint {
   strike: number;
   gex: number;
   gexBillions: number;
+}
+
+/**
+ * Time series data point for intraday GEX chart.
+ */
+export interface TimeSeriesDataPoint {
+  timestamp: string;
+  netGex: number;
+  netGexBillions: number;
+  spotPrice?: number;
 }
 
 /**

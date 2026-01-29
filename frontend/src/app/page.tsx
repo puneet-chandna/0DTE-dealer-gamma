@@ -126,12 +126,28 @@ export default function Home() {
           </p>
         </div>
 
-        {/* Info Section */}
+        {/* Dashboard Link */}
         <div className="mt-16 text-center">
-          <p className="text-sm text-zinc-500">
-            Dashboard charts and detailed analytics coming in Phase 4.
-          </p>
-          <p className="mt-2 text-xs text-zinc-600">
+          <a
+            href="/dashboard"
+            className="inline-flex items-center gap-2 rounded-lg bg-violet-500 px-6 py-3 text-sm font-semibold text-white transition-colors hover:bg-violet-600"
+          >
+            Open Full Dashboard
+            <svg
+              className="h-4 w-4"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M13 7l5 5m0 0l-5 5m5-5H6"
+              />
+            </svg>
+          </a>
+          <p className="mt-4 text-xs text-zinc-600">
             Data refreshes automatically every 30 seconds.
           </p>
         </div>
@@ -139,3 +155,4 @@ export default function Home() {
     </div>
   );
 }
+
