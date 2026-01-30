@@ -1,0 +1,17 @@
+# Railway.toml - Configuration for Railway deployment
+# See: https://docs.railway.app/guides/config-as-code
+
+[build]
+builder = "nixpacks"
+buildCommand = "pip install -r requirements.txt"
+
+[deploy]
+startCommand = "uvicorn app.main:app --host 0.0.0.0 --port $PORT"
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+
+[env]
+ENVIRONMENT = "production"
+DEBUG = "false"

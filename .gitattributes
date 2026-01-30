@@ -1,0 +1,47 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# Force LF line endings for common text files
+*.py text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.js text eol=lf
+*.jsx text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.sh text eol=lf
+*.sql text eol=lf
+
+# Denote all files that are truly binary and should not be modified
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.pdf binary
+
+# Jupyter notebooks - treat as text for better diffs
+*.ipynb text eol=lf diff=python
+
+# Lock files - exact format matters
+pnpm-lock.yaml -diff
+package-lock.json -diff
+poetry.lock -diff
+
+# Prevent Windows CRLF issues in shell scripts
+*.bash text eol=lf
+Procfile text eol=lf
+
+# Linguist overrides for GitHub language stats
+*.css linguist-detectable=false
+*.html linguist-detectable=false

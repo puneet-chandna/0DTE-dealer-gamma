@@ -80,9 +80,45 @@ async def root() -> dict[str, str]:
 
 
 @app.get("/health")
-async def health_check() -> dict[str, str]:
-    """Health check endpoint for monitoring."""
-    return {"status": "healthy"}
+async def health_check() -> dict:
+    """
+    Health check endpoint for monitoring.
+
+    Returns detailed health status including:
+    - API status
+    - Environment
+    - Polygon API key configuration
+    - Cache status
+    """
+    from datetime import datetime
+
+    from zoneinfo import ZoneInfo
+
+    from app.services.cache import get_cache
+
+    ET = ZoneInfo("America/New_York")
+    now = datetime.now(ET)
+
+    # Check if Polygon API key is configured
+    polygon_configured = bool(settings.polygon_api_key)
+
+    # Get cache instance and status
+    try:
+        cache = get_cache()
+        cache_status = "healthy"
+    except Exception:
+        cache_status = "not_initialized"
+
+    return {
+        "status": "healthy",
+        "environment": settings.environment,
+        "timestamp": now.isoformat(),
+        "checks": {
+            "api": "healthy",
+            "polygon_api_key": "configured" if polygon_configured else "missing",
+            "cache": cache_status,
+        },
+    }
 
 
 if __name__ == "__main__":

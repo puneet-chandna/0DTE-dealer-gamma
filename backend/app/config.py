@@ -1,8 +1,9 @@
 """0DTE GEX Backend - Application Configuration."""
 
 from functools import lru_cache
-from typing import List
+from typing import List, Optional
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -31,13 +32,46 @@ class Settings(BaseSettings):
     # CORS
     cors_origins: List[str] = ["http://localhost:3000"]
 
+    # API Rate Limiting
+    api_rate_limit: int = 100  # requests per minute per IP
+
+    # WebSocket Authentication (optional)
+    ws_auth_enabled: bool = False
+    ws_auth_secret: Optional[str] = None
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, v: str | List[str]) -> List[str]:
+        """Parse CORS origins from string or list."""
+        if isinstance(v, str):
+            # Handle JSON-like string from env var
+            import json
+
+            try:
+                return json.loads(v)
+            except json.JSONDecodeError:
+                # Fallback: comma-separated values
+                return [origin.strip() for origin in v.split(",")]
+        return v
+
     @property
     def is_development(self) -> bool:
         """Check if running in development mode."""
         return self.environment == "development"
+
+    @property
+    def is_production(self) -> bool:
+        """Check if running in production mode."""
+        return self.environment == "production"
+
+    @property
+    def is_staging(self) -> bool:
+        """Check if running in staging mode."""
+        return self.environment == "staging"
 
 
 @lru_cache
 def get_settings() -> Settings:
     """Get cached settings instance."""
     return Settings()
+
