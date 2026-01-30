@@ -17,6 +17,7 @@ from app.core.data_acquisition import (
     get_market_status,
     get_current_trading_date,
 )
+from app.core.yfinance_provider import YFinanceClient
 from app.core.analytics import (
     VolatilityAnalyzer,
     TradingStrategy,
@@ -40,6 +41,7 @@ __all__ = [
     "RateLimiter",
     "PolygonClient",
     "MockPolygonClient",
+    "YFinanceClient",
     "is_market_open",
     "get_market_status",
     "get_current_trading_date",
