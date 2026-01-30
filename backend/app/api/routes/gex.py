@@ -12,7 +12,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.config import Settings, get_settings
 from app.core.analytics import generate_synthetic_gex_data
-from app.core.data_acquisition import PolygonClient, get_market_status, is_market_open
+from app.core.data_acquisition import get_market_status, is_market_open
+from app.core.yfinance_provider import YFinanceClient
 from app.core.gex_calculator import GEXCalculator
 from app.models.schemas import (
     GEXByStrike,
@@ -31,7 +32,7 @@ ET = ZoneInfo("America/New_York")
 
 # Module-level instances (lazy initialization)
 _gex_calculator: Optional[GEXCalculator] = None
-_polygon_client: Optional[PolygonClient] = None
+_data_client: Optional[YFinanceClient] = None
 
 
 def get_gex_calculator() -> GEXCalculator:
@@ -42,30 +43,29 @@ def get_gex_calculator() -> GEXCalculator:
     return _gex_calculator
 
 
-def get_polygon_client(settings: Settings = Depends(get_settings)) -> Optional[PolygonClient]:
-    """Get or create the Polygon client instance.
+def get_data_client() -> YFinanceClient:
+    """Get or create the YFinance data client instance.
 
-    Returns None if API key is not configured.
+    Uses Yahoo Finance via yfinance library (free, no API key required).
+    Uses SPY as proxy for SPX options data.
     """
-    global _polygon_client
-    if _polygon_client is None:
-        if not settings.polygon_api_key:
-            return None
-        _polygon_client = PolygonClient(
-            api_key=settings.polygon_api_key,
-            tier="free",
+    global _data_client
+    if _data_client is None:
+        _data_client = YFinanceClient(
+            calls_per_minute=10,
+            use_spy_as_proxy=True,
         )
-    return _polygon_client
+    return _data_client
 
 
 async def _get_live_gex_snapshot(
-    polygon_client: PolygonClient,
+    data_client: YFinanceClient,
     gex_calculator: GEXCalculator,
 ) -> GEXSnapshot:
     """Fetch live options data and compute GEX snapshot.
 
     Args:
-        polygon_client: Polygon.io API client.
+        data_client: YFinance data client.
         gex_calculator: GEX computation engine.
 
     Returns:
@@ -83,8 +83,8 @@ async def _get_live_gex_snapshot(
         return cached
 
     try:
-        # Fetch options chain and spot price
-        options_df, spot_price = await polygon_client.get_options_chain_for_gex()
+        # Fetch options chain and spot price via YFinance (uses SPY as proxy)
+        options_df, spot_price = await data_client.get_options_chain_for_gex("SPY")
 
         # Update spot price and check for cache invalidation
         cache.update_spot_price(spot_price)
@@ -181,25 +181,16 @@ async def get_current_gex(
     Returns the latest GEX snapshot including net GEX, zero gamma level,
     and breakdown by strike.
 
-    If Polygon API key is not configured, returns mock data for demo purposes.
+    Uses YFinance (free Yahoo Finance data) - no API key required.
+    Uses SPY as proxy for SPX options.
     """
     gex_calculator = get_gex_calculator()
-
-    # Check if we have API key configured
-    if not settings.polygon_api_key:
-        logger.warning("No Polygon API key configured, returning mock GEX data")
-        return _generate_mock_gex_snapshot()
-
-    # Get or create Polygon client
-    polygon_client = PolygonClient(
-        api_key=settings.polygon_api_key,
-        tier="free",
-    )
+    data_client = get_data_client()
 
     try:
-        return await _get_live_gex_snapshot(polygon_client, gex_calculator)
+        return await _get_live_gex_snapshot(data_client, gex_calculator)
     finally:
-        await polygon_client.close()
+        pass  # YFinanceClient.close() is a no-op
 
 
 @router.get("/historical", response_model=GEXHistorical)

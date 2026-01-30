@@ -12,10 +12,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.config import Settings, get_settings
 from app.core.data_acquisition import (
-    PolygonClient,
     get_market_status,
     is_market_open,
 )
+from app.core.yfinance_provider import YFinanceClient
 from app.models.schemas import MarketStatusResponse, OptionContract
 from app.services.cache import get_cache
 
@@ -27,7 +27,7 @@ router = APIRouter()
 ET = ZoneInfo("America/New_York")
 
 # Module-level client (lazy initialization)
-_polygon_client: Optional[PolygonClient] = None
+_data_client: Optional[YFinanceClient] = None
 
 
 @router.get("/market-status", response_model=MarketStatusResponse)
@@ -49,21 +49,15 @@ async def get_market_status_endpoint() -> MarketStatusResponse:
 
 @router.get("/options-chain")
 async def get_options_chain(
-    symbol: str = Query("SPX", description="Underlying symbol"),
+    symbol: str = Query("SPY", description="Underlying symbol (SPY recommended)"),
     settings: Settings = Depends(get_settings),
 ) -> dict:
     """Get current 0DTE options chain.
 
     Returns raw options data before GEX calculation.
 
-    Requires a valid Polygon API key in environment.
+    Uses YFinance (free Yahoo Finance data) - SPY options only.
     """
-    # Check for API key
-    if not settings.polygon_api_key:
-        raise HTTPException(
-            status_code=503,
-            detail="Polygon API key not configured. Set POLYGON_API_KEY environment variable.",
-        )
 
     # Check cache
     cache = get_cache()
@@ -75,15 +69,15 @@ async def get_options_chain(
         logger.debug(f"Returning cached options chain for {symbol}")
         return cached
 
-    # Fetch from Polygon
-    polygon_client = PolygonClient(
-        api_key=settings.polygon_api_key,
-        tier="free",
+    # Fetch via YFinance (free - no API key required)
+    data_client = YFinanceClient(
+        calls_per_minute=10,
+        use_spy_as_proxy=True,
     )
 
     try:
-        # Get options chain
-        options_df, spot_price = await polygon_client.get_options_chain_for_gex(
+        # Get options chain via YFinance
+        options_df, spot_price = await data_client.get_options_chain_for_gex(
             underlying=symbol
         )
 
@@ -136,26 +130,20 @@ async def get_options_chain(
             detail=f"Unable to fetch options chain: {str(e)}",
         )
     finally:
-        await polygon_client.close()
+        await data_client.close()
 
 
 @router.get("/spot-price")
 async def get_spot_price(
-    symbol: str = Query("SPX", description="Symbol to get price for"),
+    symbol: str = Query("SPY", description="Symbol to get price for (SPY recommended)"),
     settings: Settings = Depends(get_settings),
 ) -> dict:
     """Get current spot price.
 
     Returns the latest underlying price.
 
-    Requires a valid Polygon API key in environment.
+    Uses YFinance (free Yahoo Finance data).
     """
-    # Check for API key
-    if not settings.polygon_api_key:
-        raise HTTPException(
-            status_code=503,
-            detail="Polygon API key not configured. Set POLYGON_API_KEY environment variable.",
-        )
 
     # Check cache (short TTL for spot price)
     cache = get_cache()
@@ -166,14 +154,14 @@ async def get_spot_price(
         logger.debug(f"Returning cached spot price for {symbol}")
         return cached
 
-    # Fetch from Polygon
-    polygon_client = PolygonClient(
-        api_key=settings.polygon_api_key,
-        tier="free",
+    # Fetch via YFinance (free - no API key required)
+    data_client = YFinanceClient(
+        calls_per_minute=10,
+        use_spy_as_proxy=True,
     )
 
     try:
-        spot_price = await polygon_client.get_spot_price(symbol=symbol)
+        spot_price = await data_client.get_spot_price(symbol=symbol)
 
         # Update cache (and check for invalidation)
         cache.update_spot_price(spot_price)
@@ -202,4 +190,4 @@ async def get_spot_price(
             detail=f"Unable to fetch spot price: {str(e)}",
         )
     finally:
-        await polygon_client.close()
+        await data_client.close()

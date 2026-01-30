@@ -53,7 +53,7 @@ interface TimeSeriesPoint {
  */
 export function useDashboardData(): DashboardData {
   const queryClient = useQueryClient();
-  const [currentTime, setCurrentTime] = useState(Date.now);
+  const [currentTime, setCurrentTime] = useState(() => Date.now());
 
   // WebSocket stream for real-time updates
   const wsStream = useGEXStream();
@@ -72,6 +72,9 @@ export function useDashboardData(): DashboardData {
   }, []);
 
   // Sync WebSocket data to React Query cache for consistency
+  // NOTE: Intentionally omitting polledGEX.data and polledRegime.data from deps
+  // to avoid circular updates (setQueryData would trigger re-fetch which triggers this effect)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (wsStream.isConnected && wsStream.data) {
       // Create a GEXSnapshot-like object from WebSocket update
@@ -116,7 +119,7 @@ export function useDashboardData(): DashboardData {
         }));
       }
     }
-  }, [wsStream.data, wsStream.isConnected, queryClient, polledGEX.data, polledRegime.data]);
+  }, [wsStream.data, wsStream.isConnected, queryClient]);
 
   // Determine effective GEX data
   const gexData = useMemo((): GEXSnapshot | null => {

@@ -10,7 +10,8 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
-from app.core.data_acquisition import PolygonClient, is_market_open
+from app.core.data_acquisition import is_market_open
+from app.core.yfinance_provider import YFinanceClient
 from app.core.gex_calculator import GEXCalculator
 from app.services.cache import get_cache
 
@@ -29,7 +30,7 @@ _shutdown_event: Optional[asyncio.Event] = None
 
 # Module-level instances
 _gex_calculator: Optional[GEXCalculator] = None
-_polygon_client: Optional[PolygonClient] = None
+_data_client: Optional[YFinanceClient] = None
 
 
 def get_gex_calculator() -> GEXCalculator:
@@ -40,22 +41,20 @@ def get_gex_calculator() -> GEXCalculator:
     return _gex_calculator
 
 
-async def get_polygon_client() -> Optional[PolygonClient]:
-    """Get or create the Polygon client instance.
+async def get_data_client() -> YFinanceClient:
+    """Get or create the YFinance data client instance.
 
-    Returns None if API key is not configured.
+    Uses Yahoo Finance via yfinance library (free, no API key required).
+    Uses SPY as proxy for SPX options data.
     """
-    global _polygon_client
-    settings = get_settings()
+    global _data_client
 
-    if _polygon_client is None:
-        if not settings.polygon_api_key:
-            return None
-        _polygon_client = PolygonClient(
-            api_key=settings.polygon_api_key,
-            tier="free",
+    if _data_client is None:
+        _data_client = YFinanceClient(
+            calls_per_minute=10,  # Conservative rate limit
+            use_spy_as_proxy=True,
         )
-    return _polygon_client
+    return _data_client
 
 
 async def periodic_gex_refresh() -> None:
@@ -83,16 +82,12 @@ async def periodic_gex_refresh() -> None:
                 await asyncio.sleep(60)
                 continue
 
-            # Get Polygon client
-            polygon_client = await get_polygon_client()
-            if polygon_client is None:
-                logger.debug("No Polygon API key configured, skipping GEX refresh")
-                await asyncio.sleep(GEX_REFRESH_INTERVAL)
-                continue
+            # Get data client (YFinance)
+            data_client = await get_data_client()
 
             try:
-                # Fetch options chain and spot price
-                options_df, spot_price = await polygon_client.get_options_chain_for_gex()
+                # Fetch options chain and spot price via YFinance (uses SPY as proxy)
+                options_df, spot_price = await data_client.get_options_chain_for_gex("SPY")
 
                 # Update spot price in cache (may trigger invalidation)
                 cache.update_spot_price(spot_price)
@@ -152,14 +147,11 @@ async def periodic_spot_refresh() -> None:
                 await asyncio.sleep(60)
                 continue
 
-            # Get Polygon client
-            polygon_client = await get_polygon_client()
-            if polygon_client is None:
-                await asyncio.sleep(SPOT_REFRESH_INTERVAL)
-                continue
+            # Get data client (YFinance)
+            data_client = await get_data_client()
 
             try:
-                spot_price = await polygon_client.get_spot_price()
+                spot_price = await data_client.get_spot_price("SPY")
                 cache.update_spot_price(spot_price)
                 logger.debug(f"Spot price refreshed: {spot_price:.2f}")
 
@@ -189,17 +181,14 @@ async def cache_warmup() -> None:
         logger.info("Market is closed, skipping cache warmup")
         return
 
-    polygon_client = await get_polygon_client()
-    if polygon_client is None:
-        logger.warning("No Polygon API key configured, skipping cache warmup")
-        return
+    data_client = await get_data_client()
 
     cache = get_cache()
     gex_calculator = get_gex_calculator()
 
     try:
-        # Fetch initial data
-        options_df, spot_price = await polygon_client.get_options_chain_for_gex()
+        # Fetch initial data via YFinance (uses SPY as proxy)
+        options_df, spot_price = await data_client.get_options_chain_for_gex("SPY")
         cache.update_spot_price(spot_price)
 
         # Calculate and cache GEX
@@ -234,32 +223,26 @@ async def start_background_tasks() -> None:
     # Start periodic tasks
     settings = get_settings()
 
-    if settings.polygon_api_key:
-        # Only start data refresh tasks if API key is configured
-        gex_task = asyncio.create_task(periodic_gex_refresh())
-        gex_task.set_name("gex_refresh")
-        _background_tasks.append(gex_task)
+    # Start data refresh tasks (YFinance - no API key required)
+    gex_task = asyncio.create_task(periodic_gex_refresh())
+    gex_task.set_name("gex_refresh")
+    _background_tasks.append(gex_task)
 
-        spot_task = asyncio.create_task(periodic_spot_refresh())
-        spot_task.set_name("spot_refresh")
-        _background_tasks.append(spot_task)
+    spot_task = asyncio.create_task(periodic_spot_refresh())
+    spot_task.set_name("spot_refresh")
+    _background_tasks.append(spot_task)
 
-        logger.info(
-            f"Started {len(_background_tasks)} background tasks "
-            f"(API key configured)"
-        )
-    else:
-        logger.warning(
-            "No Polygon API key configured. Background data refresh disabled. "
-            "Set POLYGON_API_KEY environment variable to enable."
-        )
+    logger.info(
+        f"Started {len(_background_tasks)} background tasks "
+        f"(using YFinance - free data)"
+    )
 
     logger.info("Background tasks initialization complete")
 
 
 async def stop_background_tasks() -> None:
     """Stop all background tasks on application shutdown."""
-    global _background_tasks, _shutdown_event, _polygon_client
+    global _background_tasks, _shutdown_event, _data_client
 
     logger.info("Stopping background tasks...")
 
@@ -280,9 +263,9 @@ async def stop_background_tasks() -> None:
 
     _background_tasks.clear()
 
-    # Close Polygon client
-    if _polygon_client:
-        await _polygon_client.close()
-        _polygon_client = None
+    # Close data client
+    if _data_client:
+        await _data_client.close()
+        _data_client = None
 
     logger.info("Background tasks stopped")

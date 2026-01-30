@@ -12,7 +12,8 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
 from app.config import Settings, get_settings
-from app.core.data_acquisition import PolygonClient, is_market_open
+from app.core.data_acquisition import is_market_open
+from app.core.yfinance_provider import YFinanceClient
 from app.core.gex_calculator import GEXCalculator
 from app.services.cache import get_cache
 
@@ -144,19 +145,15 @@ async def _get_gex_update(settings: Settings) -> dict:
             "is_stale": cache.is_stale("gex:current"),
         }
 
-    # If no cached data and no API key, return mock
-    if not settings.polygon_api_key:
-        return _generate_mock_gex_data()
-
-    # Try to fetch fresh data
+    # If no cached data, fetch fresh data via YFinance
     try:
-        polygon_client = PolygonClient(
-            api_key=settings.polygon_api_key,
-            tier="free",
+        data_client = YFinanceClient(
+            calls_per_minute=10,
+            use_spy_as_proxy=True,
         )
 
         try:
-            options_df, spot_price = await polygon_client.get_options_chain_for_gex()
+            options_df, spot_price = await data_client.get_options_chain_for_gex("SPY")
             cache.update_spot_price(spot_price)
 
             gex_calculator = get_gex_calculator()
@@ -180,7 +177,7 @@ async def _get_gex_update(settings: Settings) -> dict:
             }
 
         finally:
-            await polygon_client.close()
+            await data_client.close()
 
     except Exception as e:
         logger.warning(f"Failed to fetch GEX data for WebSocket: {e}")
