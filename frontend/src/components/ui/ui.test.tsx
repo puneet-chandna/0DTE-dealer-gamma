@@ -2,12 +2,23 @@
  * UI Components Tests
  */
 
-import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { describe, it, expect, vi } from 'vitest';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { Card, CardHeader, CardContent, CardTitle, CardFooter } from './Card';
 import { Badge } from './Badge';
 import { Skeleton, SkeletonText, SkeletonValue, SkeletonCard } from './Skeleton';
 import { MetricCard } from './MetricCard';
+import { AlertBanner, regimeDescriptions } from './AlertBanner';
+
+// Mock framer-motion to avoid animation issues in tests
+vi.mock('framer-motion', () => ({
+  motion: {
+    div: ({ children, className, ...props }: { children: React.ReactNode; className?: string }) => (
+      <div className={className} {...props}>{children}</div>
+    ),
+  },
+  AnimatePresence: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+}));
 
 describe('Card Components', () => {
   it('renders Card with children', () => {
@@ -149,3 +160,102 @@ describe('MetricCard', () => {
     expect(screen.getByText('+5%')).toBeInTheDocument();
   });
 });
+
+describe('AlertBanner', () => {
+  it('renders short_gamma regime correctly', () => {
+    render(<AlertBanner regime="short_gamma" />);
+    expect(screen.getByText('Short Gamma')).toBeInTheDocument();
+  });
+
+  it('renders long_gamma regime correctly', () => {
+    render(<AlertBanner regime="long_gamma" />);
+    expect(screen.getByText('Long Gamma')).toBeInTheDocument();
+  });
+
+  it('renders neutral regime correctly', () => {
+    render(<AlertBanner regime="neutral" />);
+    expect(screen.getByText('Neutral')).toBeInTheDocument();
+  });
+
+  it('displays net GEX billions value', () => {
+    render(<AlertBanner regime="short_gamma" netGexBillions={-1.5} />);
+    expect(screen.getByText('(-1.50B)')).toBeInTheDocument();
+  });
+
+  it('displays positive GEX with + sign', () => {
+    render(<AlertBanner regime="long_gamma" netGexBillions={2.0} />);
+    expect(screen.getByText('(+2.00B)')).toBeInTheDocument();
+  });
+
+  it('displays description when provided', () => {
+    render(
+      <AlertBanner
+        regime="short_gamma"
+        description="Market volatility expected"
+      />
+    );
+    expect(screen.getByText('Market volatility expected')).toBeInTheDocument();
+  });
+
+  it('does not render when isVisible is false', () => {
+    render(<AlertBanner regime="short_gamma" isVisible={false} />);
+    expect(screen.queryByText('Short Gamma')).not.toBeInTheDocument();
+  });
+
+  it('renders dismiss button when onDismiss is provided', () => {
+    const onDismiss = vi.fn();
+    render(<AlertBanner regime="neutral" onDismiss={onDismiss} />);
+    const dismissButton = screen.getByRole('button', { name: /dismiss/i });
+    expect(dismissButton).toBeInTheDocument();
+  });
+
+  it('calls onDismiss when dismiss button is clicked', () => {
+    const onDismiss = vi.fn();
+    render(<AlertBanner regime="neutral" onDismiss={onDismiss} />);
+    const dismissButton = screen.getByRole('button', { name: /dismiss/i });
+    fireEvent.click(dismissButton);
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+  });
+
+  it('applies correct styling for short_gamma (danger)', () => {
+    const { container } = render(<AlertBanner regime="short_gamma" />);
+    const banner = container.firstChild as HTMLElement;
+    expect(banner).toHaveClass('bg-rose-500/10');
+    expect(banner).toHaveClass('border-rose-500/30');
+  });
+
+  it('applies correct styling for long_gamma (success)', () => {
+    const { container } = render(<AlertBanner regime="long_gamma" />);
+    const banner = container.firstChild as HTMLElement;
+    expect(banner).toHaveClass('bg-emerald-500/10');
+    expect(banner).toHaveClass('border-emerald-500/30');
+  });
+
+  it('applies correct styling for neutral (warning)', () => {
+    const { container } = render(<AlertBanner regime="neutral" />);
+    const banner = container.firstChild as HTMLElement;
+    expect(banner).toHaveClass('bg-amber-500/10');
+    expect(banner).toHaveClass('border-amber-500/30');
+  });
+});
+
+describe('regimeDescriptions', () => {
+  it('has description for short_gamma', () => {
+    expect(regimeDescriptions.short_gamma).toBe(
+      'Dealers are short gamma. Volatility amplification expected.'
+    );
+  });
+
+  it('has description for long_gamma', () => {
+    expect(regimeDescriptions.long_gamma).toBe(
+      'Dealers are long gamma. Volatility dampening expected.'
+    );
+  });
+
+  it('has description for neutral', () => {
+    expect(regimeDescriptions.neutral).toBe(
+      'Near neutral gamma positioning. Normal volatility expected.'
+    );
+  });
+});
+
