@@ -4,10 +4,18 @@ These constants are used throughout the GEX calculation engine.
 Update quarterly or as market conditions change.
 """
 
-# Risk-free rate (Fed Funds rate approximation)
+# Risk-free rate FALLBACK (used when FRED is unreachable)
+# Live rate is fetched from FRED via pandas-datareader (see rate_provider.py)
 # Source: Federal Reserve Bank of New York
 # Last updated: 2024-Q4
-RISK_FREE_RATE: float = 0.05  # 5% annualized
+DEFAULT_RISK_FREE_RATE: float = 0.05  # 5% annualized
+
+# Backward-compatible alias (deprecated — prefer DEFAULT_RISK_FREE_RATE)
+RISK_FREE_RATE: float = DEFAULT_RISK_FREE_RATE
+
+# FRED (Federal Reserve Economic Data) settings
+FRED_RATE_SYMBOL: str = "DTB4WK"  # 4-Week Treasury Bill rate
+RATE_CACHE_TTL: int = 86400  # 24 hours in seconds
 
 # SPX dividend yield
 # Source: S&P 500 Index dividend data

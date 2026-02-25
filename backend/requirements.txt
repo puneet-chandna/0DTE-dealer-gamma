@@ -10,9 +10,13 @@ asyncpg==0.30.0
 alembic==1.14.0
 
 # Data Processing
-pandas==2.2.3
-numpy==2.2.2
+pandas==2.3.3
+numpy==2.2.6
 scipy==1.15.1
+pandas-datareader==0.10.0
+pandas-ta==0.4.71b0
+py_vollib==1.0.1
+vectorbt==0.28.4
 
 # Validation & Settings
 pydantic==2.10.5
@@ -25,6 +29,7 @@ yfinance==1.1.0
 
 # Utilities
 python-dotenv==1.0.1
+setuptools>=69.0.0  # Required for pandas-datareader on Python 3.13+ (distutils)
 
 # Development & Testing
 pytest==8.3.4

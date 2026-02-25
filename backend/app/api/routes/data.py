@@ -191,3 +191,18 @@ async def get_spot_price(
         )
     finally:
         await data_client.close()
+
+
+@router.get("/risk-free-rate")
+async def get_risk_free_rate() -> dict:
+    """Get current risk-free rate used for Black-Scholes calculations.
+
+    Fetches the 4-Week T-Bill rate from FRED (Federal Reserve Economic Data).
+    Falls back to a hardcoded default if FRED is unreachable.
+    Rate is cached for 24 hours.
+    """
+    from app.core.rate_provider import get_rate_provider
+
+    provider = get_rate_provider()
+    return provider.get_rate_info()
+

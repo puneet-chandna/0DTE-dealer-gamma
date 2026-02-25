@@ -47,10 +47,25 @@ class GEXCalculator:
         self,
         risk_free_rate: float = RISK_FREE_RATE,
         dividend_yield: float = SPX_DIVIDEND_YIELD,
+        rate_provider=None,
     ):
-        """Initialize with risk-free rate and dividend yield."""
-        self.risk_free_rate = risk_free_rate
+        """Initialize with risk-free rate and dividend yield.
+
+        Args:
+            risk_free_rate: Static fallback rate (used if no rate_provider).
+            dividend_yield: SPX dividend yield.
+            rate_provider: Optional RiskFreeRateProvider for dynamic FRED rates.
+        """
+        self._rate_provider = rate_provider
+        self._static_rate = risk_free_rate
         self.dividend_yield = dividend_yield
+
+    @property
+    def risk_free_rate(self) -> float:
+        """Get the current risk-free rate (dynamic if provider is set)."""
+        if self._rate_provider is not None:
+            return self._rate_provider.get_rate()
+        return self._static_rate
 
     def calculate_gex_from_chain(
         self,

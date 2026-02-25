@@ -35,11 +35,14 @@ _gex_calculator: Optional[GEXCalculator] = None
 _data_client: Optional[YFinanceClient] = None
 
 
+from app.core.rate_provider import get_rate_provider
+
+
 def get_gex_calculator() -> GEXCalculator:
     """Get or create the GEX calculator instance."""
     global _gex_calculator
     if _gex_calculator is None:
-        _gex_calculator = GEXCalculator()
+        _gex_calculator = GEXCalculator(rate_provider=get_rate_provider())
     return _gex_calculator
 
 

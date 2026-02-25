@@ -157,3 +157,88 @@ class WebSocketMessage(BaseModel):
     type: Literal["gex_update", "price_update", "alert"]
     data: Dict[str, float | str | int]
     timestamp: datetime
+
+
+# ============================================================================
+# New Integration Schemas
+# ============================================================================
+
+
+class RiskFreeRateResponse(BaseModel):
+    """Response for risk-free rate endpoint."""
+
+    rate: float = Field(..., description="Annualized risk-free rate (decimal)")
+    rate_pct: float = Field(..., description="Rate as percentage")
+    source: str = Field(..., description="Data source (FRED or fallback)")
+    symbol: str = Field(..., description="FRED symbol used")
+    fetched_at: Optional[str] = Field(None, description="When rate was fetched")
+    is_fallback: bool = Field(..., description="Whether using fallback rate")
+    cache_ttl_seconds: int = Field(..., description="Cache TTL in seconds")
+
+
+class TechnicalIndicatorData(BaseModel):
+    """Single data point for technical indicators."""
+
+    timestamp: str
+    close: float
+    atr: Optional[float] = None
+    rsi: Optional[float] = None
+    bb_upper: Optional[float] = None
+    bb_mid: Optional[float] = None
+    bb_lower: Optional[float] = None
+
+
+class TechnicalIndicatorResponse(BaseModel):
+    """Response for technical indicators endpoint."""
+
+    symbol: str
+    period: str
+    indicators: List[str]
+    data: List[TechnicalIndicatorData]
+    count: int
+
+
+class IVSurfaceData(BaseModel):
+    """Single data point for IV surface."""
+
+    strike: float
+    option_type: str = Field(..., alias="type")
+    iv: float
+    mid_price: float
+    moneyness: float
+
+    class Config:
+        populate_by_name = True
+
+
+class IVSurfaceResponse(BaseModel):
+    """Response for IV surface endpoint."""
+
+    symbol: str
+    spot_price: float
+    surface: List[IVSurfaceData]
+    skew: List[Dict[str, float]]
+    count: int
+
+
+class VectorBTBacktestResult(BaseModel):
+    """Enhanced backtest results from vectorbt."""
+
+    total_return: float
+    sharpe_ratio: float
+    sortino_ratio: float
+    calmar_ratio: float
+    max_drawdown: float
+    total_trades: int
+    winning_trades: int
+    losing_trades: int
+    win_rate: float
+    profit_factor: float
+    avg_trade_return: float
+    best_trade: float
+    worst_trade: float
+    avg_trade_duration_minutes: float
+    start_date: datetime
+    end_date: datetime
+    equity_curve: List[float]
+

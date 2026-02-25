@@ -8,6 +8,8 @@ from datetime import date, datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
 
+import pandas as pd
+
 from fastapi import APIRouter, HTTPException, Query
 
 from app.core.analytics import (
@@ -257,4 +259,219 @@ async def get_summary_stats(
         raise HTTPException(
             status_code=500,
             detail=f"Summary statistics failed: {str(e)}",
+        )
+
+
+# ============================================================================
+# New Integration Endpoints
+# ============================================================================
+
+
+@router.get("/iv-surface")
+async def get_iv_surface(
+    symbol: str = Query("SPY", description="Symbol to analyze"),
+) -> dict:
+    """Get implied volatility surface and skew.
+
+    Computes IV for each strike using py_vollib and returns
+    the IV smile and skew (put IV - call IV).
+    """
+    from app.core.rate_provider import get_rate_provider
+    from app.core.vollib_bridge import VolLibBridge
+    from app.core.yfinance_provider import YFinanceClient
+
+    try:
+        client = YFinanceClient(calls_per_minute=10, use_spy_as_proxy=True)
+        options_df, spot_price = await client.get_options_chain_for_gex(symbol)
+
+        if options_df.empty:
+            raise HTTPException(status_code=404, detail="No options data available")
+
+        # Get live rate
+        rate = get_rate_provider().get_rate()
+
+        # Add time-to-expiry column if not present
+        if "T" not in options_df.columns:
+            from datetime import datetime
+            from zoneinfo import ZoneInfo
+
+            now = datetime.now(ZoneInfo("America/New_York"))
+            expiration = pd.to_datetime(options_df["expiration"])
+            options_df["T"] = (
+                (expiration - now).dt.total_seconds() / (365.25 * 24 * 3600)
+            )
+            options_df["T"] = options_df["T"].clip(lower=1e-10)
+
+        # Calculate mid price if not present
+        if "mid" not in options_df.columns and "bid" in options_df.columns:
+            options_df["mid"] = (options_df["bid"] + options_df["ask"]) / 2
+
+        # Compute IV surface
+        surface_df = VolLibBridge.calculate_iv_surface(options_df, spot_price, r=rate)
+
+        if surface_df.empty:
+            return {
+                "symbol": symbol,
+                "spot_price": spot_price,
+                "surface": [],
+                "skew": [],
+                "count": 0,
+            }
+
+        # Compute skew
+        skew_df = VolLibBridge.calculate_iv_skew(surface_df)
+
+        return {
+            "symbol": symbol,
+            "spot_price": spot_price,
+            "surface": surface_df.to_dict(orient="records"),
+            "skew": skew_df.to_dict(orient="records") if not skew_df.empty else [],
+            "count": len(surface_df),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"IV surface computation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"IV surface failed: {str(e)}")
+
+
+@router.get("/technical-indicators")
+async def get_technical_indicators(
+    symbol: str = Query("SPY", description="Symbol to analyze"),
+    period: str = Query("1mo", description="Data period (1d, 5d, 1mo, 3mo, 6mo, 1y)"),
+    interval: str = Query("1d", description="Data interval (1m, 5m, 15m, 1h, 1d)"),
+    indicators: str = Query("ATR,RSI,BBANDS", description="Comma-separated indicators"),
+) -> dict:
+    """Get technical indicators for a symbol using pandas-ta.
+
+    Supports: ATR (Average True Range), RSI (Relative Strength Index),
+    BBANDS (Bollinger Bands).
+
+    Feature idea: overlay with GEX levels to detect volatility explosions.
+    """
+    from app.core.technical_indicators import TechnicalIndicatorEngine
+
+    try:
+        import yfinance as yf
+
+        ticker = yf.Ticker(symbol)
+        hist = ticker.history(period=period, interval=interval)
+
+        if hist.empty:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No price data available for {symbol}",
+            )
+
+        # Compute indicators
+        indicator_list = [i.strip().upper() for i in indicators.split(",")]
+        result_df = TechnicalIndicatorEngine.compute_indicators(
+            hist, indicators=indicator_list
+        )
+
+        # Build response data
+        data = []
+        for idx, row in result_df.iterrows():
+            point = {
+                "timestamp": str(idx),
+                "close": float(row["close"]),
+            }
+            if "atr" in result_df.columns:
+                val = row["atr"]
+                point["atr"] = None if pd.isna(val) else float(val)
+            if "rsi" in result_df.columns:
+                val = row["rsi"]
+                point["rsi"] = None if pd.isna(val) else float(val)
+            if "bb_upper" in result_df.columns:
+                point["bb_upper"] = None if pd.isna(row["bb_upper"]) else float(row["bb_upper"])
+                point["bb_mid"] = None if pd.isna(row["bb_mid"]) else float(row["bb_mid"])
+                point["bb_lower"] = None if pd.isna(row["bb_lower"]) else float(row["bb_lower"])
+            data.append(point)
+
+        return {
+            "symbol": symbol,
+            "period": period,
+            "indicators": indicator_list,
+            "data": data,
+            "count": len(data),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Technical indicator computation failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Technical indicators failed: {str(e)}",
+        )
+
+
+@router.get("/vectorbt-backtest")
+async def run_vectorbt_backtest(
+    start_date: date = Query(..., description="Backtest start date"),
+    end_date: date = Query(..., description="Backtest end date"),
+    entry_threshold: float = Query(-1e9, description="GEX entry threshold (dollars)"),
+    exit_threshold: float = Query(0.0, description="GEX exit threshold (dollars)"),
+    initial_cash: float = Query(100_000.0, description="Starting capital"),
+) -> dict:
+    """Run high-performance backtest using vectorbt.
+
+    Strategy: Enter long when net GEX < entry_threshold (short gamma),
+    exit when net GEX > exit_threshold.
+
+    Note: Currently uses synthetic data for demonstration.
+    """
+    from app.core.vectorbt_backtester import VectorBTBacktester
+
+    # Validate
+    if start_date > end_date:
+        raise HTTPException(status_code=400, detail="start_date must be before end_date")
+
+    if (end_date - start_date).days < 5:
+        raise HTTPException(status_code=400, detail="Period must be at least 5 days")
+
+    if (end_date - start_date).days > 365:
+        raise HTTPException(status_code=400, detail="Period cannot exceed 365 days")
+
+    try:
+        start_dt = datetime.combine(start_date, datetime.min.time())
+        end_dt = datetime.combine(end_date, datetime.max.time())
+
+        gex_data = generate_synthetic_gex_data(start_dt, end_dt)
+        price_data = generate_synthetic_price_data(start_dt, end_dt)
+
+        result = VectorBTBacktester.run_gex_signal_backtest(
+            price_data=price_data,
+            gex_data=gex_data,
+            entry_threshold=entry_threshold,
+            exit_threshold=exit_threshold,
+            initial_cash=initial_cash,
+        )
+
+        return {
+            "total_return": result.total_return,
+            "sharpe_ratio": result.sharpe_ratio,
+            "sortino_ratio": result.sortino_ratio,
+            "calmar_ratio": result.calmar_ratio,
+            "max_drawdown": result.max_drawdown,
+            "total_trades": result.total_trades,
+            "winning_trades": result.winning_trades,
+            "losing_trades": result.losing_trades,
+            "win_rate": result.win_rate,
+            "profit_factor": result.profit_factor,
+            "avg_trade_return": result.avg_trade_return,
+            "best_trade": result.best_trade,
+            "worst_trade": result.worst_trade,
+            "avg_trade_duration_minutes": result.avg_trade_duration_minutes,
+            "start_date": result.start_date.isoformat(),
+            "end_date": result.end_date.isoformat(),
+            "equity_curve": result.equity_curve,
+        }
+
+    except Exception as e:
+        logger.error(f"VectorBT backtest failed: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"VectorBT backtest failed: {str(e)}",
         )
