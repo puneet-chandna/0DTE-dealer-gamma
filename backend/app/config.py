@@ -20,8 +20,7 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "postgresql+asyncpg://odte_user:password@localhost:5432/odte_gex"
 
-    # Data Providers
-    polygon_api_key: str = ""
+    # Data Providers — using YFinance (no API key required)
 
     # Server
     host: str = "0.0.0.0"

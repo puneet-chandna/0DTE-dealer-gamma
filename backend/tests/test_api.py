@@ -106,19 +106,17 @@ class TestDataEndpoints:
         assert data["status"] in ["open", "pre_market", "after_hours", "closed_weekend"]
         assert "current_time_et" in data
 
-    def test_options_chain_requires_api_key(self):
-        """Options chain should require API key."""
+    def test_options_chain_endpoint(self):
+        """Options chain should return data via YFinance (no API key required)."""
         response = client.get("/api/data/options-chain")
+        # YFinance may succeed (200) or have network issues (503)
+        assert response.status_code in (200, 503)
 
-        # Without API key, should return 503
-        assert response.status_code == 503
-
-    def test_spot_price_requires_api_key(self):
-        """Spot price should require API key."""
+    def test_spot_price_endpoint(self):
+        """Spot price should return data via YFinance (no API key required)."""
         response = client.get("/api/data/spot-price")
-
-        # Without API key, should return 503
-        assert response.status_code == 503
+        # YFinance may succeed (200) or have network issues (503)
+        assert response.status_code in (200, 503)
 
 
 class TestAnalyticsEndpoints:

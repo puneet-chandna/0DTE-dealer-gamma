@@ -87,7 +87,7 @@ async def health_check() -> dict:
     Returns detailed health status including:
     - API status
     - Environment
-    - Polygon API key configuration
+    - Data source (YFinance — free, no API key required)
     - Cache status
     """
     from datetime import datetime
@@ -98,9 +98,6 @@ async def health_check() -> dict:
 
     ET = ZoneInfo("America/New_York")
     now = datetime.now(ET)
-
-    # Check if Polygon API key is configured
-    polygon_configured = bool(settings.polygon_api_key)
 
     # Get cache instance and status
     try:
@@ -115,7 +112,7 @@ async def health_check() -> dict:
         "timestamp": now.isoformat(),
         "checks": {
             "api": "healthy",
-            "polygon_api_key": "configured" if polygon_configured else "missing",
+            "data_source": "yfinance (free)",
             "cache": cache_status,
         },
     }

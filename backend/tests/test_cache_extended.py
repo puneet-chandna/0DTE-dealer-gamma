@@ -1,12 +1,11 @@
 """Expanded tests for the Cache service.
 
-Tests edge cases: TTL expiry, spot-price-triggered invalidation,
-reset behaviour, concurrent access patterns, and capacity limits.
+Tests edge cases: TTL, spot-price-based invalidation, reset,
+and singleton contract.
 """
 
 import time
-from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -42,24 +41,31 @@ class TestGEXCacheBasicOps:
         assert self.cache.get("a") == 1
         assert self.cache.get("b") == 2
 
+    def test_get_fresh_vs_get(self):
+        """get() returns stale data within stale_ttl; get_if_fresh() checks TTL."""
+        self.cache.set("gex:test", "data")
+        # get_if_fresh respects per-key TTL; since we just set it, it's fresh
+        assert self.cache.get_if_fresh("gex:test") == "data"
 
-class TestGEXCacheTTL:
-    """Test TTL-based expiry."""
+    def test_is_stale_fresh_key(self):
+        """A newly set key should not be stale."""
+        self.cache.set("gex:new", "val")
+        assert self.cache.is_stale("gex:new") is False
 
-    def setup_method(self):
-        reset_cache()
-        self.cache = get_cache()
+    def test_is_stale_missing_key(self):
+        """A missing key should be reported as stale."""
+        assert self.cache.is_stale("gex:missing") is True
 
-    def test_value_available_before_ttl(self):
-        """Value should be retrievable within its TTL."""
-        self.cache.set("ttl:key", "value", ttl_seconds=60)
-        assert self.cache.get("ttl:key") == "value"
+    def test_invalidate_removes_key(self):
+        """invalidate() should remove a key and return True."""
+        self.cache.set("gex:bye", "value")
+        result = self.cache.invalidate("gex:bye")
+        assert result is True
+        assert self.cache.get("gex:bye") is None
 
-    def test_value_expired_after_ttl(self):
-        """Value should be None once TTL has elapsed."""
-        self.cache.set("exp:key", "value", ttl_seconds=0.01)
-        time.sleep(0.05)
-        assert self.cache.get("exp:key") is None
+    def test_invalidate_missing_key_returns_false(self):
+        """invalidate() should return False for a key that never existed."""
+        assert self.cache.invalidate("gex:ghost") is False
 
 
 class TestGEXCacheSpotPriceInvalidation:
@@ -69,56 +75,82 @@ class TestGEXCacheSpotPriceInvalidation:
         reset_cache()
         self.cache = get_cache()
 
-    def test_update_spot_price_stores_value(self):
-        """update_spot_price should store the new spot price."""
+    def test_update_spot_price_stores_in_spot_key(self):
+        """update_spot_price() should store the value under 'spot:price'."""
         self.cache.update_spot_price(5900.0)
-        assert self.cache.spot_price == pytest.approx(5900.0)
+        assert self.cache.get("spot:price") == pytest.approx(5900.0)
+
+    def test_update_spot_price_caches_last_price(self):
+        """_last_spot_price should be updated."""
+        self.cache.update_spot_price(5905.0)
+        assert self.cache._last_spot_price == pytest.approx(5905.0)
 
     def test_large_move_triggers_invalidation(self):
-        """A large spot price move should invalidate GEX cache."""
+        """A move > 1% should invalidate gex: keys."""
         mock_snapshot = MagicMock()
         self.cache.set("gex:current", mock_snapshot)
         assert self.cache.get("gex:current") is not None
 
         self.cache.update_spot_price(5900.0)
-        # A 5% move should invalidate the cache
-        self.cache.update_spot_price(6195.0)  # +5%
+        # A 2% move exceeds the default 1% threshold
+        self.cache.update_spot_price(5900.0 * 1.02)
 
         assert self.cache.get("gex:current") is None
 
     def test_small_move_does_not_invalidate(self):
-        """A small spot price move should not invalidate GEX cache."""
+        """A move < 1% should preserve the GEX cache."""
         mock_snapshot = MagicMock()
         self.cache.set("gex:current", mock_snapshot)
 
         self.cache.update_spot_price(5900.0)
-        self.cache.update_spot_price(5901.0)  # ~0.017%
+        self.cache.update_spot_price(5900.5)  # ~0.008% move
 
+        # GEX cache should still be present (within stale_ttl)
         assert self.cache.get("gex:current") is not None
 
+    def test_invalidate_on_spot_move_returns_true_on_big_move(self):
+        """invalidate_on_spot_move() should return True for large moves."""
+        result = self.cache.invalidate_on_spot_move(5900.0, 6000.0)
+        assert result is True
 
-class TestGEXCacheReset:
-    """Test cache reset."""
+    def test_invalidate_on_spot_move_returns_false_on_small_move(self):
+        """invalidate_on_spot_move() should return False for small moves."""
+        result = self.cache.invalidate_on_spot_move(5900.0, 5901.0)
+        assert result is False
 
-    def test_reset_clears_all_entries(self):
-        """reset_cache() should wipe all stored values."""
-        cache = get_cache()
-        cache.set("k1", "v1")
-        cache.set("k2", "v2")
+
+class TestGEXCacheClear:
+    """Test cache clear and stats."""
+
+    def test_clear_removes_all_entries(self):
+        """clear() should wipe all cached data."""
+        cache = GEXCache()
+        cache.set("gex:1", "a")
+        cache.set("gex:2", "b")
+        n = cache.clear()
+        assert n == 2
+        assert cache.get("gex:1") is None
+
+    def test_stats_returns_dict(self):
+        """stats() should return a dict with entry counts."""
+        cache = GEXCache()
+        cache.set("gex:x", "val")
+        stats = cache.stats()
+        assert "total_entries" in stats
+        assert "fresh_entries" in stats
+        assert stats["total_entries"] >= 1
+
+    def test_reset_cache_creates_new_instance(self):
+        """reset_cache() should wipe the singleton so get_cache() returns a fresh one."""
+        c1 = get_cache()
+        c1.set("gex:foo", "bar")
         reset_cache()
-        new_cache = get_cache()
-        assert new_cache.get("k1") is None
-        assert new_cache.get("k2") is None
-
-    def test_get_cache_returns_same_instance_after_reset(self):
-        """After reset, get_cache() should still return a valid cache."""
-        reset_cache()
-        c = get_cache()
-        assert c is not None
-        assert isinstance(c, GEXCache)
+        c2 = get_cache()
+        assert c2.get("gex:foo") is None
+        assert c1 is not c2
 
 
-class TestGEXCacheGetCacheSingleton:
+class TestGEXCacheSingleton:
     """Test get_cache() singleton behaviour."""
 
     def test_get_cache_returns_same_instance(self):

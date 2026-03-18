@@ -14,8 +14,6 @@ from app.core.greeks import BlackScholesGreeks, ImpliedVolatilitySolver, GreeksR
 from app.core.gex_calculator import GEXCalculator
 from app.core.data_acquisition import (
     RateLimiter,
-    PolygonClient,
-    MockPolygonClient,
     is_market_open,
     get_market_status,
     get_current_trading_date,
@@ -49,8 +47,6 @@ __all__ = [
     "GEXCalculator",
     # Data Acquisition
     "RateLimiter",
-    "PolygonClient",
-    "MockPolygonClient",
     "YFinanceClient",
     "is_market_open",
     "get_market_status",

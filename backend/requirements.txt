@@ -24,7 +24,7 @@ pydantic-settings==2.7.1
 
 # HTTP Client
 httpx==0.28.1
-polygon-api-client==1.14.3
+
 yfinance==1.1.0
 
 # Utilities

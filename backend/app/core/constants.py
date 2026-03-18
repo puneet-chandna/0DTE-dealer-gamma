@@ -42,9 +42,7 @@ LONG_GAMMA_THRESHOLD: float = 1e9    # +$1 billion
 # Strike filtering (percentage of spot price)
 STRIKE_RANGE_PERCENT: float = 0.20  # ±20% of spot
 
-# API rate limiting
-POLYGON_FREE_TIER_RATE: int = 5  # requests per minute
-POLYGON_PAID_TIER_RATE: int = 100  # requests per minute
+# (YFinance is free and rate-limit is handled internally by yfinance_provider.py)
 
 # Cache TTL (seconds)
 GEX_CACHE_TTL: int = 5
