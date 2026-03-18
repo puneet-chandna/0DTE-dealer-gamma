@@ -4,6 +4,10 @@
 
 export { ChartErrorBoundary } from './ChartErrorBoundary';
 export { GEXBarChart } from './GEXBarChart';
-export { TimeSeriesChart } from './TimeSeriesChart';
 export { RegimeIndicator } from './RegimeIndicator';
-export { ZeroGammaLine, zeroGammaReferenceLineConfig } from './ZeroGammaLine';
+export { TimeSeriesChart } from './TimeSeriesChart';
+export { ZeroGammaLine } from './ZeroGammaLine';
+export { IVSurfaceChart } from './IVSurfaceChart';
+export { IVSkewChart } from './IVSkewChart';
+export { TechnicalOverlayChart } from './TechnicalOverlayChart';
+export { EquityCurveChart } from './EquityCurveChart';

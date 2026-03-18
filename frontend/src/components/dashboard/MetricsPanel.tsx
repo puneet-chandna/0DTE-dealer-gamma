@@ -9,6 +9,7 @@ import { TrendingUp, TrendingDown, Target, Crosshair } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatGEX, formatCurrency } from '@/lib/utils';
 import { Card, CardHeader, CardContent, CardTitle, Skeleton } from '@/components/ui';
+import { useRiskFreeRate } from '@/hooks/useAnalyticsData';
 import type { GEXSnapshot } from '@/types';
 
 interface MetricsPanelProps {
@@ -74,6 +75,12 @@ function MetricsPanelComponent({ data, isLoading = false }: MetricsPanelProps) {
     );
   }
 
+  return <MetricsPanelInner data={data} />;
+}
+
+function MetricsPanelInner({ data }: { data: GEXSnapshot }) {
+  const { data: rateData } = useRiskFreeRate();
+
   // Calculate derived metrics
   const callGexBillions = data.total_call_gex / 1e9;
   const putGexBillions = data.total_put_gex / 1e9;
@@ -126,6 +133,12 @@ function MetricsPanelComponent({ data, isLoading = false }: MetricsPanelProps) {
           <MetricRow
             label="Spot Price"
             value={formatCurrency(data.spot_price, 2)}
+          />
+          <MetricRow
+            label="Risk-Free Rate"
+            value={rateData ? `${rateData.rate_pct.toFixed(2)}%` : '--'}
+            icon={rateData?.is_fallback ? undefined : <TrendingUp className="h-3.5 w-3.5 text-emerald-400" />}
+            color={rateData?.is_fallback ? 'default' : 'positive'}
           />
         </div>
 

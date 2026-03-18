@@ -144,3 +144,100 @@ export interface APIError {
 export interface HealthStatus {
   status: 'healthy' | 'unhealthy';
 }
+
+// ============================================================================
+// New Integration Types
+// ============================================================================
+
+/**
+ * Risk-free rate info from FRED.
+ */
+export interface RiskFreeRateInfo {
+  rate: number;
+  rate_pct: number;
+  source: string;
+  symbol: string;
+  fetched_at: string | null;
+  is_fallback: boolean;
+  cache_ttl_seconds: number;
+}
+
+/**
+ * IV surface data point.
+ */
+export interface IVSurfacePoint {
+  strike: number;
+  type: string;
+  iv: number;
+  mid_price: number;
+  moneyness: number;
+}
+
+/**
+ * IV skew data point (put IV - call IV at a strike).
+ */
+export interface IVSkewPoint {
+  strike: number;
+  call_iv: number;
+  put_iv: number;
+  skew: number;
+  moneyness: number;
+}
+
+/**
+ * Full IV surface response from the backend.
+ */
+export interface IVSurfaceResponse {
+  symbol: string;
+  spot_price: number;
+  surface: IVSurfacePoint[];
+  skew: IVSkewPoint[];
+  count: number;
+}
+
+/**
+ * Single data point for technical indicators.
+ */
+export interface TechnicalIndicatorPoint {
+  timestamp: string;
+  close: number;
+  atr: number | null;
+  rsi: number | null;
+  bb_upper: number | null;
+  bb_mid: number | null;
+  bb_lower: number | null;
+}
+
+/**
+ * Technical indicator response from backend.
+ */
+export interface TechnicalIndicatorResponse {
+  symbol: string;
+  period: string;
+  indicators: string[];
+  data: TechnicalIndicatorPoint[];
+  count: number;
+}
+
+/**
+ * Enhanced backtest result from vectorbt.
+ */
+export interface VectorBTBacktestResult {
+  total_return: number;
+  sharpe_ratio: number;
+  sortino_ratio: number;
+  calmar_ratio: number;
+  max_drawdown: number;
+  total_trades: number;
+  winning_trades: number;
+  losing_trades: number;
+  win_rate: number;
+  profit_factor: number;
+  avg_trade_return: number;
+  best_trade: number;
+  worst_trade: number;
+  avg_trade_duration_minutes: number;
+  start_date: string;
+  end_date: string;
+  equity_curve: number[];
+}

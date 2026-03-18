@@ -5,12 +5,14 @@
 'use client';
 
 import { memo } from 'react';
-import { ChevronLeft, ChevronRight, Settings, Calendar } from 'lucide-react';
+import Link from 'next/link';
+import { ChevronLeft, ChevronRight, Settings, Calendar, LineChart, FlaskConical } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatGEX, formatCurrency } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
 import { MetricCard, Card, CardContent, Skeleton } from '@/components/ui';
 import { RegimeIndicator } from '@/components/charts';
+import { useRiskFreeRate } from '@/hooks/useAnalyticsData';
 import type { GEXSnapshot, RegimeData } from '@/types';
 
 interface SidebarProps {
@@ -20,6 +22,7 @@ interface SidebarProps {
 }
 
 function SidebarComponent({ gexData, regimeData, isLoading = false }: SidebarProps) {
+  const { data: rateData } = useRiskFreeRate();
   const {
     isSidebarOpen,
     toggleSidebar,
@@ -102,6 +105,34 @@ function SidebarComponent({ gexData, regimeData, isLoading = false }: SidebarPro
               value={gexData ? formatCurrency(gexData.dominant_strike, 0) : '--'}
               isLoading={isLoading}
             />
+
+            <MetricCard
+              label="Risk-Free Rate"
+              value={rateData ? `${rateData.rate_pct.toFixed(2)}%` : '--'}
+              isLoading={!rateData}
+              isPositive={rateData ? !rateData.is_fallback : false}
+            />
+          </div>
+
+          {/* Navigation Links */}
+          <div className="mt-6 space-y-2">
+            <h3 className="text-xs font-medium uppercase tracking-wider text-zinc-500">
+              Pages
+            </h3>
+            <Link
+              href="/analytics"
+              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-zinc-400 transition-colors hover:bg-zinc-800/60 hover:text-zinc-200"
+            >
+              <LineChart className="h-4 w-4" />
+              Analytics
+            </Link>
+            <Link
+              href="/backtest"
+              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-zinc-400 transition-colors hover:bg-zinc-800/60 hover:text-zinc-200"
+            >
+              <FlaskConical className="h-4 w-4" />
+              Backtest
+            </Link>
           </div>
 
           {/* Settings */}
