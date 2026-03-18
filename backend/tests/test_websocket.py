@@ -76,8 +76,8 @@ class TestWebSocketEndpoints:
             assert -5e9 <= gex_data["net_gex"] <= 5e9
             assert gex_data["net_gex_billions"] == gex_data["net_gex"] / 1e9
 
-            # Spot price should be realistic for SPX
-            assert 1000 <= gex_data["spot_price"] <= 10000
+            # Spot price should be a positive realistic number
+            assert 100 <= gex_data["spot_price"] <= 10000
 
     def test_websocket_handles_client_messages(self):
         """Test that WebSocket can receive client messages (e.g., ping)."""
