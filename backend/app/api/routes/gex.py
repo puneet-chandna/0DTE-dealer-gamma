@@ -12,16 +12,22 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.config import Settings, get_settings
 from app.core.analytics import generate_synthetic_gex_data
-from app.core.data_acquisition import get_market_status, is_market_open
-from app.core.yfinance_provider import YFinanceClient
-from app.core.gex_calculator import GEXCalculator
+from app.core import (
+    GEXCalculator,
+    ProviderRegistry,
+    get_data_client,
+    get_current_trading_date,
+    is_market_open,
+)
 from app.models.schemas import (
     GEXByStrike,
     GEXHistorical,
     GEXSnapshot,
     RegimeData,
+    MarketStatusResponse,
 )
 from app.services.cache import get_cache
+from app.core.rate_provider import get_rate_provider
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +38,6 @@ ET = ZoneInfo("America/New_York")
 
 # Module-level instances (lazy initialization)
 _gex_calculator: Optional[GEXCalculator] = None
-_data_client: Optional[YFinanceClient] = None
-
-
-from app.core.rate_provider import get_rate_provider
 
 
 def get_gex_calculator() -> GEXCalculator:
@@ -46,94 +48,54 @@ def get_gex_calculator() -> GEXCalculator:
     return _gex_calculator
 
 
-def get_data_client() -> YFinanceClient:
-    """Get or create the YFinance data client instance.
-
-    Uses Yahoo Finance via yfinance library (free, no API key required).
-    Uses SPY as proxy for SPX options data.
-    """
-    global _data_client
-    if _data_client is None:
-        _data_client = YFinanceClient(
-            calls_per_minute=10,
-            use_spy_as_proxy=True,
-        )
-    return _data_client
-
-
 async def _get_live_gex_snapshot(
-    data_client: YFinanceClient,
-    gex_calculator: GEXCalculator,
-) -> GEXSnapshot:
-    """Fetch live options data and compute GEX snapshot.
-
+    symbol: str, 
+    provider: Optional[str] = None
+) -> dict:
+    """Fetch live data and calculate GEX snapshot.
+    
     Args:
-        data_client: YFinance data client.
-        gex_calculator: GEX computation engine.
-
-    Returns:
-        Computed GEX snapshot.
-
-    Raises:
-        HTTPException: If data fetch or calculation fails.
+        symbol: The underlying symbol (e.g. "SPX").
+        provider: Optional data provider name (e.g. "yfinance", "tradier").
     """
-    cache = get_cache()
-
-    # Check cache first
-    cached = cache.get_if_fresh("gex:current")
-    if cached is not None:
-        logger.debug("Returning cached GEX snapshot")
-        return cached
+    gex_calculator = get_gex_calculator()
+    data_client = None
 
     try:
-        # Fetch options chain and spot price via YFinance (uses SPY as proxy)
-        options_df, spot_price = await data_client.get_options_chain_for_gex("SPY")
+        # Initialise data client via registry
+        data_client = get_data_client(provider)
 
-        # Update spot price and check for cache invalidation
-        cache.update_spot_price(spot_price)
+        # Log appropriate message
+        request_symbol = getattr(data_client, "_get_ticker_symbol", lambda s: s)(symbol)
+        logger.info(f"Fetching live options data for {symbol} ({request_symbol}) via {data_client.provider_name}")
 
-        # Calculate GEX from chain
-        timestamp = datetime.now(ET)
+        # Fetch filtered data
+        options_df, spot_price = await data_client.get_options_chain_for_gex(
+            underlying=symbol
+        )
+
+        if options_df.empty:
+            raise ValueError(f"No valid 0DTE options data found for {symbol} on {data_client.provider_name}")
+
+        # Calculate GEX
         snapshot = gex_calculator.calculate_gex_from_chain(
             options_df=options_df,
             spot_price=spot_price,
-            timestamp=timestamp,
+            timestamp=datetime.now(ET),
         )
+        
+        # Add provider info
+        raw = snapshot.model_dump()
+        raw["provider"] = data_client.provider_name
+        return raw
 
-        # Cache the result
-        cache.set("gex:current", snapshot)
-        logger.info(
-            f"GEX computed: net_gex={snapshot.net_gex/1e9:.3f}B, "
-            f"spot={snapshot.spot_price:.2f}, "
-            f"zgl={snapshot.zero_gamma_level:.2f}"
-        )
-
-        return snapshot
-
-    except Exception as e:
-        logger.error(f"Failed to compute live GEX: {e}")
-
-        # Try to return stale cache data
-        stale = cache.get("gex:current")
-        if stale is not None:
-            logger.warning("Returning stale cached GEX snapshot")
-            return stale
-
-        raise HTTPException(
-            status_code=503,
-            detail=f"Unable to fetch GEX data: {str(e)}",
-        )
+    finally:
+        if data_client:
+            await data_client.close()
 
 
 def _generate_mock_gex_snapshot(spot_price: float = 5950.0) -> GEXSnapshot:
-    """Generate a mock GEX snapshot for demo/testing purposes.
-
-    Args:
-        spot_price: Simulated spot price.
-
-    Returns:
-        Mock GEX snapshot with realistic values.
-    """
+    """Generate a mock GEX snapshot for demo/testing purposes."""
     import numpy as np
 
     now = datetime.now(ET)
@@ -177,23 +139,63 @@ def _generate_mock_gex_snapshot(spot_price: float = 5950.0) -> GEXSnapshot:
 
 @router.get("/current", response_model=GEXSnapshot)
 async def get_current_gex(
-    settings: Settings = Depends(get_settings),
-) -> GEXSnapshot:
-    """Get current real-time GEX calculation.
-
-    Returns the latest GEX snapshot including net GEX, zero gamma level,
-    and breakdown by strike.
-
-    Uses YFinance (free Yahoo Finance data) - no API key required.
-    Uses SPY as proxy for SPX options.
+    symbol: str = Query("SPX", description="Underlying symbol (default: SPX)"),
+    provider: Optional[str] = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
+):
     """
-    gex_calculator = get_gex_calculator()
-    data_client = get_data_client()
+    Get the most recent 0DTE GEX calculation.
+    """
+    from app.config import get_settings
+    settings = get_settings()
+    active_provider = provider or settings.data_provider
 
+    cache = get_cache()
+    cache_key = f"gex:current:{symbol}:{active_provider}"
+    legacy_key = "gex:current"
+
+    # Try specific provider key first, then fallback to legacy key if it matches default provider
+    cached_data = cache.get_if_fresh(cache_key)
+    if cached_data is None and active_provider == settings.data_provider:
+        cached_data = cache.get_if_fresh(legacy_key)
+
+    if cached_data is not None:
+        logger.debug(f"Serving current GEX from cache for {symbol} ({active_provider})")
+        # Ensure provider field is on the response if missing
+        if hasattr(cached_data, 'model_dump'):
+             dump = cached_data.model_dump()
+             dump["provider"] = active_provider
+             return GEXSnapshot(**dump)
+        if isinstance(cached_data, dict):
+            cached_data["provider"] = cached_data.get("provider", active_provider)
+        return cached_data
+
+    # Not in cache, compute live
+    logger.info(f"Cache miss for {cache_key}, computing live GEX")
     try:
-        return await _get_live_gex_snapshot(data_client, gex_calculator)
-    finally:
-        pass  # YFinanceClient.close() is a no-op
+        snapshot_dict = await _get_live_gex_snapshot(symbol, provider)
+        
+        # Save to specific cache
+        cache.set(cache_key, snapshot_dict)
+        
+        # Also save to legacy cache if it's the default provider
+        if active_provider == settings.data_provider:
+            cache.set(legacy_key, snapshot_dict)
+            
+        return snapshot_dict
+    except Exception as e:
+        logger.error(f"Failed to compute live GEX: {e}")
+        # Try to return stale cache data
+        stale = cache.get(cache_key) or (cache.get(legacy_key) if active_provider == settings.data_provider else None)
+        if stale is not None:
+            logger.warning("Returning stale cached GEX snapshot")
+            if hasattr(stale, 'model_dump'):
+                 dump = stale.model_dump()
+                 dump["provider"] = active_provider
+                 return GEXSnapshot(**dump)
+            if isinstance(stale, dict):
+                stale["provider"] = stale.get("provider", active_provider)
+            return stale
+        raise HTTPException(status_code=503, detail=f"Unable to fetch GEX data: {str(e)}")
 
 
 @router.get("/historical", response_model=GEXHistorical)
@@ -205,22 +207,12 @@ async def get_historical_gex(
     """Get historical GEX data for date range.
 
     Note: Currently returns synthetic data for demonstration.
-    Database storage will be implemented in a future phase.
     """
-    # Validate date range
     if start_date > end_date:
-        raise HTTPException(
-            status_code=400,
-            detail="start_date must be before or equal to end_date",
-        )
-
+        raise HTTPException(status_code=400, detail="start_date must be before or equal to end_date")
     if (end_date - start_date).days > 365:
-        raise HTTPException(
-            status_code=400,
-            detail="Date range cannot exceed 365 days",
-        )
+        raise HTTPException(status_code=400, detail="Date range cannot exceed 365 days")
 
-    # Generate synthetic data for demo
     try:
         start_dt = datetime.combine(start_date, datetime.min.time())
         end_dt = datetime.combine(end_date, datetime.max.time())
@@ -231,12 +223,9 @@ async def get_historical_gex(
             freq=interval,
         )
 
-        # Convert to GEXSnapshot list
         snapshots = []
         for _, row in synthetic_gex.iterrows():
-            # Create minimal snapshot from synthetic data
             snapshot = _generate_mock_gex_snapshot(spot_price=5950.0)
-            # Override with actual timestamp
             snapshot = GEXSnapshot(
                 timestamp=row.name if hasattr(row, 'name') else datetime.now(ET),
                 spot_price=snapshot.spot_price,
@@ -251,7 +240,7 @@ async def get_historical_gex(
             snapshots.append(snapshot)
 
         return GEXHistorical(
-            data=snapshots[:100],  # Limit to 100 snapshots for demo
+            data=snapshots[:100],
             start_date=start_dt,
             end_date=end_dt,
             count=len(snapshots[:100]),
@@ -259,67 +248,103 @@ async def get_historical_gex(
 
     except Exception as e:
         logger.error(f"Failed to generate historical GEX data: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to generate historical data: {str(e)}",
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to generate historical data: {str(e)}")
 
 
 @router.get("/strikes", response_model=GEXByStrike)
 async def get_gex_by_strikes(
-    min_strike: Optional[float] = Query(None, description="Minimum strike price"),
-    max_strike: Optional[float] = Query(None, description="Maximum strike price"),
-    settings: Settings = Depends(get_settings),
-) -> GEXByStrike:
-    """Get GEX breakdown by strike price.
+    symbol: str = Query("SPX", description="Underlying symbol (default: SPX)"),
+    provider: Optional[str] = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
+):
+    """Get GEX values separated by strike price."""
+    # Try to get from cache first
+    cache = get_cache()
+    
+    from app.config import get_settings
+    settings = get_settings()
+    active_provider = provider or settings.data_provider
+    cache_key = f"gex:current:{symbol}:{active_provider}"
+    legacy_key = "gex:current"
 
-    Returns arrays of strikes and corresponding GEX values for charting.
-    """
-    # Get current GEX snapshot
-    snapshot = await get_current_gex(settings=settings)
+    cached_data = cache.get(cache_key)
+    if cached_data is None and active_provider == settings.data_provider:
+        cached_data = cache.get(legacy_key)
 
-    # Extract strike data
-    gex_by_strike = snapshot.gex_by_strike
+    try:
+        if cached_data is None:
+            # Need to compute
+            snapshot_dict = await _get_live_gex_snapshot(symbol, provider)
+        else:
+            snapshot_dict = (
+                cached_data.model_dump()
+                if hasattr(cached_data, "model_dump")
+                else cached_data
+            )
+        # Get current GEX snapshot
+        snapshot = GEXSnapshot(**snapshot_dict)
 
-    # Filter by strike range if specified
-    if min_strike is not None:
-        gex_by_strike = {k: v for k, v in gex_by_strike.items() if k >= min_strike}
-    if max_strike is not None:
-        gex_by_strike = {k: v for k, v in gex_by_strike.items() if k <= max_strike}
+        # Extract strike data
+        gex_by_strike = snapshot.gex_by_strike
 
-    # Sort by strike
-    sorted_strikes = sorted(gex_by_strike.keys())
-    sorted_values = [gex_by_strike[s] for s in sorted_strikes]
+        # Sort by strike
+        sorted_strikes = sorted(gex_by_strike.keys())
+        sorted_values = [gex_by_strike[s] for s in sorted_strikes]
 
-    return GEXByStrike(
-        strikes=sorted_strikes,
-        gex_values=sorted_values,
-        spot_price=snapshot.spot_price,
-        zero_gamma_level=snapshot.zero_gamma_level,
-    )
+        return GEXByStrike(
+            strikes=sorted_strikes,
+            gex_values=sorted_values,
+            spot_price=snapshot.spot_price,
+            zero_gamma_level=snapshot.zero_gamma_level,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get GEX by strikes for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to get GEX by strikes: {e}")
 
 
 @router.get("/regime", response_model=RegimeData)
-async def get_current_regime(
-    settings: Settings = Depends(get_settings),
-) -> RegimeData:
-    """Get current market regime based on GEX.
+async def get_market_regime(
+    symbol: str = Query("SPX", description="Underlying symbol (default: SPX)"),
+    provider: Optional[str] = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
+):
+    """Get current market regime based on GEX positioning."""
+    cache = get_cache()
+    
+    from app.config import get_settings
+    settings = get_settings()
+    active_provider = provider or settings.data_provider
+    cache_key = f"gex:current:{symbol}:{active_provider}"
+    legacy_key = "gex:current"
 
-    Returns regime classification (short_gamma, long_gamma, neutral)
-    with description and suggested color for UI.
-    """
-    # Get current GEX snapshot
-    snapshot = await get_current_gex(settings=settings)
+    cached_data = cache.get_if_fresh(cache_key)
+    if cached_data is None and active_provider == settings.data_provider:
+        cached_data = cache.get_if_fresh(legacy_key)
 
-    # Determine regime
-    gex_calculator = get_gex_calculator()
-    regime, description, color = gex_calculator.determine_regime(snapshot.net_gex)
+    try:
+        if cached_data is None:
+            snapshot_dict = await _get_live_gex_snapshot(symbol, provider)
+        else:
+            snapshot_dict = (
+                cached_data.model_dump()
+                if hasattr(cached_data, "model_dump")
+                else cached_data
+            )
+        
+        snapshot = GEXSnapshot(**snapshot_dict)
 
-    return RegimeData(
-        regime=regime,
-        description=description,
-        color=color,
-        net_gex=snapshot.net_gex,
-        net_gex_billions=snapshot.net_gex / 1e9,
-        timestamp=snapshot.timestamp,
-    )
+        # Determine regime
+        gex_calculator = get_gex_calculator()
+        regime, description, color = gex_calculator.determine_regime(snapshot.net_gex)
+
+        return RegimeData(
+            regime=regime,
+            description=description,
+            color=color,
+            net_gex=snapshot.net_gex,
+            net_gex_billions=snapshot.net_gex / 1e9,
+            timestamp=snapshot.timestamp,
+        )
+    except Exception as e:
+        logger.error(f"Failed to get regime for {symbol}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to determine regime: {e}")

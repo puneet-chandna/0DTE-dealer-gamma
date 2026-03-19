@@ -1,0 +1,49 @@
+============================= test session starts ==============================
+platform linux -- Python 3.13.7, pytest-8.3.4, pluggy-1.6.0
+rootdir: /home/puneet/codes/ODTE-dealer-gamma/backend
+configfile: pyproject.toml
+plugins: anyio-4.12.1, asyncio-0.25.2, cov-6.0.0
+asyncio: mode=Mode.AUTO, asyncio_default_fixture_loop_scope=function
+collected 0 items / 1 error
+
+==================================== ERRORS ====================================
+______________________ ERROR collecting tests/test_api.py ______________________
+ImportError while importing test module '/home/puneet/codes/ODTE-dealer-gamma/backend/tests/test_api.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+/usr/lib/python3.13/importlib/__init__.py:88: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+tests/test_api.py:6: in <module>
+    from app.main import app
+app/main.py:10: in <module>
+    from app.api.routes import analytics, data, gex
+app/api/routes/data.py:14: in <module>
+    from app.core import (
+E   ImportError: cannot import name 'get_market_status' from 'app.core' (/home/puneet/codes/ODTE-dealer-gamma/backend/app/core/__init__.py)
+=============================== warnings summary ===============================
+.venv/lib/python3.13/site-packages/pydantic/_internal/_config.py:295
+.venv/lib/python3.13/site-packages/pydantic/_internal/_config.py:295
+  /home/puneet/codes/ODTE-dealer-gamma/backend/.venv/lib/python3.13/site-packages/pydantic/_internal/_config.py:295: PydanticDeprecatedSince20: Support for class-based `config` is deprecated, use ConfigDict instead. Deprecated in Pydantic V2.0 to be removed in V3.0. See Pydantic V2 Migration Guide at https://errors.pydantic.dev/2.10/migration/
+    warnings.warn(DEPRECATION_MESSAGE, DeprecationWarning)
+
+.venv/lib/python3.13/site-packages/pandas_datareader/compat/__init__.py:11
+  /home/puneet/codes/ODTE-dealer-gamma/backend/.venv/lib/python3.13/site-packages/pandas_datareader/compat/__init__.py:11: DeprecationWarning: distutils Version classes are deprecated. Use packaging.version instead.
+    PANDAS_VERSION = LooseVersion(pd.__version__)
+
+.venv/lib/python3.13/site-packages/pandas_datareader/compat/__init__.py:13
+  /home/puneet/codes/ODTE-dealer-gamma/backend/.venv/lib/python3.13/site-packages/pandas_datareader/compat/__init__.py:13: DeprecationWarning: distutils Version classes are deprecated. Use packaging.version instead.
+    PANDAS_0210 = PANDAS_VERSION >= LooseVersion("0.21.0")
+
+.venv/lib/python3.13/site-packages/pandas_datareader/compat/__init__.py:14
+  /home/puneet/codes/ODTE-dealer-gamma/backend/.venv/lib/python3.13/site-packages/pandas_datareader/compat/__init__.py:14: DeprecationWarning: distutils Version classes are deprecated. Use packaging.version instead.
+    PANDAS_0220 = PANDAS_VERSION >= LooseVersion("0.22.0")
+
+.venv/lib/python3.13/site-packages/pandas_datareader/compat/__init__.py:15
+  /home/puneet/codes/ODTE-dealer-gamma/backend/.venv/lib/python3.13/site-packages/pandas_datareader/compat/__init__.py:15: DeprecationWarning: distutils Version classes are deprecated. Use packaging.version instead.
+    PANDAS_0230 = PANDAS_VERSION >= LooseVersion("0.23.0")
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ============================
+ERROR tests/test_api.py
+!!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+========================= 6 warnings, 1 error in 1.45s =========================

@@ -20,7 +20,12 @@ class Settings(BaseSettings):
     # Database
     database_url: str = "postgresql+asyncpg://odte_user:password@localhost:5432/odte_gex"
 
-    # Data Providers — using YFinance (no API key required)
+    # Data Providers
+    data_provider: str = "yfinance"
+    tradier_api_key: Optional[str] = None
+    tradier_base_url: str = "https://api.tradier.com/v1"
+
+    # Background Tasks
 
     # Server
     host: str = "0.0.0.0"

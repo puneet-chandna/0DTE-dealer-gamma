@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
 from app.config import Settings, get_settings
 from app.core.data_acquisition import is_market_open
-from app.core.yfinance_provider import YFinanceClient
+from app.core.provider_registry import get_data_client
 from app.core.gex_calculator import GEXCalculator
 from app.services.cache import get_cache
 
@@ -145,16 +145,18 @@ async def _get_gex_update(settings: Settings) -> dict:
             "is_stale": cache.is_stale("gex:current"),
         }
 
-    # If no cached data, fetch fresh data via YFinance
+    # If no cached data, fetch fresh data via data provider
     try:
-        data_client = YFinanceClient(
-            calls_per_minute=10,
-            use_spy_as_proxy=True,
-        )
+        data_client = get_data_client()
+        provider_name = data_client.provider_name
 
         try:
-            options_df, spot_price = await data_client.get_options_chain_for_gex("SPY")
+            options_df, spot_price = await data_client.get_options_chain_for_gex()
             cache.update_spot_price(spot_price)
+
+            if options_df.empty:
+                 logger.warning(f"WebSocket update: empty chain returned by {provider_name}")
+                 return _generate_mock_gex_data()
 
             gex_calculator = get_gex_calculator()
             snapshot = gex_calculator.calculate_gex_from_chain(
@@ -163,7 +165,11 @@ async def _get_gex_update(settings: Settings) -> dict:
                 timestamp=datetime.now(ET),
             )
 
+            # Store in specific active provider cache and default cache
+            cache_key = f"gex:current:SPX:{provider_name}"
+            cache.set(cache_key, snapshot)
             cache.set("gex:current", snapshot)
+
             regime, _, _ = gex_calculator.determine_regime(snapshot.net_gex)
 
             return {
@@ -174,6 +180,7 @@ async def _get_gex_update(settings: Settings) -> dict:
                 "regime": regime,
                 "is_mock": False,
                 "is_stale": False,
+                "provider": provider_name,
             }
 
         finally:

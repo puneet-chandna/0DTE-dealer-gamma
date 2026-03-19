@@ -13,6 +13,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import yfinance as yf
 
+from app.core.base_provider import DataProvider
 from app.core.constants import STRIKE_RANGE_PERCENT
 from app.core.data_acquisition import (
     RateLimiter,
@@ -25,18 +26,27 @@ logger = logging.getLogger(__name__)
 ET = ZoneInfo("America/New_York")
 
 
-class YFinanceClient:
+class YFinanceClient(DataProvider):
     """
     Yahoo Finance API client for options data via yfinance library.
-    
+
     Provides free real-time options chain data. Note that yfinance is an
     unofficial API and may be subject to rate limiting or changes.
-    
-    Key differences from Polygon:
+
+    Key characteristics:
     - Greeks are NOT provided by yfinance (must be calculated separately)
     - Uses SPY as proxy for SPX (SPX options not available on Yahoo)
     - No historical options data available
+    - No API key required (free)
     """
+
+    # ---- DataProvider metadata ----
+    provider_name = "yfinance"
+    display_name = "Yahoo Finance"
+    provides_greeks = False
+    supports_spx_directly = False
+    rate_limit = 10
+    requires_api_key = False
     
     # SPY is used as proxy since SPX options aren't on Yahoo Finance
     # SPY tracks S&P 500 at ~1/10th the price

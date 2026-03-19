@@ -77,28 +77,20 @@ class TestGetGEXCalculator:
 # ---------------------------------------------------------------------------
 
 class TestGetDataClient:
-    """Test YFinance data client singleton management."""
+    """Test data client factory."""
 
-    def setup_method(self):
-        background._data_client = None
-
-    @pytest.mark.asyncio
-    async def test_creates_client(self):
+    def test_creates_client(self):
         """Should create a YFinanceClient instance."""
         from app.core.yfinance_provider import YFinanceClient
-        client = await get_data_client()
+        client = get_data_client("yfinance")
         assert client is not None
         assert isinstance(client, YFinanceClient)
 
-    @pytest.mark.asyncio
-    async def test_returns_same_instance(self):
+    def test_returns_same_instance(self):
         """Should return the same client on subsequent calls (singleton)."""
-        client1 = await get_data_client()
-        client2 = await get_data_client()
+        client1 = get_data_client("yfinance")
+        client2 = get_data_client("yfinance")
         assert client1 is client2
-
-    def teardown_method(self):
-        background._data_client = None
 
 
 # ---------------------------------------------------------------------------
@@ -427,14 +419,10 @@ class TestStopBackgroundTasks:
 
     @pytest.mark.asyncio
     async def test_closes_data_client(self):
-        """Should close the YFinance data client on shutdown."""
-        mock_client = AsyncMock()
-        background._data_client = mock_client
-
-        await stop_background_tasks()
-
-        mock_client.close.assert_called_once()
-        assert background._data_client is None
+        """Should ask ProviderRegistry to close all clients on shutdown."""
+        with patch("app.core.provider_registry.ProviderRegistry.close_all", new_callable=AsyncMock) as mock_close_all:
+            await stop_background_tasks()
+            mock_close_all.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_handles_already_done_tasks(self):

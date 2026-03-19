@@ -66,6 +66,18 @@ class OptionContract(BaseModel):
         populate_by_name = True
 
 
+class OptionsChainResponse(BaseModel):
+    """Full options chain response including all contracts."""
+
+    underlying: str
+    spot_price: float
+    expiration_date: str
+    contract_count: int
+    contracts: List[Dict[str, float | str | int]]
+    timestamp: str
+    provider: Optional[str] = None
+
+
 class GEXSnapshot(BaseModel):
     """GEX calculation result for a point in time."""
 

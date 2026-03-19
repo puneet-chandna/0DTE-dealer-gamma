@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from app.config import get_settings
 from app.core.data_acquisition import is_market_open
-from app.core.yfinance_provider import YFinanceClient
+from app.core.provider_registry import get_data_client
 from app.core.gex_calculator import GEXCalculator
 from app.services.cache import get_cache
 
@@ -30,7 +30,6 @@ _shutdown_event: Optional[asyncio.Event] = None
 
 # Module-level instances
 _gex_calculator: Optional[GEXCalculator] = None
-_data_client: Optional[YFinanceClient] = None
 
 
 def get_gex_calculator() -> GEXCalculator:
@@ -39,22 +38,6 @@ def get_gex_calculator() -> GEXCalculator:
     if _gex_calculator is None:
         _gex_calculator = GEXCalculator()
     return _gex_calculator
-
-
-async def get_data_client() -> YFinanceClient:
-    """Get or create the YFinance data client instance.
-
-    Uses Yahoo Finance via yfinance library (free, no API key required).
-    Uses SPY as proxy for SPX options data.
-    """
-    global _data_client
-
-    if _data_client is None:
-        _data_client = YFinanceClient(
-            calls_per_minute=10,  # Conservative rate limit
-            use_spy_as_proxy=True,
-        )
-    return _data_client
 
 
 async def periodic_gex_refresh() -> None:
@@ -82,12 +65,12 @@ async def periodic_gex_refresh() -> None:
                 await asyncio.sleep(60)
                 continue
 
-            # Get data client (YFinance)
-            data_client = await get_data_client()
+            # Get data client
+            data_client = get_data_client()
 
             try:
-                # Fetch options chain and spot price via YFinance (uses SPY as proxy)
-                options_df, spot_price = await data_client.get_options_chain_for_gex("SPY")
+                # Fetch options chain and spot price
+                options_df, spot_price = await data_client.get_options_chain_for_gex()
 
                 # Update spot price in cache (may trigger invalidation)
                 cache.update_spot_price(spot_price)
@@ -105,7 +88,7 @@ async def periodic_gex_refresh() -> None:
 
                 logger.debug(
                     f"GEX refreshed: net_gex={snapshot.net_gex/1e9:.3f}B, "
-                    f"spot={snapshot.spot_price:.2f}"
+                    f"spot={snapshot.spot_price:.2f} via {data_client.provider_name}"
                 )
 
             except Exception as e:
@@ -147,11 +130,11 @@ async def periodic_spot_refresh() -> None:
                 await asyncio.sleep(60)
                 continue
 
-            # Get data client (YFinance)
-            data_client = await get_data_client()
+            # Get data client
+            data_client = get_data_client()
 
             try:
-                spot_price = await data_client.get_spot_price("SPY")
+                spot_price = await data_client.get_spot_price()
                 cache.update_spot_price(spot_price)
                 logger.debug(f"Spot price refreshed: {spot_price:.2f}")
 
@@ -181,14 +164,13 @@ async def cache_warmup() -> None:
         logger.info("Market is closed, skipping cache warmup")
         return
 
-    data_client = await get_data_client()
-
+    data_client = get_data_client()
     cache = get_cache()
     gex_calculator = get_gex_calculator()
 
     try:
-        # Fetch initial data via YFinance (uses SPY as proxy)
-        options_df, spot_price = await data_client.get_options_chain_for_gex("SPY")
+        # Fetch initial data
+        options_df, spot_price = await data_client.get_options_chain_for_gex()
         cache.update_spot_price(spot_price)
 
         # Calculate and cache GEX
@@ -201,7 +183,7 @@ async def cache_warmup() -> None:
 
         logger.info(
             f"Cache warmup complete: net_gex={snapshot.net_gex/1e9:.3f}B, "
-            f"spot={spot_price:.2f}, contracts={len(options_df)}"
+            f"spot={spot_price:.2f}, contracts={len(options_df)} via {data_client.provider_name}"
         )
 
     except Exception as e:
@@ -220,10 +202,7 @@ async def start_background_tasks() -> None:
     # Run cache warmup first
     await cache_warmup()
 
-    # Start periodic tasks
-    settings = get_settings()
-
-    # Start data refresh tasks (YFinance - no API key required)
+    # Start data refresh tasks
     gex_task = asyncio.create_task(periodic_gex_refresh())
     gex_task.set_name("gex_refresh")
     _background_tasks.append(gex_task)
@@ -232,17 +211,13 @@ async def start_background_tasks() -> None:
     spot_task.set_name("spot_refresh")
     _background_tasks.append(spot_task)
 
-    logger.info(
-        f"Started {len(_background_tasks)} background tasks "
-        f"(using YFinance - free data)"
-    )
-
+    logger.info(f"Started {len(_background_tasks)} background tasks")
     logger.info("Background tasks initialization complete")
 
 
 async def stop_background_tasks() -> None:
     """Stop all background tasks on application shutdown."""
-    global _background_tasks, _shutdown_event, _data_client
+    global _background_tasks, _shutdown_event
 
     logger.info("Stopping background tasks...")
 
@@ -263,9 +238,8 @@ async def stop_background_tasks() -> None:
 
     _background_tasks.clear()
 
-    # Close data client
-    if _data_client:
-        await _data_client.close()
-        _data_client = None
+    # Close data provider instances
+    from app.core.provider_registry import ProviderRegistry
+    await ProviderRegistry.close_all()
 
     logger.info("Background tasks stopped")

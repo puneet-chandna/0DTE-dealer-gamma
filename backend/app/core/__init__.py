@@ -10,6 +10,7 @@ from app.core.constants import (
     MIN_IV,
     MAX_IV,
 )
+from app.core.base_provider import DataProvider
 from app.core.greeks import BlackScholesGreeks, ImpliedVolatilitySolver, GreeksResult
 from app.core.gex_calculator import GEXCalculator
 from app.core.data_acquisition import (
@@ -18,6 +19,8 @@ from app.core.data_acquisition import (
     get_market_status,
     get_current_trading_date,
 )
+from app.core.provider_registry import get_data_client, ProviderRegistry
+from app.core.tradier_provider import TradierClient
 from app.core.yfinance_provider import YFinanceClient
 from app.core.analytics import (
     VolatilityAnalyzer,
@@ -45,9 +48,13 @@ __all__ = [
     "GreeksResult",
     # GEX
     "GEXCalculator",
-    # Data Acquisition
-    "RateLimiter",
+    # Data Acquisition & Providers
+    "DataProvider",
+    "get_data_client",
+    "ProviderRegistry",
     "YFinanceClient",
+    "TradierClient",
+    "RateLimiter",
     "is_market_open",
     "get_market_status",
     "get_current_trading_date",
