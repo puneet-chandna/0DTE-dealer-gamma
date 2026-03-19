@@ -20,7 +20,7 @@ Step-by-step instructions for deploying the 0DTE GEX Monitor to production.
 - GitHub account with repository access
 - [Vercel](https://vercel.com) account
 - [Railway](https://railway.app) account
-- [Polygon.io](https://polygon.io) API key (free tier works)
+- (Optional) Data Provider API key (e.g., Tradier). YFinance acts as a free tier default.
 
 ---
 
@@ -54,7 +54,8 @@ In Railway dashboard → **Variables** tab:
 
 | Variable          | Value                             | Required |
 | ----------------- | --------------------------------- | -------- |
-| `POLYGON_API_KEY` | Your Polygon.io API key           | ✅ Yes   |
+| `DATA_PROVIDER`   | `yfinance`, `tradier`, etc.       | No (def: yfinance) |
+| `TRADIER_API_KEY` | Your Tradier API key (if using)   | No       |
 | `ENVIRONMENT`     | `production`                      | ✅ Yes   |
 | `DEBUG`           | `false`                           | ✅ Yes   |
 | `CORS_ORIGINS`    | `["https://your-app.vercel.app"]` | ✅ Yes   |
@@ -82,7 +83,7 @@ curl https://your-project.up.railway.app/health
   "environment": "production",
   "checks": {
     "api": "healthy",
-    "polygon_api_key": "configured",
+    "data_provider": "yfinance",
     "cache": "healthy"
   }
 }
@@ -170,10 +171,13 @@ Redeploy backend to apply changes.
 
 ```env
 # Required
-POLYGON_API_KEY=pk_xxxxx
 ENVIRONMENT=production
 DEBUG=false
 CORS_ORIGINS=["https://your-app.vercel.app"]
+
+# Data Providers (Optional but recommended for prod)
+DATA_PROVIDER=yfinance
+TRADIER_API_KEY=your_key_here
 
 # Auto-set by Railway
 DATABASE_URL=postgresql+asyncpg://...
@@ -203,7 +207,7 @@ NEXT_PUBLIC_GA_ID=G-XXXXXXXXXX
 
 | Issue                     | Solution                                    |
 | ------------------------- | ------------------------------------------- |
-| `503 Service Unavailable` | Check `POLYGON_API_KEY` is set              |
+| `503 Service Unavailable` | Check Data Provider API key is valid / set  |
 | CORS errors               | Verify `CORS_ORIGINS` includes frontend URL |
 | WebSocket fails           | Use `wss://` instead of `ws://`             |
 | Health check fails        | Check Railway deployment logs               |
@@ -267,6 +271,6 @@ Monitor `/health` endpoint for uptime:
 | -------------- | -------------------------------- | ---------------- |
 | **Vercel**     | 100GB bandwidth, 100 deployments | $20/mo (Pro)     |
 | **Railway**    | $5 credit/mo, 500 hours          | Pay-as-you-go    |
-| **Polygon.io** | 5 req/min, delayed data          | $29/mo (Starter) |
+| **Data API**   | Free (YFinance/AkShare)          | E.g., Tradier/ORATS |
 
 > **Tip:** Free tiers are sufficient for demo/portfolio projects.

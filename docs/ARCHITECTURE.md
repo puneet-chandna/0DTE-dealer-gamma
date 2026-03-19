@@ -7,7 +7,7 @@ System design documentation for the 0DTE Dealer Gamma Exposure (GEX) Monitor.
 ```mermaid
 graph LR
     subgraph External
-        P["Polygon.io API"]
+        DP["Data Providers (YFinance, Tradier, etc.)"]
     end
 
     subgraph Backend["Backend (Railway)"]
@@ -24,7 +24,7 @@ graph LR
         CHARTS["Recharts"]
     end
 
-    P --> API
+    DP --> API
     API --> GEX
     GEX --> GREEKS
     API --> CACHE
@@ -45,7 +45,7 @@ graph LR
 | **FastAPI App**      | `app/main.py`                  | HTTP server, middleware, routing      |
 | **Greeks Engine**    | `app/core/greeks.py`           | Vectorized Black-Scholes calculations |
 | **GEX Calculator**   | `app/core/gex_calculator.py`   | GEX formula, zero gamma level         |
-| **Data Acquisition** | `app/core/data_acquisition.py` | Polygon.io client with rate limiting  |
+| **Data Providers**   | `app/core/base_provider.py`    | Dynamic unified data fetching via Registry |
 | **Analytics**        | `app/core/analytics.py`        | Backtesting, volatility analysis      |
 | **WebSocket**        | `app/api/websocket.py`         | Real-time streaming to clients        |
 | **Cache**            | `app/services/cache.py`        | TTL-based in-memory caching           |
@@ -74,12 +74,12 @@ sequenceDiagram
     participant Client
     participant WSManager
     participant BgTask
-    participant Polygon
+    participant Provider
     participant GEXCalc
     participant Cache
 
-    BgTask->>Polygon: GET /options/chain (rate limited)
-    Polygon-->>BgTask: Options data
+    BgTask->>Provider: GET /options/chain (rate limited)
+    Provider-->>BgTask: Options data
     BgTask->>GEXCalc: calculate_gex_from_chain()
     GEXCalc->>GEXCalc: Greeks vectorized calculation
     GEXCalc-->>BgTask: GEXSnapshot
@@ -96,15 +96,15 @@ sequenceDiagram
     participant API
     participant Cache
     participant GEXCalc
-    participant Polygon
+    participant Provider
 
     Client->>API: GET /api/gex/current
     API->>Cache: Check cache (5s TTL)
     alt Cache Hit
         Cache-->>API: Cached GEXSnapshot
     else Cache Miss
-        API->>Polygon: Fetch options chain
-        Polygon-->>API: Options data
+        API->>Provider: Fetch options chain
+        Provider-->>API: Options data
         API->>GEXCalc: Calculate GEX
         GEXCalc-->>API: GEXSnapshot
         API->>Cache: Store in cache
@@ -182,7 +182,7 @@ for i in range(len(strikes) - 1):
 
 - All secrets in environment variables (`.env`)
 - Never committed to version control
-- Rotated quarterly (Polygon API key)
+- Configured dynamically via ProviderRegistry
 
 ### CORS
 
@@ -191,8 +191,9 @@ for i in range(len(strikes) - 1):
 
 ### Rate Limiting
 
-- Polygon.io: 5 requests/minute (free tier)
-- Internal `RateLimiter` class enforces limits
+- YFinance: Dynamic throttling
+- Tradier: Based on assigned tier
+- Internal `RateLimiter` class enforces limits on a per-provider basis
 
 ---
 

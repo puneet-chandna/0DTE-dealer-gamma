@@ -20,6 +20,13 @@ Currently, the API does not require authentication. All endpoints are public.
 
 Get current real-time GEX calculation.
 
+**Parameters:**
+
+| Name       | Type   | Required | Description                     |
+| ---------- | ------ | -------- | ------------------------------- |
+| `symbol`   | string | No       | Ticker symbol (default: `SPX`)  |
+| `provider` | string | No       | Data provider e.g., `yfinance`  |
+
 **Response:**
 
 ```json
@@ -58,8 +65,10 @@ Get historical GEX data for a date range.
 | `start_date` | date   | Yes      | Start date (YYYY-MM-DD)                                |
 | `end_date`   | date   | Yes      | End date (YYYY-MM-DD)                                  |
 | `interval`   | string | No       | Data interval: `5m`, `15m`, `1h`, `1d` (default: `1h`) |
+| `symbol`     | string | No       | Ticker symbol (default: `SPX`)                         |
+| `provider`   | string | No       | Data provider, e.g., `yfinance`                        |
 
-**Example:** `GET /api/gex/historical?start_date=2026-01-01&end_date=2026-01-30`
+**Example:** `GET /api/gex/historical?start_date=2026-01-01&end_date=2026-01-30&symbol=SPX`
 
 **Response:**
 
@@ -90,8 +99,10 @@ Get GEX breakdown by strike price.
 
 | Name         | Type  | Required | Description                 |
 | ------------ | ----- | -------- | --------------------------- |
-| `min_strike` | float | No       | Minimum strike price filter |
-| `max_strike` | float | No       | Maximum strike price filter |
+| `min_strike` | float  | No       | Minimum strike price filter |
+| `max_strike` | float  | No       | Maximum strike price filter |
+| `symbol`     | string | No       | Ticker symbol (default: `SPX`) |
+| `provider`   | string | No       | Data provider, e.g., `yfinance` |
 
 **Response:**
 
@@ -110,6 +121,13 @@ Get GEX breakdown by strike price.
 ### `GET /api/gex/regime`
 
 Get current market regime based on GEX.
+
+**Parameters:**
+
+| Name       | Type   | Required | Description                     |
+| ---------- | ------ | -------- | ------------------------------- |
+| `symbol`   | string | No       | Ticker symbol (default: `SPX`)  |
+| `provider` | string | No       | Data provider e.g., `yfinance`  |
 
 **Response:**
 
@@ -266,15 +284,43 @@ Get current market status. Does not require API key.
 
 ---
 
+### `GET /api/data/providers`
+
+Get list of all supported dynamic data providers and the active default.
+
+**Response:**
+
+```json
+{
+  "providers": {
+    "yfinance": {
+      "has_greeks": true,
+      "needs_api_key": false,
+      "requires_auth": false
+    },
+    "tradier": {
+      "has_greeks": true,
+      "needs_api_key": true,
+      "requires_auth": true
+    }
+  },
+  "active_default": "yfinance"
+}
+```
+
+---
+
 ### `GET /api/data/options-chain`
 
-Get current 0DTE options chain. Requires Polygon API key.
+Get current 0DTE options chain. Supports different API sources dynamically.
 
 **Parameters:**
 
-| Name     | Type   | Default | Description       |
-| -------- | ------ | ------- | ----------------- |
-| `symbol` | string | `SPX`   | Underlying symbol |
+| Name         | Type   | Default | Description                            |
+| ------------ | ------ | ------- | -------------------------------------- |
+| `symbol`     | string | `SPX`   | Underlying symbol                      |
+| `expiration` | string | `None`  | Expiration date filter (YYYY-MM-DD)    |
+| `provider`   | string | `None`  | Specific data provider to use          |
 
 **Response:**
 
@@ -306,13 +352,14 @@ Get current 0DTE options chain. Requires Polygon API key.
 
 ### `GET /api/data/spot-price`
 
-Get current spot price. Requires Polygon API key.
+Get current spot price based on active provider.
 
 **Parameters:**
 
-| Name     | Type   | Default | Description             |
-| -------- | ------ | ------- | ----------------------- |
-| `symbol` | string | `SPX`   | Symbol to get price for |
+| Name       | Type   | Default | Description                     |
+| ---------- | ------ | ------- | ------------------------------- |
+| `symbol`   | string | `SPX`   | Symbol to get price for         |
+| `provider` | string | `None`  | Specific data provider to use   |
 
 **Response:**
 
@@ -380,7 +427,7 @@ Health check endpoint for monitoring.
   "timestamp": "2026-01-30T10:30:00-05:00",
   "checks": {
     "api": "healthy",
-    "polygon_api_key": "configured",
+    "data_provider": "yfinance",
     "cache": "healthy"
   }
 }
@@ -411,6 +458,6 @@ All errors return a JSON object:
 
 ## Rate Limiting
 
-- **Polygon.io Free Tier:** 5 requests/minute
-- The backend includes a `RateLimiter` class that automatically throttles requests.
-- Cached responses are returned when available to minimize API calls.
+- **Provider Dependent:** The rate limits vary by registered `DataProvider`.
+- The backend includes a `RateLimiter` class configured specifically for the active API limits (e.g. YFinance or Tradier tiers).
+- Most heavy calculations are cached and intelligently return stale requests or fallbacks if the limit is exceeded. 
