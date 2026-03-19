@@ -1,0 +1,217 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 390" width="900" height="390">
+<defs>
+
+  <pattern id="dg" x="0" y="0" width="16" height="16" patternUnits="userSpaceOnUse">
+    <circle cx="8" cy="8" r=".55" fill="#0b1d32"/>
+  </pattern>
+
+  <linearGradient id="bgm" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="#060e1e"/>
+    <stop offset="100%" stop-color="#020810"/>
+  </linearGradient>
+
+  <linearGradient id="pg" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="#00ff99" stop-opacity=".95"/>
+    <stop offset="100%" stop-color="#005c25" stop-opacity=".72"/>
+  </linearGradient>
+
+  <linearGradient id="ng" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="#7a0018" stop-opacity=".88"/>
+    <stop offset="100%" stop-color="#ff3355" stop-opacity=".96"/>
+  </linearGradient>
+
+  <linearGradient id="sideAcc" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%"   stop-color="#00e887"/>
+    <stop offset="45%"  stop-color="#00ccff"/>
+    <stop offset="100%" stop-color="#ff3355"/>
+  </linearGradient>
+
+</defs>
+
+<!-- ═══════════════ BACKGROUND ═══════════════ -->
+<rect width="900" height="390" fill="url(#bgm)" rx="10"/>
+<rect x="25" y="91" width="850" height="217" fill="url(#dg)"/>
+
+<!-- Frame accents -->
+<rect x="0"   y="0"   width="900" height="3"   rx="1.5" fill="#00ccff" opacity=".82"/>
+<rect x="897" y="3"   width="3"   height="384" rx="1.5" fill="url(#sideAcc)" opacity=".22"/>
+<rect x="0"   y="387" width="900" height="3"   rx="1.5" fill="#00ccff" opacity=".2"/>
+
+<!-- Ghost Γ watermark -->
+<text x="572" y="308" font-family="Georgia,Times New Roman,serif" font-size="252" fill="#00ccff" opacity=".022">Γ</text>
+
+<!-- ═══════════════ HEADER ═══════════════ -->
+<text x="24" y="30" font-family="Courier New,Courier,monospace" font-size="10" fill="#00ccff" letter-spacing="3.5" opacity=".88">0DTE · SPX · DEALER GAMMA</text>
+<text x="24" y="58" font-family="Courier New,Courier,monospace" font-size="22" fill="#b5d8f4" font-weight="bold" letter-spacing=".6">DEALER GAMMA EXPOSURE MONITOR</text>
+<text x="24" y="76" font-family="Courier New,Courier,monospace" font-size="9" fill="#1b4460" letter-spacing="1.4">REAL-TIME GEX · VECTORIZED BLACK-SCHOLES · WEBSOCKET STREAMING · FINAL YEAR QUANT PROJECT</text>
+
+<!-- Time + LIVE indicator -->
+<text x="862" y="19" font-family="Courier New,Courier,monospace" font-size="8" fill="#10304a" text-anchor="end">14:32:05 ET</text>
+<circle cx="876" cy="32" r="5" fill="#00e887">
+  <animate attributeName="r"       values="4;7;4"   dur="1.4s" repeatCount="indefinite"/>
+  <animate attributeName="opacity" values="1;.07;1" dur="1.4s" repeatCount="indefinite"/>
+</circle>
+<text x="864" y="36" font-family="Courier New,Courier,monospace" font-size="9" fill="#00e887" text-anchor="end" letter-spacing="2">LIVE</text>
+
+<!-- Regime history row -->
+<text x="607" y="28" font-family="Courier New,Courier,monospace" font-size="7" fill="#102840" text-anchor="end">RECENT</text>
+<circle cx="613" cy="24" r="4" fill="#cc2240" opacity=".75"/>
+<circle cx="624" cy="24" r="4" fill="#00e887" opacity=".75"/>
+<circle cx="635" cy="24" r="4" fill="#00e887" opacity=".75"/>
+<circle cx="646" cy="24" r="4" fill="#00e887" opacity=".75"/>
+<circle cx="657" cy="24" r="4" fill="#ffcc00" opacity=".75"/>
+<circle cx="668" cy="24" r="5.2" fill="#00e887" stroke="#00ff99" stroke-width="1"/>
+<text x="678" y="28" font-family="Courier New,Courier,monospace" font-size="7" fill="#00aa44">NOW</text>
+
+<!-- NET GEX panel -->
+<rect x="618" y="40" width="258" height="44" rx="4" fill="#011508" stroke="#006e2c" stroke-width=".65"/>
+<rect x="618" y="40" width="258" height="44" rx="4" fill="none" stroke="#00ff77" stroke-width=".4" opacity=".15">
+  <animate attributeName="opacity" values=".08;.45;.08" dur="2.8s" repeatCount="indefinite"/>
+</rect>
+<text x="634" y="57" font-family="Courier New,Courier,monospace" font-size="9"  fill="#004c22" letter-spacing="2">NET GEX</text>
+<text x="634" y="75" font-family="Courier New,Courier,monospace" font-size="19" fill="#00e887" font-weight="bold">+$2.4B</text>
+<rect x="730" y="47" width="136" height="20" rx="3" fill="#001f12" stroke="#009944" stroke-width=".5"/>
+<text x="798" y="61" font-family="Courier New,Courier,monospace" font-size="9.5" fill="#00cc66" text-anchor="middle" letter-spacing="1">● LONG GAMMA</text>
+
+<!-- ═══════════════ CHART ═══════════════ -->
+<rect x="25" y="91" width="850" height="217" rx="4" fill="none" stroke="#0c1e34" stroke-width="1"/>
+
+<!-- Grid lines -->
+<line x1="55" y1="152" x2="856" y2="152" stroke="#0c1e34" stroke-width=".5"/>
+<line x1="55" y1="248" x2="856" y2="248" stroke="#0c1e34" stroke-width=".5"/>
+
+<!-- Rotated Y-axis label -->
+<text x="14" y="200" font-family="Courier New,Courier,monospace" font-size="8.5" fill="#193650" text-anchor="middle" transform="rotate(-90,14,200)">GEX ($B)</text>
+
+<!-- Region annotation -->
+<text x="62" y="108" font-family="Courier New,Courier,monospace" font-size="7.5" fill="#007733" letter-spacing="1" opacity=".65">CALL GEX</text>
+<text x="62" y="300" font-family="Courier New,Courier,monospace" font-size="7.5" fill="#88001e" letter-spacing="1" opacity=".65">PUT GEX</text>
+
+<!-- Zero line (amber, pulsing) -->
+<line x1="55" y1="200" x2="856" y2="200" stroke="#ffcc00" stroke-width="1.2" stroke-dasharray="6 4">
+  <animate attributeName="opacity" values=".5;.95;.5" dur="4s" repeatCount="indefinite"/>
+</line>
+
+<!-- Peak glow halo (bar 4, strike 5860) -->
+<rect x="253" y="103" width="48" height="97" rx="2" fill="#00ff99" opacity=".052"/>
+
+<!-- ──── POSITIVE GEX BARS ──── -->
+<rect x="55"  y="190" width="36" height="10" fill="url(#pg)" rx="1">
+  <animate attributeName="opacity" values="1;1;.25;1;1;1;1;1;1;1;1" keyTimes="0;.38;.40;.42;.5;.6;.7;.8;.9;.95;1" dur="11s" begin="0s"    repeatCount="indefinite"/>
+</rect>
+<rect x="106" y="175" width="36" height="25" fill="url(#pg)" rx="1">
+  <animate attributeName="opacity" values="1;1;.25;1;1;1;1;1;1;1;1" keyTimes="0;.38;.40;.42;.5;.6;.7;.8;.9;.95;1" dur="11s" begin=".42s"  repeatCount="indefinite"/>
+</rect>
+<rect x="157" y="153" width="36" height="47" fill="url(#pg)" rx="1">
+  <animate attributeName="opacity" values="1;1;.25;1;1;1;1;1;1;1;1" keyTimes="0;.38;.40;.42;.5;.6;.7;.8;.9;.95;1" dur="11s" begin=".84s"  repeatCount="indefinite"/>
+</rect>
+<rect x="208" y="128" width="36" height="72" fill="url(#pg)" rx="1">
+  <animate attributeName="opacity" values="1;1;.25;1;1;1;1;1;1;1;1" keyTimes="0;.38;.40;.42;.5;.6;.7;.8;.9;.95;1" dur="11s" begin="1.26s" repeatCount="indefinite"/>
+</rect>
+<!-- Peak bar (5860) -->
+<rect x="259" y="105" width="36" height="95" fill="url(#pg)" rx="1">
+  <animate attributeName="opacity" values="1;1;.25;1;1;1;1;1;1;1;1" keyTimes="0;.38;.40;.42;.5;.6;.7;.8;.9;.95;1" dur="11s" begin="1.68s" repeatCount="indefinite"/>
+</rect>
+<rect x="259" y="105" width="36" height="2" fill="#00ffaa" rx="1" opacity=".9"/>
+<rect x="310" y="120" width="36" height="80" fill="url(#pg)" rx="1">
+  <animate attributeName="opacity" values="1;1;.25;1;1;1;1;1;1;1;1" keyTimes="0;.38;.40;.42;.5;.6;.7;.8;.9;.95;1" dur="11s" begin="2.1s"  repeatCount="indefinite"/>
+</rect>
+<rect x="361" y="143" width="36" height="57" fill="url(#pg)" rx="1">
+  <animate attributeName="opacity" values="1;1;.25;1;1;1;1;1;1;1;1" keyTimes="0;.38;.40;.42;.5;.6;.7;.8;.9;.95;1" dur="11s" begin="2.52s" repeatCount="indefinite"/>
+</rect>
+<rect x="412" y="168" width="36" height="32" fill="url(#pg)" rx="1">
+  <animate attributeName="opacity" values="1;1;.25;1;1;1;1;1;1;1;1" keyTimes="0;.38;.40;.42;.5;.6;.7;.8;.9;.95;1" dur="11s" begin="2.94s" repeatCount="indefinite"/>
+</rect>
+<rect x="463" y="192" width="36" height="8"  fill="url(#pg)" rx="1">
+  <animate attributeName="opacity" values="1;1;.25;1;1;1;1;1;1;1;1" keyTimes="0;.38;.40;.42;.5;.6;.7;.8;.9;.95;1" dur="11s" begin="3.36s" repeatCount="indefinite"/>
+</rect>
+
+<!-- Trough glow halo (bar 12, strike 5940) -->
+<rect x="661" y="200" width="48" height="95" rx="2" fill="#ff3355" opacity=".052"/>
+
+<!-- ──── NEGATIVE GEX BARS ──── -->
+<rect x="514" y="200" width="36" height="14" fill="url(#ng)" rx="1">
+  <animate attributeName="opacity" values="1;1;.25;1;1;1;1;1;1;1;1" keyTimes="0;.38;.40;.42;.5;.6;.7;.8;.9;.95;1" dur="11s" begin="3.78s" repeatCount="indefinite"/>
+</rect>
+<rect x="565" y="200" width="36" height="42" fill="url(#ng)" rx="1">
+  <animate attributeName="opacity" values="1;1;.25;1;1;1;1;1;1;1;1" keyTimes="0;.38;.40;.42;.5;.6;.7;.8;.9;.95;1" dur="11s" begin="4.2s"  repeatCount="indefinite"/>
+</rect>
+<rect x="616" y="200" width="36" height="73" fill="url(#ng)" rx="1">
+  <animate attributeName="opacity" values="1;1;.25;1;1;1;1;1;1;1;1" keyTimes="0;.38;.40;.42;.5;.6;.7;.8;.9;.95;1" dur="11s" begin="4.62s" repeatCount="indefinite"/>
+</rect>
+<!-- Trough bar (5940) -->
+<rect x="667" y="200" width="36" height="95" fill="url(#ng)" rx="1">
+  <animate attributeName="opacity" values="1;1;.25;1;1;1;1;1;1;1;1" keyTimes="0;.38;.40;.42;.5;.6;.7;.8;.9;.95;1" dur="11s" begin="5.04s" repeatCount="indefinite"/>
+</rect>
+<rect x="667" y="293" width="36" height="2" fill="#ff4466" rx="1" opacity=".9"/>
+<rect x="718" y="200" width="36" height="68" fill="url(#ng)" rx="1">
+  <animate attributeName="opacity" values="1;1;.25;1;1;1;1;1;1;1;1" keyTimes="0;.38;.40;.42;.5;.6;.7;.8;.9;.95;1" dur="11s" begin="5.46s" repeatCount="indefinite"/>
+</rect>
+<rect x="769" y="200" width="36" height="40" fill="url(#ng)" rx="1">
+  <animate attributeName="opacity" values="1;1;.25;1;1;1;1;1;1;1;1" keyTimes="0;.38;.40;.42;.5;.6;.7;.8;.9;.95;1" dur="11s" begin="5.88s" repeatCount="indefinite"/>
+</rect>
+<rect x="820" y="200" width="36" height="17" fill="url(#ng)" rx="1">
+  <animate attributeName="opacity" values="1;1;.25;1;1;1;1;1;1;1;1" keyTimes="0;.38;.40;.42;.5;.6;.7;.8;.9;.95;1" dur="11s" begin="6.3s"  repeatCount="indefinite"/>
+</rect>
+
+<!-- Zero Gamma Level vertical marker -->
+<line x1="500" y1="91" x2="500" y2="308" stroke="#ffcc00" stroke-width=".7" stroke-dasharray="3 5" opacity=".5"/>
+<rect x="466" y="92" width="69" height="13" rx="2" fill="#130f00"/>
+<text x="500" y="102" font-family="Courier New,Courier,monospace" font-size="7.5" fill="#ffcc00" text-anchor="middle" letter-spacing=".4">ZERO Γ LEVEL</text>
+
+<!-- Scan line animation -->
+<rect x="55" y="91" width="2.5" height="217" fill="#00ccff" opacity="0">
+  <animate attributeName="x"       from="55" to="856"              dur="4.5s" repeatCount="indefinite"/>
+  <animate attributeName="opacity" values="0;.62;.48;0" keyTimes="0;.022;.92;1" dur="4.5s" repeatCount="indefinite"/>
+</rect>
+
+<!-- X-axis line -->
+<line x1="55" y1="308" x2="856" y2="308" stroke="#0c1e34" stroke-width=".5"/>
+
+<!-- X-axis labels (even bars) -->
+<text x="73"  y="320" font-family="Courier New,Courier,monospace" font-size="7.5" fill="#1d3d58" text-anchor="middle">5820</text>
+<text x="175" y="320" font-family="Courier New,Courier,monospace" font-size="7.5" fill="#1d3d58" text-anchor="middle">5840</text>
+<text x="277" y="320" font-family="Courier New,Courier,monospace" font-size="7.5" fill="#1d3d58" text-anchor="middle">5860</text>
+<text x="379" y="320" font-family="Courier New,Courier,monospace" font-size="7.5" fill="#1d3d58" text-anchor="middle">5880</text>
+<text x="481" y="320" font-family="Courier New,Courier,monospace" font-size="7.5" fill="#1d3d58" text-anchor="middle">5900</text>
+<text x="583" y="320" font-family="Courier New,Courier,monospace" font-size="7.5" fill="#1d3d58" text-anchor="middle">5920</text>
+<text x="685" y="320" font-family="Courier New,Courier,monospace" font-size="7.5" fill="#1d3d58" text-anchor="middle">5940</text>
+<text x="787" y="320" font-family="Courier New,Courier,monospace" font-size="7.5" fill="#1d3d58" text-anchor="middle">5960</text>
+
+<text x="456" y="330" font-family="Courier New,Courier,monospace" font-size="6.5" fill="#0d2030" text-anchor="middle" letter-spacing="1">SPX STRIKE PRICE</text>
+
+<!-- ═══════════════ BOTTOM STRIP ═══════════════ -->
+<line x1="25" y1="338" x2="875" y2="338" stroke="#0c1e34" stroke-width=".5"/>
+
+<!-- Tech badges -->
+<rect x="25"  y="343" width="70" height="17" rx="3" fill="#0c1c30" stroke="#162840" stroke-width=".5"/>
+<text x="60"  y="355" font-family="Courier New,Courier,monospace" font-size="8" fill="#4d8fc4" text-anchor="middle">Python 3.13</text>
+
+<rect x="101" y="343" width="50" height="17" rx="3" fill="#0c1c30" stroke="#162840" stroke-width=".5"/>
+<text x="126" y="355" font-family="Courier New,Courier,monospace" font-size="8" fill="#1db588" text-anchor="middle">FastAPI</text>
+
+<rect x="157" y="343" width="60" height="17" rx="3" fill="#0c1c30" stroke="#162840" stroke-width=".5"/>
+<text x="187" y="355" font-family="Courier New,Courier,monospace" font-size="8" fill="#909090" text-anchor="middle">Next.js 16</text>
+
+<rect x="223" y="343" width="68" height="17" rx="3" fill="#0c1c30" stroke="#162840" stroke-width=".5"/>
+<text x="257" y="355" font-family="Courier New,Courier,monospace" font-size="8" fill="#3178c6" text-anchor="middle">TypeScript</text>
+
+<rect x="297" y="343" width="80" height="17" rx="3" fill="#0c1c30" stroke="#162840" stroke-width=".5"/>
+<text x="337" y="355" font-family="Courier New,Courier,monospace" font-size="8" fill="#336791" text-anchor="middle">PostgreSQL 16</text>
+
+<rect x="383" y="343" width="66" height="17" rx="3" fill="#0c1c30" stroke="#162840" stroke-width=".5"/>
+<text x="416" y="355" font-family="Courier New,Courier,monospace" font-size="8" fill="#4f8cbd" text-anchor="middle">WebSocket</text>
+
+<rect x="455" y="343" width="46" height="17" rx="3" fill="#0c1c30" stroke="#162840" stroke-width=".5"/>
+<text x="478" y="355" font-family="Courier New,Courier,monospace" font-size="8" fill="#2496ed" text-anchor="middle">Docker</text>
+
+<rect x="507" y="343" width="62" height="17" rx="3" fill="#0c1c30" stroke="#162840" stroke-width=".5"/>
+<text x="538" y="355" font-family="Courier New,Courier,monospace" font-size="8" fill="#4a70b8" text-anchor="middle">Polygon.io</text>
+
+<!-- Stats (right-aligned) -->
+<text x="875" y="355" font-family="Courier New,Courier,monospace" font-size="8" fill="#1c3c58" text-anchor="end">322 tests  ·  &lt;1ms vectorized  ·  1000+ contracts</text>
+
+<!-- Formula line -->
+<text x="25" y="374" font-family="Courier New,Courier,monospace" font-size="8.5" fill="#112438" letter-spacing=".25">GEX&#8201;=&#8201;OI&#8201;×&#8201;Γ&#8201;×&#8201;100&#8201;×&#8201;S²   ·   NetGEX&#8201;=&#8201;Σ(Put GEX)&#8201;+&#8201;Σ(Call GEX)   ·   Zero&#8201;Γ&#8201;Level via linear interpolation</text>
+
+</svg>

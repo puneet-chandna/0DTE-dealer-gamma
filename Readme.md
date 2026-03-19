@@ -10,7 +10,24 @@ Real-time dashboard to monitor Dealer Gamma Exposure for 0DTE (zero-days-to-expi
 
 **Goal:** Identify the "Zero Gamma Level" and "Net GEX" to predict intraday volatility regimes.
 
+<img
+  src="assets/0dte-poster-brutalist.svg"
+  alt="0DTE Dealer GEX Monitor brutalist poster"
+  style="width: 100%; max-width: 900px; height: auto;"
+/>
+
 ---
+
+## Table of Contents
+- [Features](#features)
+- [Tech Stack](#tech-stack)
+- [Quick Start](#quick-start)
+- [Key Concepts](#key-concepts)
+- [Tests](#tests)
+- [Documentation](#documentation)
+- [Deployment](#deployment)
+- [Architecture Rules](#architecture-rules)
+- [License](#license)
 
 ## ✨ Features
 
@@ -70,7 +87,7 @@ odte-dealer-gamma/
 ### 1. Clone and Setup
 
 ```bash
-git clone https://github.com/yourusername/odte-dealer-gamma.git
+git clone https://github.com/<your-org>/odte-dealer-gamma.git
 cd odte-dealer-gamma
 
 # Copy environment files
@@ -79,6 +96,18 @@ cp frontend/.env.example frontend/.env.local
 
 # Add your Polygon.io API key to backend/.env
 ```
+
+### Environment Variables (minimum)
+
+Backend (`backend/.env`):
+- `DATABASE_URL` (Postgres connection string)
+- `HOST`, `PORT`
+- `ENVIRONMENT` (development | staging | production)
+- `CORS_ORIGINS` (JSON array string)
+
+Frontend (`frontend/.env.local`):
+- `NEXT_PUBLIC_API_URL=http://localhost:8000`
+- `NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws`
 
 ### 2. Start Database
 
@@ -114,9 +143,17 @@ Dashboard available at: http://localhost:3000
 
 ### GEX Formula
 
+Black-Scholes Gamma (Γ) is computed with a dividend yield suitable for SPX (approximately `q ≈ 0.015`).
+
+For each option contract `i`, the raw (magnitude) gamma exposure is:
+
+```txt
+raw_gex_i = OI_i × Γ_i × 100 × S²
 ```
-GEX_i = OI_i × Γ_i × 100 × S²
-```
+
+Then the project applies the sign convention by option type:
+- Calls contribute **negative** GEX
+- Puts contribute **positive** GEX
 
 | Symbol | Description                               |
 | ------ | ----------------------------------------- |
@@ -132,7 +169,7 @@ GEX_i = OI_i × Γ_i × 100 × S²
 | Buy Calls       | Short Calls     | **Negative** |
 | Buy Puts        | Sell Puts       | **Positive** |
 
-**Net GEX = Σ(Put GEX) + Σ(Call GEX)**
+**Net GEX = Σ(signed Put GEX) + Σ(signed Call GEX)** (calls are already signed negative).
 
 ### Market Regimes
 
@@ -201,4 +238,4 @@ MIT
 
 ---
 
-**Built with ❤️ for quantitative traders and market structure enthusiasts.**
+**Built with love for quantitative traders and market structure enthusiasts.**

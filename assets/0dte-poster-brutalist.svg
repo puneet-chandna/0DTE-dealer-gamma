@@ -1,0 +1,138 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 400" width="900" height="400">
+<defs>
+  <linearGradient id="posG" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%"   stop-color="#111"/>
+    <stop offset="100%" stop-color="#333"/>
+  </linearGradient>
+  <linearGradient id="negG" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%"   stop-color="#555"/>
+    <stop offset="100%" stop-color="#222"/>
+  </linearGradient>
+</defs>
+
+<!-- Raw white background -->
+<rect width="900" height="400" fill="#f7f5f0"/>
+
+<!-- Heavy black border -->
+<rect x="0" y="0" width="900" height="400" fill="none" stroke="#111" stroke-width="8"/>
+
+<!-- Title block - brutal sans-like via letter-spacing and weight -->
+<rect x="0" y="0" width="900" height="76" fill="#111"/>
+<text x="22" y="30" font-family="'Arial Black',Arial,sans-serif" font-size="9"  fill="#f7f5f0" letter-spacing="6">FINAL YEAR QUANT PROJECT · VIT CHENNAI</text>
+<text x="22" y="64" font-family="'Arial Black',Arial,sans-serif" font-size="33" fill="#f7f5f0" letter-spacing="-1">0DTE DEALER GEX MONITOR</text>
+
+<!-- Accent stripe -->
+<rect x="0" y="76" width="900" height="5" fill="#e8c000"/>
+
+<!-- Ticker sub-row -->
+<rect x="0" y="81" width="900" height="22" fill="#eeece6"/>
+<text x="18" y="96"  font-family="'Courier New',monospace" font-size="9" fill="#111">SPX  ·</text>
+<text x="64" y="96"  font-family="'Courier New',monospace" font-size="9" fill="#111">NET GEX +$2.4B  ·</text>
+<text x="194" y="96" font-family="'Courier New',monospace" font-size="9" fill="#111">REGIME: LONG GAMMA  ·</text>
+<text x="358" y="96" font-family="'Courier New',monospace" font-size="9" fill="#111">ZERO Γ = 5902  ·</text>
+<text x="480" y="96" font-family="'Courier New',monospace" font-size="9" fill="#111">14:32:05 ET  ·</text>
+<text x="570" y="96" font-family="'Courier New',monospace" font-size="9" fill="#111">UPDATE 5s  ·</text>
+<text x="650" y="96" font-family="'Courier New',monospace" font-size="9" fill="#111">322 TESTS PASS</text>
+<!-- Animate ticker text scrolling illusion with opacity -->
+<text x="860" y="96" font-family="'Courier New',monospace" font-size="9" fill="#111">▶</text>
+
+<!-- Chart area -->
+<rect x="18" y="110" width="864" height="220" fill="none" stroke="#ccc" stroke-width=".5"/>
+
+<!-- Grid lines -->
+<g stroke="#ddd" stroke-width=".5">
+  <line x1="18" y1="140" x2="882" y2="140"/>
+  <line x1="18" y1="165" x2="882" y2="165"/>
+  <line x1="18" y1="190" x2="882" y2="190"/>
+  <line x1="18" y1="215" x2="882" y2="215"/>
+  <line x1="18" y1="245" x2="882" y2="245"/>
+  <line x1="18" y1="270" x2="882" y2="270"/>
+  <line x1="18" y1="295" x2="882" y2="295"/>
+</g>
+
+<!-- Heavy zero line -->
+<line x1="18" y1="220" x2="882" y2="220" stroke="#111" stroke-width="2.5"/>
+
+<!-- Positive GEX bars (black, raw) -->
+<rect x="24"  y="212" width="44" height="8"   fill="url(#posG)"/>
+<rect x="76"  y="201" width="44" height="19"  fill="url(#posG)"/>
+<rect x="128" y="186" width="44" height="34"  fill="url(#posG)"/>
+<rect x="180" y="168" width="44" height="52"  fill="url(#posG)"/>
+<rect x="232" y="142" width="44" height="78"  fill="url(#posG)">
+  <animate attributeName="y"      values="142;139;142;145;142" dur="3s" repeatCount="indefinite"/>
+  <animate attributeName="height" values="78;81;78;75;78"      dur="3s" repeatCount="indefinite"/>
+</rect>
+<rect x="284" y="156" width="44" height="64"  fill="url(#posG)"/>
+<rect x="336" y="174" width="44" height="46"  fill="url(#posG)"/>
+<rect x="388" y="196" width="44" height="24"  fill="url(#posG)"/>
+<rect x="440" y="212" width="44" height="8"   fill="url(#posG)"/>
+
+<!-- Peak accent: yellow stripe top -->
+<rect x="232" y="140" width="44" height="4" fill="#e8c000"/>
+
+<!-- Negative GEX bars (gray, raw) -->
+<rect x="500" y="220" width="44" height="12"  fill="url(#negG)"/>
+<rect x="552" y="220" width="44" height="38"  fill="url(#negG)"/>
+<rect x="604" y="220" width="44" height="66"  fill="url(#negG)"/>
+<rect x="656" y="220" width="44" height="90"  fill="url(#negG)">
+  <animate attributeName="height" values="90;94;90;86;90" dur="3.4s" repeatCount="indefinite"/>
+</rect>
+<rect x="708" y="220" width="44" height="62"  fill="url(#negG)"/>
+<rect x="760" y="220" width="44" height="36"  fill="url(#negG)"/>
+<rect x="812" y="220" width="44" height="16"  fill="url(#negG)"/>
+
+<!-- Trough accent -->
+<rect x="656" y="308" width="44" height="4" fill="#666"/>
+
+<!-- Zero Gamma marker (bold) -->
+<line x1="480" y1="110" x2="480" y2="330" stroke="#111" stroke-width="1.5" stroke-dasharray="5 4"/>
+<rect x="444" y="110" width="72" height="16" fill="#e8c000"/>
+<text x="480" y="122" font-family="'Arial Black',Arial,sans-serif" font-size="7.5" fill="#111" text-anchor="middle" letter-spacing=".2">ZERO Γ LEVEL</text>
+
+<!-- X-axis labels -->
+<g font-family="'Courier New',monospace" font-size="8" fill="#555">
+  <text x="46"  y="340" text-anchor="middle">5820</text>
+  <text x="98"  y="340" text-anchor="middle">5830</text>
+  <text x="150" y="340" text-anchor="middle">5840</text>
+  <text x="202" y="340" text-anchor="middle">5850</text>
+  <text x="254" y="340" text-anchor="middle">5860</text>
+  <text x="306" y="340" text-anchor="middle">5870</text>
+  <text x="358" y="340" text-anchor="middle">5880</text>
+  <text x="410" y="340" text-anchor="middle">5890</text>
+  <text x="462" y="340" text-anchor="middle">5900</text>
+  <text x="522" y="340" text-anchor="middle">5910</text>
+  <text x="574" y="340" text-anchor="middle">5920</text>
+  <text x="626" y="340" text-anchor="middle">5930</text>
+  <text x="678" y="340" text-anchor="middle">5940</text>
+  <text x="730" y="340" text-anchor="middle">5950</text>
+  <text x="782" y="340" text-anchor="middle">5960</text>
+  <text x="834" y="340" text-anchor="middle">5970</text>
+</g>
+<text x="450" y="352" font-family="'Arial Black',Arial,sans-serif" font-size="7" fill="#888" text-anchor="middle" letter-spacing="3">SPX STRIKE</text>
+
+<!-- Right-side data block -->
+<rect x="862" y="110" width="20" height="220" fill="#111"/>
+<!-- Vertical text substitute (just ticks) -->
+<g fill="#f7f5f0">
+  <rect x="865" y="139" width="14" height="1.2"/>
+  <rect x="865" y="164" width="14" height="1.2"/>
+  <rect x="865" y="189" width="14" height="1.2"/>
+  <rect x="865" y="219" width="14" height="2"/>
+  <rect x="865" y="244" width="14" height="1.2"/>
+  <rect x="865" y="269" width="14" height="1.2"/>
+  <rect x="865" y="294" width="14" height="1.2"/>
+</g>
+
+<!-- Bottom row: tech + formula -->
+<rect x="0" y="360" width="900" height="40" fill="#111"/>
+<line x1="0" y1="360" x2="900" y2="360" stroke="#e8c000" stroke-width="3"/>
+<text x="18" y="376" font-family="'Courier New',monospace" font-size="8.5" fill="#e8c000">GEX = OI × Γ × 100 × S²</text>
+<text x="18" y="392" font-family="'Courier New',monospace" font-size="7"   fill="#888">Python 3.13 · FastAPI · Next.js 16 · TypeScript · NumPy (vectorized) · PostgreSQL · Docker · Polygon.io</text>
+<text x="882" y="392" font-family="'Courier New',monospace" font-size="7"  fill="#555" text-anchor="end">puneet-chandna</text>
+
+<!-- Live blink -->
+<circle cx="874" cy="374" r="5" fill="#e8c000">
+  <animate attributeName="opacity" values="1;0;1" dur="1s" repeatCount="indefinite"/>
+</circle>
+<text x="864" y="378" font-family="'Courier New',monospace" font-size="7" fill="#e8c000" text-anchor="end">LIVE</text>
+</svg>
