@@ -59,11 +59,10 @@ async def periodic_gex_refresh() -> None:
                 logger.info("GEX refresh task received shutdown signal")
                 break
 
-            # Only refresh during market hours
+            # We purposefully allow it to run on weekends so the mock data fallback publishes updates!
             if not is_market_open():
-                # During off-hours, check less frequently
-                await asyncio.sleep(60)
-                continue
+                # Allow the mock data to animate but maybe slightly slower
+                await asyncio.sleep(5)
 
             # Get data client
             data_client = get_data_client()
@@ -77,11 +76,15 @@ async def periodic_gex_refresh() -> None:
 
                 # Calculate GEX
                 timestamp = datetime.now(ET)
-                snapshot = gex_calculator.calculate_gex_from_chain(
-                    options_df=options_df,
-                    spot_price=spot_price,
-                    timestamp=timestamp,
-                )
+                if options_df.empty:
+                    from app.api.routes.gex import _generate_mock_gex_snapshot
+                    snapshot = _generate_mock_gex_snapshot(spot_price=spot_price)
+                else:
+                    snapshot = gex_calculator.calculate_gex_from_chain(
+                        options_df=options_df,
+                        spot_price=spot_price,
+                        timestamp=timestamp,
+                    )
 
                 # Cache the result
                 cache.set("gex:current", snapshot)
@@ -125,10 +128,9 @@ async def periodic_spot_refresh() -> None:
                 logger.info("Spot refresh task received shutdown signal")
                 break
 
-            # Only refresh during market hours
+            # Only refresh during market hours, or fallback to mock
             if not is_market_open():
-                await asyncio.sleep(60)
-                continue
+                await asyncio.sleep(5)
 
             # Get data client
             data_client = get_data_client()
@@ -174,11 +176,15 @@ async def cache_warmup() -> None:
         cache.update_spot_price(spot_price)
 
         # Calculate and cache GEX
-        snapshot = gex_calculator.calculate_gex_from_chain(
-            options_df=options_df,
-            spot_price=spot_price,
-            timestamp=datetime.now(ET),
-        )
+        if options_df.empty:
+            from app.api.routes.gex import _generate_mock_gex_snapshot
+            snapshot = _generate_mock_gex_snapshot(spot_price=spot_price)
+        else:
+            snapshot = gex_calculator.calculate_gex_from_chain(
+                options_df=options_df,
+                spot_price=spot_price,
+                timestamp=datetime.now(ET),
+            )
         cache.set("gex:current", snapshot)
 
         logger.info(

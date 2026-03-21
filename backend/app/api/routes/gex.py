@@ -75,9 +75,14 @@ async def _get_live_gex_snapshot(
         )
 
         if options_df.empty:
-            raise ValueError(f"No valid 0DTE options data found for {symbol} on {data_client.provider_name}")
+            logger.warning(f"No valid 0DTE options data found for {symbol} (possibly weekend). Falling back to mock data.")
+            mock_snapshot = _generate_mock_gex_snapshot(spot_price=spot_price)
+            raw = mock_snapshot.model_dump()
+            raw["provider"] = f"mock ({data_client.provider_name} empty)"
+            return raw
 
-        # Calculate GEX
+        # Calculate live GEX
+
         snapshot = gex_calculator.calculate_gex_from_chain(
             options_df=options_df,
             spot_price=spot_price,
