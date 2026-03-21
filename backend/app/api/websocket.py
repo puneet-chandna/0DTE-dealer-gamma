@@ -132,6 +132,16 @@ async def _get_gex_update(settings: Settings) -> dict:
     # Try to get from cache first
     cached = cache.get("gex:current")
     if cached is not None:
+        print(f"DEBUG WS CACHE: type={type(cached)}")
+        if isinstance(cached, str):
+            import json
+            cached = json.loads(cached)
+            
+        if isinstance(cached, dict):
+            from app.models.schemas import GEXSnapshot
+            # Some fields might be missing or date strings, GEXSnapshot handles them
+            cached = GEXSnapshot(**cached)
+            
         gex_calculator = get_gex_calculator()
         regime, _, _ = gex_calculator.determine_regime(cached.net_gex)
 
@@ -253,7 +263,7 @@ async def websocket_gex_stream(websocket: WebSocket) -> None:
             except WebSocketDisconnect:
                 raise
             except Exception as e:
-                logger.error(f"Error in WebSocket loop: {e}")
+                logger.exception(f"Error in WebSocket loop: {e}")
                 # Send error message to client
                 try:
                     await websocket.send_json({
