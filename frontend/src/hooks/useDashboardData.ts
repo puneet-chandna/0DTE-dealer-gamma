@@ -235,9 +235,9 @@ export function useIntradayTimeSeries() {
     []
   );
 
-  // Accumulate data points from WebSocket updates
+  // Accumulate data points from WebSocket OR REST updates
   useEffect(() => {
-    if (isRealtime && gexData && lastUpdateTime) {
+    if (gexData && lastUpdateTime) {
       dispatch({
         type: 'add',
         point: {
@@ -247,7 +247,7 @@ export function useIntradayTimeSeries() {
         },
       });
     }
-  }, [gexData, isRealtime, lastUpdateTime]);
+  }, [gexData, lastUpdateTime]);
 
   // Clear time series (e.g., on market close)
   const clearTimeSeries = useCallback(() => {
