@@ -319,12 +319,14 @@ class YFinanceClient(DataProvider):
         if df.empty:
             return df
         
-        if target_date is None:
-            target_date = get_current_trading_date()
-        
         # Convert expiration column to date
         df = df.copy()
         df["expiration_date"] = pd.to_datetime(df["expiration"]).dt.date
+        
+        if target_date is None:
+            # If no target date is forced, just use the nearest expiration we actually fetched
+            # This allows weekend queries to naturally use Monday's data seamlessly
+            target_date = df["expiration_date"].min()
         
         # Filter to target date
         mask = df["expiration_date"] == target_date
