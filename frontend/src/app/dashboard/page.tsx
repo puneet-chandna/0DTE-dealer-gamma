@@ -73,7 +73,7 @@ export default function DashboardPage() {
   const barChartData: GEXChartDataPoint[] = useMemo(() => {
     if (!effectiveStrikesData?.strikes || !effectiveStrikesData?.gex_values) return [];
 
-    return effectiveStrikesData.strikes.map((strike, index) => ({
+    return effectiveStrikesData.strikes.map((strike: number, index: number) => ({
       strike,
       gex: effectiveStrikesData.gex_values[index],
       gexBillions: effectiveStrikesData.gex_values[index] / 1e9,
@@ -210,12 +210,12 @@ export default function DashboardPage() {
                         <div className="flex h-[250px] items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/50">
                           <div className="text-center">
                             <p className="text-sm text-zinc-500">
-                              {isRealtime
+                              {isLoading
                                 ? 'Accumulating real-time data...'
-                                : 'Waiting for WebSocket connection...'}
+                                : 'Waiting for telemetry...'}
                             </p>
                             <p className="mt-1 text-xs text-zinc-600">
-                              Intraday GEX timeline will build up during market hours
+                              Intraday GEX timeline will build up as data arrives
                             </p>
                           </div>
                         </div>
