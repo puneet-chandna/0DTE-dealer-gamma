@@ -1,11 +1,5 @@
 # 0DTE Dealer Gamma Exposure (GEX) Monitor
 
-[![Python](https://img.shields.io/badge/Python-3.13-blue.svg)](https://python.org)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green.svg)](https://fastapi.tiangolo.com)
-[![Next.js](https://img.shields.io/badge/Next.js-16-black.svg)](https://nextjs.org)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.7-blue.svg)](https://typescriptlang.org)
-[![Tests](https://img.shields.io/badge/Tests-322%20passing-brightgreen.svg)](#tests)
-
 Real-time dashboard to monitor Dealer Gamma Exposure for 0DTE (zero-days-to-expiration) options on SPX.
 
 **Goal:** Identify the "Zero Gamma Level" and "Net GEX" to predict intraday volatility regimes.
