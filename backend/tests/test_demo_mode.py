@@ -4,6 +4,7 @@ from datetime import date, datetime
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -86,6 +87,13 @@ def test_demo_websocket_identifies_demo_stream(monkeypatch):
     assert update["data"]["is_demo"] is True
 
 
+def test_websocket_rejects_unsupported_symbol():
+    """WebSocket should reject symbols outside the allowlist."""
+    with pytest.raises(Exception):
+        with client.websocket_connect("/ws/gex-stream?symbol=bad-symbol"):
+            pass
+
+
 def test_demo_session_is_deterministic_for_same_bucket():
     """Demo session should be stable inside a time bucket and change across buckets."""
     from app.core.demo_data import DemoDataService
@@ -108,3 +116,14 @@ def test_demo_session_is_deterministic_for_same_bucket():
         or next_bucket.spot_price != first.spot_price
         or next_bucket.zero_gamma_level != first.zero_gamma_level
     )
+
+
+def test_demo_session_treats_naive_datetimes_as_utc():
+    """Naive datetimes should be interpreted consistently before ET conversion."""
+    from app.core.demo_data import DemoDataService
+
+    normalized = DemoDataService._normalize_now(datetime(2026, 3, 20, 14, 30, 0))
+
+    assert normalized.tzinfo == ET
+    assert normalized.hour == 10
+    assert normalized.minute == 30

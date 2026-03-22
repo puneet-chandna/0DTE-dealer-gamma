@@ -27,6 +27,7 @@ ET = ZoneInfo("America/New_York")
 
 # WebSocket update interval (seconds)
 WS_UPDATE_INTERVAL = 5
+SUPPORTED_SYMBOLS = {"SPX", "SPY", "QQQ", "IWM"}
 
 
 class ConnectionManager:
@@ -246,10 +247,19 @@ async def websocket_gex_stream(websocket: WebSocket) -> None:
         "timestamp": "2024-01-15T10:30:00-05:00"
     }
     """
+    demo = websocket.query_params.get("demo", "false").lower() == "true"
+    symbol = websocket.query_params.get("symbol", "SPX").strip().upper()
+
+    if symbol not in SUPPORTED_SYMBOLS:
+        logger.warning(f"Rejected websocket connection with unsupported symbol '{symbol}'")
+        await websocket.close(
+            code=1008,
+            reason=f"Unsupported symbol '{symbol}'. Supported symbols: {', '.join(sorted(SUPPORTED_SYMBOLS))}",
+        )
+        return
+
     await manager.connect(websocket)
     settings = get_settings()
-    demo = websocket.query_params.get("demo", "false").lower() == "true"
-    symbol = websocket.query_params.get("symbol", "SPX")
 
     try:
         # Send initial connection message

@@ -40,7 +40,7 @@ function NavBarComponent() {
   const statusLabel = demoModeEnabled
     ? 'Demo'
     : marketStatus
-      ? marketStatusLabel[marketStatus.status]
+      ? marketStatusLabel[marketStatus.status] ?? 'Closed'
       : 'Checking';
 
   const statusTone = demoModeEnabled

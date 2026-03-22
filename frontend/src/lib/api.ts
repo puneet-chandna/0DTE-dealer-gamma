@@ -164,18 +164,23 @@ export const analyticsAPI = {
   },
   getTechnicalIndicators: async (
     symbol: string,
-    period: string,
+    period: string | number,
     interval: string,
-    indicators: string = 'ATR,RSI,BBANDS',
+    indicators: string | string[] = 'ATR,RSI,BBANDS',
     options?: DemoRequestOptions
   ) => {
+    const normalizedPeriod = typeof period === 'number' ? String(period) : period;
+    const normalizedIndicators = Array.isArray(indicators)
+      ? indicators.join(',')
+      : indicators;
+
     const response = await api.get('/api/analytics/technical-indicators', {
       params: withDemoParam(
         {
           symbol,
-          period,
+          period: normalizedPeriod,
           interval,
-          indicators,
+          indicators: normalizedIndicators,
         },
         options
       ),

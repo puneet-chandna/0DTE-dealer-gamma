@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from functools import lru_cache
 from typing import Iterable, Optional
 from zoneinfo import ZoneInfo
@@ -402,7 +402,7 @@ class DemoDataService:
         if now is None:
             return datetime.now(ET)
         if now.tzinfo is None:
-            return now.replace(tzinfo=ET)
+            return now.replace(tzinfo=timezone.utc).astimezone(ET)
         return now.astimezone(ET)
 
     @staticmethod
