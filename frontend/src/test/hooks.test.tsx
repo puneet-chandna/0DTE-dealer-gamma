@@ -50,6 +50,7 @@ vi.mock('@/stores/uiStore', () => ({
   useUIStore: () => ({
     autoRefreshEnabled: true,
     refreshInterval: 5,
+    demoModeEnabled: true,
   }),
 }));
 
@@ -73,19 +74,19 @@ function createWrapper() {
 
 describe('queryKeys', () => {
   it('should have correct structure for gex keys', () => {
-    expect(queryKeys.gex.current).toEqual(['gex', 'current']);
-    expect(queryKeys.gex.strikes).toEqual(['gex', 'strikes']);
-    expect(queryKeys.gex.regime).toEqual(['gex', 'regime']);
+    expect(queryKeys.gex.current('demo')).toEqual(['gex', 'demo', 'current']);
+    expect(queryKeys.gex.strikes('demo')).toEqual(['gex', 'demo', 'strikes']);
+    expect(queryKeys.gex.regime('demo')).toEqual(['gex', 'demo', 'regime']);
   });
 
   it('should generate historical keys with dates', () => {
-    const key = queryKeys.gex.historical('2025-01-01', '2025-01-31');
-    expect(key).toEqual(['gex', 'historical', '2025-01-01', '2025-01-31']);
+    const key = queryKeys.gex.historical('demo', '2025-01-01', '2025-01-31');
+    expect(key).toEqual(['gex', 'demo', 'historical', '2025-01-01', '2025-01-31']);
   });
 
   it('should generate analytics summary keys', () => {
-    const key = queryKeys.analytics.summary('2025-01-01', '2025-01-31');
-    expect(key).toEqual(['analytics', 'summary', '2025-01-01', '2025-01-31']);
+    const key = queryKeys.analytics.summary('demo', '2025-01-01', '2025-01-31');
+    expect(key).toEqual(['analytics', 'demo', 'summary', '2025-01-01', '2025-01-31']);
   });
 });
 
@@ -122,7 +123,7 @@ describe('useCurrentGEX', () => {
     });
 
     expect(result.current.data).toEqual(mockData);
-    expect(gexAPI.getCurrentGEX).toHaveBeenCalledTimes(1);
+    expect(gexAPI.getCurrentGEX).toHaveBeenCalledWith({ demo: true });
   });
 
   it('should handle API errors', async () => {
@@ -177,7 +178,7 @@ describe('useGEXByStrikes', () => {
     });
 
     expect(result.current.data).toEqual(mockData);
-    expect(gexAPI.getGEXByStrikes).toHaveBeenCalledWith(undefined, undefined);
+    expect(gexAPI.getGEXByStrikes).toHaveBeenCalledWith(undefined, undefined, { demo: true });
   });
 
   it('should fetch strikes data with filters', async () => {
@@ -198,7 +199,7 @@ describe('useGEXByStrikes', () => {
       expect(result.current.isSuccess).toBe(true);
     });
 
-    expect(gexAPI.getGEXByStrikes).toHaveBeenCalledWith(5850, 5950);
+    expect(gexAPI.getGEXByStrikes).toHaveBeenCalledWith(5850, 5950, { demo: true });
   });
 });
 
@@ -229,6 +230,7 @@ describe('useCurrentRegime', () => {
 
     expect(result.current.data?.regime).toBe('short_gamma');
     expect(result.current.data?.color).toBe('red');
+    expect(gexAPI.getCurrentRegime).toHaveBeenCalledWith({ demo: true });
   });
 
   it('should return long_gamma regime', async () => {
@@ -333,7 +335,8 @@ describe('useHistoricalGEX', () => {
     expect(gexAPI.getHistoricalGEX).toHaveBeenCalledWith(
       '2025-01-14',
       '2025-01-14',
-      '1h'
+      '1h',
+      { demo: true }
     );
   });
 
@@ -396,7 +399,8 @@ describe('useSummaryStats', () => {
     await waitFor(() => {
       expect(analyticsAPI.getSummaryStats).toHaveBeenCalledWith(
         '2025-01-01',
-        '2025-01-31'
+        '2025-01-31',
+        { demo: true }
       );
     });
   });

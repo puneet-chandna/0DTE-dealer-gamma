@@ -59,10 +59,9 @@ async def periodic_gex_refresh() -> None:
                 logger.info("GEX refresh task received shutdown signal")
                 break
 
-            # We purposefully allow it to run on weekends so the mock data fallback publishes updates!
             if not is_market_open():
-                # Allow the mock data to animate but maybe slightly slower
-                await asyncio.sleep(5)
+                await asyncio.sleep(60)
+                continue
 
             # Get data client
             data_client = get_data_client()
@@ -128,9 +127,9 @@ async def periodic_spot_refresh() -> None:
                 logger.info("Spot refresh task received shutdown signal")
                 break
 
-            # Only refresh during market hours, or fallback to mock
             if not is_market_open():
-                await asyncio.sleep(5)
+                await asyncio.sleep(60)
+                continue
 
             # Get data client
             data_client = get_data_client()

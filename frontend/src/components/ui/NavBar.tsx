@@ -9,7 +9,9 @@
 import { memo } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useMarketStatus } from '@/hooks/useMarketStatus';
 import { cn } from '@/lib/utils';
+import { useUIStore } from '@/stores/uiStore';
 import {
   BarChart3,
   LineChart,
@@ -23,8 +25,29 @@ const navItems = [
   { href: '/backtest', label: 'Backtest', icon: FlaskConical },
 ] as const;
 
+const marketStatusLabel = {
+  open: 'Open',
+  pre_market: 'Pre-Market',
+  after_hours: 'After Hours',
+  closed_weekend: 'Weekend',
+} as const;
+
 function NavBarComponent() {
   const pathname = usePathname();
+  const { demoModeEnabled, toggleDemoMode } = useUIStore();
+  const { data: marketStatus } = useMarketStatus();
+
+  const statusLabel = demoModeEnabled
+    ? 'Demo'
+    : marketStatus
+      ? marketStatusLabel[marketStatus.status]
+      : 'Checking';
+
+  const statusTone = demoModeEnabled
+    ? 'bg-amber-400'
+    : marketStatus?.is_open
+      ? 'bg-emerald-500'
+      : 'bg-amber-400';
 
   return (
     <nav className="border-b border-zinc-800 bg-zinc-950/90 backdrop-blur-sm">
@@ -61,10 +84,24 @@ function NavBarComponent() {
           })}
         </div>
 
-        {/* Status dot */}
         <div className="flex items-center gap-2">
-          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-xs text-zinc-500">Live</span>
+          <button
+            type="button"
+            onClick={toggleDemoMode}
+            className={cn(
+              'rounded-lg px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] transition-all',
+              demoModeEnabled
+                ? 'bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30'
+                : 'bg-zinc-800/70 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
+            )}
+          >
+            Demo
+          </button>
+
+          <div className="flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900/80 px-3 py-1.5">
+            <span className={cn('h-2 w-2 rounded-full', statusTone, marketStatus?.is_open && !demoModeEnabled && 'animate-pulse')} />
+            <span className="text-xs text-zinc-400">{statusLabel}</span>
+          </div>
         </div>
       </div>
     </nav>

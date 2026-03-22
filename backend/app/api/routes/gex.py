@@ -19,6 +19,7 @@ from app.core import (
     get_current_trading_date,
     is_market_open,
 )
+from app.core.demo_data import get_demo_data_service
 from app.models.schemas import (
     GEXByStrike,
     GEXHistorical,
@@ -146,10 +147,14 @@ def _generate_mock_gex_snapshot(spot_price: float = 5950.0) -> GEXSnapshot:
 async def get_current_gex(
     symbol: str = Query("SPX", description="Underlying symbol (default: SPX)"),
     provider: Optional[str] = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
+    demo: bool = Query(False, description="Return deterministic demo data"),
 ):
     """
     Get the most recent 0DTE GEX calculation.
     """
+    if demo:
+        return get_demo_data_service().get_current_snapshot(symbol=symbol)
+
     from app.config import get_settings
     settings = get_settings()
     active_provider = provider or settings.data_provider
@@ -208,6 +213,7 @@ async def get_historical_gex(
     start_date: date = Query(..., description="Start date (YYYY-MM-DD)"),
     end_date: date = Query(..., description="End date (YYYY-MM-DD)"),
     interval: str = Query("1h", description="Data interval: 5m, 15m, 1h, 1d"),
+    demo: bool = Query(False, description="Return deterministic demo data"),
 ) -> GEXHistorical:
     """Get historical GEX data for date range.
 
@@ -221,6 +227,20 @@ async def get_historical_gex(
     try:
         start_dt = datetime.combine(start_date, datetime.min.time())
         end_dt = datetime.combine(end_date, datetime.max.time())
+
+        if demo:
+            snapshots = get_demo_data_service().get_historical_snapshots(
+                symbol="SPX",
+                start_date=start_date,
+                end_date=end_date,
+                interval=interval,
+            )
+            return GEXHistorical(
+                data=snapshots[:100],
+                start_date=start_dt,
+                end_date=end_dt,
+                count=len(snapshots[:100]),
+            )
 
         synthetic_gex = generate_synthetic_gex_data(
             start_date=start_dt,
@@ -260,8 +280,20 @@ async def get_historical_gex(
 async def get_gex_by_strikes(
     symbol: str = Query("SPX", description="Underlying symbol (default: SPX)"),
     provider: Optional[str] = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
+    demo: bool = Query(False, description="Return deterministic demo data"),
 ):
     """Get GEX values separated by strike price."""
+    if demo:
+        snapshot = get_demo_data_service().get_current_snapshot(symbol=symbol)
+        sorted_strikes = sorted(snapshot.gex_by_strike.keys())
+        sorted_values = [snapshot.gex_by_strike[strike] for strike in sorted_strikes]
+        return GEXByStrike(
+            strikes=sorted_strikes,
+            gex_values=sorted_values,
+            spot_price=snapshot.spot_price,
+            zero_gamma_level=snapshot.zero_gamma_level,
+        )
+
     # Try to get from cache first
     cache = get_cache()
     
@@ -312,8 +344,21 @@ async def get_gex_by_strikes(
 async def get_market_regime(
     symbol: str = Query("SPX", description="Underlying symbol (default: SPX)"),
     provider: Optional[str] = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
+    demo: bool = Query(False, description="Return deterministic demo data"),
 ):
     """Get current market regime based on GEX positioning."""
+    if demo:
+        snapshot = get_demo_data_service().get_current_snapshot(symbol=symbol)
+        regime, description, color = get_gex_calculator().determine_regime(snapshot.net_gex)
+        return RegimeData(
+            regime=regime,
+            description=description,
+            color=color,
+            net_gex=snapshot.net_gex,
+            net_gex_billions=snapshot.net_gex / 1e9,
+            timestamp=snapshot.timestamp,
+        )
+
     cache = get_cache()
     
     from app.config import get_settings

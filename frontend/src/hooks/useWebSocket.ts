@@ -408,8 +408,13 @@ export function useWebSocket<T>(
 /**
  * Specialized hook for GEX real-time stream with enhanced options.
  */
-export function useGEXStream(options?: Omit<UseWebSocketOptions, 'onConnected' | 'onDisconnected'>) {
-  return useWebSocket<GEXUpdate>('/gex-stream', {
+export function useGEXStream(
+  demoModeEnabled: boolean = false,
+  options?: Omit<UseWebSocketOptions, 'onConnected' | 'onDisconnected'>
+) {
+  const endpoint = demoModeEnabled ? '/gex-stream?demo=true' : '/gex-stream';
+
+  return useWebSocket<GEXUpdate>(endpoint, {
     autoReconnect: true,
     maxRetries: 10,
     ...options,

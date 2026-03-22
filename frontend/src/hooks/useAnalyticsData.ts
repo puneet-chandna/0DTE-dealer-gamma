@@ -4,6 +4,8 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { dataAPI, analyticsAPI } from '@/lib/api';
+import { getAppDataMode } from '@/lib/appMode';
+import { useUIStore } from '@/stores/uiStore';
 import type {
   RiskFreeRateInfo,
   IVSurfaceResponse,
@@ -16,11 +18,16 @@ import type {
  */
 export const analyticsQueryKeys = {
   riskFreeRate: ['risk-free-rate'] as const,
-  ivSurface: (symbol: string) => ['iv-surface', symbol] as const,
-  technicalIndicators: (symbol: string, period: string, interval: string, indicators: string) =>
-    ['technical-indicators', symbol, period, interval, indicators] as const,
-  vectorbtBacktest: (params: Record<string, unknown>) =>
-    ['vectorbt-backtest', params] as const,
+  ivSurface: (mode: 'live' | 'demo', symbol: string) => ['iv-surface', mode, symbol] as const,
+  technicalIndicators: (
+    mode: 'live' | 'demo',
+    symbol: string,
+    period: string,
+    interval: string,
+    indicators: string
+  ) => ['technical-indicators', mode, symbol, period, interval, indicators] as const,
+  vectorbtBacktest: (mode: 'live' | 'demo', params: Record<string, unknown>) =>
+    ['vectorbt-backtest', mode, params] as const,
 };
 
 /**
@@ -41,9 +48,12 @@ export function useRiskFreeRate() {
  * Fetch IV surface and skew data.
  */
 export function useIVSurface(symbol: string = 'SPY', enabled: boolean = true) {
+  const { demoModeEnabled } = useUIStore();
+  const mode = getAppDataMode(demoModeEnabled);
+
   return useQuery<IVSurfaceResponse>({
-    queryKey: analyticsQueryKeys.ivSurface(symbol),
-    queryFn: () => analyticsAPI.getIVSurface(symbol),
+    queryKey: analyticsQueryKeys.ivSurface(mode, symbol),
+    queryFn: () => analyticsAPI.getIVSurface(symbol, { demo: demoModeEnabled }),
     enabled,
     staleTime: 60 * 1000, // 1 minute
     retry: 1,
@@ -60,9 +70,15 @@ export function useTechnicalIndicators(
   indicators: string = 'ATR,RSI,BBANDS',
   enabled: boolean = true
 ) {
+  const { demoModeEnabled } = useUIStore();
+  const mode = getAppDataMode(demoModeEnabled);
+
   return useQuery<TechnicalIndicatorResponse>({
-    queryKey: analyticsQueryKeys.technicalIndicators(symbol, period, interval, indicators),
-    queryFn: () => analyticsAPI.getTechnicalIndicators(symbol, period, interval, indicators),
+    queryKey: analyticsQueryKeys.technicalIndicators(mode, symbol, period, interval, indicators),
+    queryFn: () =>
+      analyticsAPI.getTechnicalIndicators(symbol, period, interval, indicators, {
+        demo: demoModeEnabled,
+      }),
     enabled,
     staleTime: 60 * 1000,
     retry: 1,
@@ -83,9 +99,12 @@ export function useVectorbtBacktest(
   } | null,
   enabled: boolean = false
 ) {
+  const { demoModeEnabled } = useUIStore();
+  const mode = getAppDataMode(demoModeEnabled);
+
   return useQuery<VectorBTBacktestResult>({
-    queryKey: analyticsQueryKeys.vectorbtBacktest(params ?? {}),
-    queryFn: () => analyticsAPI.runVectorbtBacktest(params!),
+    queryKey: analyticsQueryKeys.vectorbtBacktest(mode, params ?? {}),
+    queryFn: () => analyticsAPI.runVectorbtBacktest(params!, { demo: demoModeEnabled }),
     enabled: enabled && params !== null,
     staleTime: Infinity, // Don't auto-refetch backtests
     retry: 0,

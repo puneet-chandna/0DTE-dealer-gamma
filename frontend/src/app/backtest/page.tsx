@@ -16,12 +16,13 @@
 
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { NavBar } from '@/components/ui/NavBar';
 import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui';
 import { ChartErrorBoundary, EquityCurveChart } from '@/components/charts';
 import { useVectorbtBacktest } from '@/hooks/useAnalyticsData';
 import { cn } from '@/lib/utils';
+import { useUIStore } from '@/stores/uiStore';
 
 interface BacktestParams {
   start_date: string;
@@ -36,6 +37,7 @@ function formatPct(value: number): string {
 }
 
 export default function BacktestPage() {
+  const { demoModeEnabled } = useUIStore();
   const [params, setParams] = useState<BacktestParams>({
     start_date: '2025-01-01',
     end_date: '2025-03-01',
@@ -46,6 +48,7 @@ export default function BacktestPage() {
 
   const [submitted, setSubmitted] = useState<BacktestParams | null>(null);
   const [runEnabled, setRunEnabled] = useState(false);
+  const autoStartedDemoRef = useRef(false);
 
   const { data: result, isLoading, error, isFetching } = useVectorbtBacktest(
     submitted,
@@ -58,6 +61,21 @@ export default function BacktestPage() {
   }, [params]);
 
   const isRunning = isLoading || isFetching;
+
+  useEffect(() => {
+    if (!demoModeEnabled) {
+      autoStartedDemoRef.current = false;
+      return;
+    }
+
+    if (autoStartedDemoRef.current || submitted !== null) {
+      return;
+    }
+
+    autoStartedDemoRef.current = true;
+    setSubmitted({ ...params });
+    setRunEnabled(true);
+  }, [demoModeEnabled, params, submitted]);
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-50">
@@ -280,7 +298,7 @@ export default function BacktestPage() {
         {/* Footer */}
         <div className="mt-8 text-center">
           <p className="text-xs text-zinc-600">
-            Backtesting engine: vectorbt • Using synthetic GEX data for demonstration
+            Backtesting engine: vectorbt • {demoModeEnabled ? 'Running coherent demo session data for reviews' : 'Using current project backtest inputs'}
           </p>
         </div>
       </main>

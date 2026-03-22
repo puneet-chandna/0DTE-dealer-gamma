@@ -107,8 +107,18 @@ export interface GEXUpdate {
   spot_price: number;
   regime: RegimeType;
   is_mock?: boolean;
+  is_demo?: boolean;
   is_stale?: boolean;
   timestamp?: string;
+}
+
+export type MarketStatusType = 'open' | 'pre_market' | 'after_hours' | 'closed_weekend';
+
+export interface MarketStatus {
+  is_open: boolean;
+  status: MarketStatusType;
+  next_open: string | null;
+  current_time_et: string;
 }
 
 /**

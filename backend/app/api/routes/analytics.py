@@ -24,6 +24,7 @@ from app.core.analytics import (
     generate_synthetic_gex_data,
     generate_synthetic_price_data,
 )
+from app.core.demo_data import get_demo_data_service
 from app.models.schemas import AnalyticsResult, BacktestResult, SummaryStatistics, IVSurfaceResponse
 from app.services.cache import get_cache
 
@@ -115,6 +116,7 @@ async def backtest_strategy(
     exit_threshold: float = Query(0.0, description="GEX threshold for exit (dollars)"),
     stop_loss_pct: float = Query(0.02, description="Stop loss percentage (0.02 = 2%)"),
     take_profit_pct: float = Query(0.05, description="Take profit percentage (0.05 = 5%)"),
+    demo: bool = Query(False, description="Return deterministic demo data"),
 ) -> BacktestResult:
     """Backtest trading strategy based on GEX signals.
 
@@ -173,8 +175,15 @@ async def backtest_strategy(
         start_dt = datetime.combine(start_date, datetime.min.time())
         end_dt = datetime.combine(end_date, datetime.max.time())
 
-        gex_data = generate_synthetic_gex_data(start_dt, end_dt)
-        price_data = generate_synthetic_price_data(start_dt, end_dt)
+        if demo:
+            price_data, gex_data = get_demo_data_service().get_time_series(
+                symbol="SPX",
+                start_date=start_date,
+                end_date=end_date,
+            )
+        else:
+            gex_data = generate_synthetic_gex_data(start_dt, end_dt)
+            price_data = generate_synthetic_price_data(start_dt, end_dt)
 
         # Run backtest
         result = TradingStrategy.volatility_breakout_strategy(
@@ -219,6 +228,7 @@ async def backtest_strategy(
 async def get_summary_stats(
     start_date: Optional[date] = Query(None, description="Start date"),
     end_date: Optional[date] = Query(None, description="End date"),
+    demo: bool = Query(False, description="Return deterministic demo data"),
 ) -> SummaryStatistics:
     """Get summary statistics of GEX over time period.
 
@@ -241,20 +251,23 @@ async def get_summary_stats(
 
     # Check cache
     cache = get_cache()
-    cache_key = f"analytics:summary:{start_date}:{end_date}"
+    cache_key = f"analytics:summary:{'demo' if demo else 'live'}:{start_date}:{end_date}"
     cached = cache.get_if_fresh(cache_key)
     if cached is not None:
         return cached
 
     try:
-        # Generate synthetic data for demo
-        start_dt = datetime.combine(start_date, datetime.min.time())
-        end_dt = datetime.combine(end_date, datetime.max.time())
-
-        gex_data = generate_synthetic_gex_data(start_dt, end_dt)
-
-        # Compute statistics
-        result = VolatilityAnalyzer.compute_summary_statistics(gex_data)
+        if demo:
+            result = get_demo_data_service().get_summary_statistics(
+                symbol="SPX",
+                start_date=start_date,
+                end_date=end_date,
+            )
+        else:
+            start_dt = datetime.combine(start_date, datetime.min.time())
+            end_dt = datetime.combine(end_date, datetime.max.time())
+            gex_data = generate_synthetic_gex_data(start_dt, end_dt)
+            result = VolatilityAnalyzer.compute_summary_statistics(gex_data)
 
         # Cache and return
         cache.set(cache_key, result)
@@ -277,6 +290,7 @@ async def get_summary_stats(
 async def get_iv_surface(
     symbol: str = Query("SPX", description="Underlying symbol (default: SPX)"),
     provider: Optional[str] = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
+    demo: bool = Query(False, description="Return deterministic demo data"),
 ) -> IVSurfaceResponse:
     """Get Implied Volatility Surface data for 3D charting.
     
@@ -286,6 +300,9 @@ async def get_iv_surface(
     from app.core.vollib_bridge import VolLibBridge
 
     try:
+        if demo:
+            return get_demo_data_service().get_iv_surface(symbol=symbol)
+
         data_client = get_data_client(provider)
 
         # In a real scenario, we'd fetch multiple expirations. 
@@ -363,6 +380,7 @@ async def get_technical_indicators(
     period: str = Query("1mo", description="Data period (1d, 5d, 1mo, 3mo, 6mo, 1y)"),
     interval: str = Query("1d", description="Data interval (1m, 5m, 15m, 1h, 1d)"),
     indicators: str = Query("ATR,RSI,BBANDS", description="Comma-separated indicators"),
+    demo: bool = Query(False, description="Return deterministic demo data"),
 ) -> dict:
     """Get technical indicators for a symbol using pandas-ta.
 
@@ -374,6 +392,15 @@ async def get_technical_indicators(
     from app.core.technical_indicators import TechnicalIndicatorEngine
 
     try:
+        if demo:
+            indicator_list = [item.strip().upper() for item in indicators.split(",")]
+            return get_demo_data_service().get_technical_indicators(
+                symbol=symbol,
+                period=period,
+                interval=interval,
+                indicators=indicator_list,
+            )
+
         import yfinance as yf
 
         ticker = yf.Ticker(symbol)
@@ -435,6 +462,7 @@ async def run_vectorbt_backtest(
     entry_threshold: float = Query(-1e9, description="GEX entry threshold (dollars)"),
     exit_threshold: float = Query(0.0, description="GEX exit threshold (dollars)"),
     initial_cash: float = Query(100_000.0, description="Starting capital"),
+    demo: bool = Query(False, description="Return deterministic demo data"),
 ) -> dict:
     """Run high-performance backtest using vectorbt.
 
@@ -459,8 +487,15 @@ async def run_vectorbt_backtest(
         start_dt = datetime.combine(start_date, datetime.min.time())
         end_dt = datetime.combine(end_date, datetime.max.time())
 
-        gex_data = generate_synthetic_gex_data(start_dt, end_dt)
-        price_data = generate_synthetic_price_data(start_dt, end_dt)
+        if demo:
+            price_data, gex_data = get_demo_data_service().get_time_series(
+                symbol="SPX",
+                start_date=start_date,
+                end_date=end_date,
+            )
+        else:
+            gex_data = generate_synthetic_gex_data(start_dt, end_dt)
+            price_data = generate_synthetic_price_data(start_dt, end_dt)
 
         result = VectorBTBacktester.run_gex_signal_backtest(
             price_data=price_data,

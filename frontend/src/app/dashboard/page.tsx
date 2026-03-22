@@ -25,6 +25,8 @@ import { format } from 'date-fns';
 import { useQueryClient } from '@tanstack/react-query';
 import { useDashboardData, useIntradayTimeSeries } from '@/hooks/useDashboardData';
 import { useGEXByStrikes, queryKeys } from '@/hooks/useGEXData';
+import { getAppDataMode } from '@/lib/appMode';
+import { useUIStore } from '@/stores/uiStore';
 import { DashboardHeader, Sidebar, MetricsPanel } from '@/components/dashboard';
 import {
   AlertBanner,
@@ -40,6 +42,8 @@ import type { GEXChartDataPoint, TimeSeriesDataPoint } from '@/types';
 
 export default function DashboardPage() {
   const queryClient = useQueryClient();
+  const { demoModeEnabled } = useUIStore();
+  const mode = getAppDataMode(demoModeEnabled);
 
   // Hybrid data hook - prefers WebSocket, falls back to polling
   const {
@@ -92,9 +96,9 @@ export default function DashboardPage() {
 
   // Refresh handler - invalidate all queries
   const handleRefresh = () => {
-    queryClient.invalidateQueries({ queryKey: queryKeys.gex.current });
-    queryClient.invalidateQueries({ queryKey: queryKeys.gex.regime });
-    queryClient.invalidateQueries({ queryKey: queryKeys.gex.strikes });
+    queryClient.invalidateQueries({ queryKey: queryKeys.gex.current(mode) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.gex.regime(mode) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.gex.strikes(mode) });
     // Also reconnect WebSocket if disconnected
     if (!isRealtime) {
       reconnect();

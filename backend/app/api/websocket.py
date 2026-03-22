@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
 from app.config import Settings, get_settings
 from app.core.data_acquisition import is_market_open
+from app.core.demo_data import get_demo_data_service
 from app.core.provider_registry import get_data_client
 from app.core.gex_calculator import GEXCalculator
 from app.services.cache import get_cache
@@ -118,7 +119,28 @@ def _generate_mock_gex_data() -> dict:
     }
 
 
-async def _get_gex_update(settings: Settings) -> dict:
+def _is_reasonable_gex_payload(payload: dict) -> bool:
+    """Reject obviously broken live payloads before they reach clients."""
+    net_gex = payload.get("net_gex")
+    spot_price = payload.get("spot_price")
+
+    if not isinstance(net_gex, (int, float)) or not isinstance(spot_price, (int, float)):
+        return False
+
+    if abs(net_gex) > 5e9:
+        return False
+
+    if not 100 <= spot_price <= 10_000:
+        return False
+
+    return True
+
+
+async def _get_gex_update(
+    settings: Settings,
+    demo: bool = False,
+    symbol: str = "SPX",
+) -> dict:
     """Get current GEX data for WebSocket broadcast.
 
     Args:
@@ -127,12 +149,14 @@ async def _get_gex_update(settings: Settings) -> dict:
     Returns:
         Dictionary with GEX data for broadcasting.
     """
+    if demo:
+        return get_demo_data_service().get_ws_update(symbol=symbol)
+
     cache = get_cache()
 
     # Try to get from cache first
     cached = cache.get("gex:current")
     if cached is not None:
-        print(f"DEBUG WS CACHE: type={type(cached)}")
         if isinstance(cached, str):
             import json
             cached = json.loads(cached)
@@ -145,7 +169,7 @@ async def _get_gex_update(settings: Settings) -> dict:
         gex_calculator = get_gex_calculator()
         regime, _, _ = gex_calculator.determine_regime(cached.net_gex)
 
-        return {
+        payload = {
             "net_gex": cached.net_gex,
             "net_gex_billions": cached.net_gex / 1e9,
             "zero_gamma_level": cached.zero_gamma_level,
@@ -154,6 +178,7 @@ async def _get_gex_update(settings: Settings) -> dict:
             "is_mock": False,
             "is_stale": cache.is_stale("gex:current"),
         }
+        return payload if _is_reasonable_gex_payload(payload) else _generate_mock_gex_data()
 
     # If no cached data, fetch fresh data via data provider
     try:
@@ -182,7 +207,7 @@ async def _get_gex_update(settings: Settings) -> dict:
 
             regime, _, _ = gex_calculator.determine_regime(snapshot.net_gex)
 
-            return {
+            payload = {
                 "net_gex": snapshot.net_gex,
                 "net_gex_billions": snapshot.net_gex / 1e9,
                 "zero_gamma_level": snapshot.zero_gamma_level,
@@ -192,6 +217,7 @@ async def _get_gex_update(settings: Settings) -> dict:
                 "is_stale": False,
                 "provider": provider_name,
             }
+            return payload if _is_reasonable_gex_payload(payload) else _generate_mock_gex_data()
 
         finally:
             await data_client.close()
@@ -222,6 +248,8 @@ async def websocket_gex_stream(websocket: WebSocket) -> None:
     """
     await manager.connect(websocket)
     settings = get_settings()
+    demo = websocket.query_params.get("demo", "false").lower() == "true"
+    symbol = websocket.query_params.get("symbol", "SPX")
 
     try:
         # Send initial connection message
@@ -231,6 +259,7 @@ async def websocket_gex_stream(websocket: WebSocket) -> None:
                 "message": "Connected to GEX stream",
                 "market_open": is_market_open(),
                 "update_interval_seconds": WS_UPDATE_INTERVAL,
+                "mode": "demo" if demo else "live",
             },
             "timestamp": datetime.now(ET).isoformat(),
         })
@@ -238,7 +267,7 @@ async def websocket_gex_stream(websocket: WebSocket) -> None:
         while True:
             try:
                 # Get current GEX data
-                gex_data = await _get_gex_update(settings)
+                gex_data = await _get_gex_update(settings, demo=demo, symbol=symbol)
 
                 # Send update
                 message = {

@@ -288,6 +288,17 @@ describe('useGEXStream', () => {
     expect(ws.url).toContain('/gex-stream');
   });
 
+  it('should connect to demo stream when demo mode is enabled', async () => {
+    renderHook(() => useGEXStream(true));
+
+    await act(async () => {
+      vi.runAllTimers();
+    });
+
+    const ws = MockWebSocket.instances[MockWebSocket.instances.length - 1];
+    expect(ws.url).toContain('/gex-stream?demo=true');
+  });
+
   it('should return GEXUpdate typed data', async () => {
     const { result } = renderHook(() => useGEXStream());
 

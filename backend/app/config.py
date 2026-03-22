@@ -58,6 +58,22 @@ class Settings(BaseSettings):
                 return [origin.strip() for origin in v.split(",")]
         return v
 
+    @field_validator("debug", mode="before")
+    @classmethod
+    def parse_debug_flag(cls, value: object) -> bool:
+        """Accept common deployment strings in addition to strict booleans."""
+        if isinstance(value, bool):
+            return value
+
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on", "debug", "development", "dev"}:
+                return True
+            if normalized in {"0", "false", "no", "off", "release", "production", "prod"}:
+                return False
+
+        return bool(value)
+
     @property
     def is_development(self) -> bool:
         """Check if running in development mode."""
@@ -78,4 +94,3 @@ class Settings(BaseSettings):
 def get_settings() -> Settings:
     """Get cached settings instance."""
     return Settings()
-

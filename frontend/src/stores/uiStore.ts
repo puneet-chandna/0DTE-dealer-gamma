@@ -41,6 +41,11 @@ interface UIState {
   autoRefreshEnabled: boolean;
   refreshInterval: number; // in seconds
   setAutoRefresh: (enabled: boolean, interval?: number) => void;
+
+  // Demo Mode
+  demoModeEnabled: boolean;
+  toggleDemoMode: () => void;
+  setDemoMode: (enabled: boolean) => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -79,6 +84,11 @@ export const useUIStore = create<UIState>()(
           autoRefreshEnabled: enabled,
           refreshInterval: interval ?? 30,
         }),
+
+      // Demo mode
+      demoModeEnabled: false,
+      toggleDemoMode: () => set((state) => ({ demoModeEnabled: !state.demoModeEnabled })),
+      setDemoMode: (enabled) => set({ demoModeEnabled: enabled }),
     }),
     {
       name: 'odte-gex-ui-settings',
@@ -91,6 +101,7 @@ export const useUIStore = create<UIState>()(
         isDarkMode: state.isDarkMode,
         autoRefreshEnabled: state.autoRefreshEnabled,
         refreshInterval: state.refreshInterval,
+        demoModeEnabled: state.demoModeEnabled,
       }),
     }
   )

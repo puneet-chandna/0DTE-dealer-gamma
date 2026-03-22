@@ -6,6 +6,39 @@ const api = axios.create({
   baseURL: API_URL,
 });
 
+interface DemoRequestOptions {
+  demo?: boolean;
+}
+
+function withDemoParam(
+  params: Record<string, unknown>,
+  options?: DemoRequestOptions
+) {
+  const normalizedParams = Object.entries(params).reduce<Record<string, string | number | boolean>>(
+    (accumulator, [key, value]) => {
+      if (
+        typeof value === 'string' ||
+        typeof value === 'number' ||
+        typeof value === 'boolean'
+      ) {
+        accumulator[key] = value;
+      }
+
+      return accumulator;
+    },
+    {}
+  );
+
+  if (!options?.demo) {
+    return normalizedParams;
+  }
+
+  return {
+    ...normalizedParams,
+    demo: true,
+  };
+}
+
 export const healthAPI = {
   check: async () => {
     const response = await api.get('/health');
@@ -18,27 +51,50 @@ export const healthAPI = {
 };
 
 export const gexAPI = {
-  getCurrentGEX: async () => {
-    const response = await api.get('/api/gex/current');
+  getCurrentGEX: async (options?: DemoRequestOptions) => {
+    const response = await api.get('/api/gex/current', {
+      params: withDemoParam({}, options),
+    });
     return response.data;
   },
-  getGEXByStrikes: async (minStrike?: number, maxStrike?: number) => {
-    const params = new URLSearchParams();
-    if (minStrike) params.append('min_strike', minStrike.toString());
-    if (maxStrike) params.append('max_strike', maxStrike.toString());
-    const response = await api.get(`/api/gex/strikes?${params.toString()}`);
+  getGEXByStrikes: async (
+    minStrike?: number,
+    maxStrike?: number,
+    options?: DemoRequestOptions
+  ) => {
+    const response = await api.get('/api/gex/strikes', {
+      params: withDemoParam(
+        {
+          min_strike: minStrike,
+          max_strike: maxStrike,
+        },
+        options
+      ),
+    });
     return response.data;
   },
-  getCurrentRegime: async () => {
-    const response = await api.get('/api/gex/regime');
+  getCurrentRegime: async (options?: DemoRequestOptions) => {
+    const response = await api.get('/api/gex/regime', {
+      params: withDemoParam({}, options),
+    });
     return response.data;
   },
-  getHistoricalGEX: async (startDate: string, endDate: string, interval?: string) => {
-    const params = new URLSearchParams();
-    params.append('start_date', startDate);
-    params.append('end_date', endDate);
-    if (interval) params.append('interval', interval);
-    const response = await api.get(`/api/gex/historical?${params.toString()}`);
+  getHistoricalGEX: async (
+    startDate: string,
+    endDate: string,
+    interval?: string,
+    options?: DemoRequestOptions
+  ) => {
+    const response = await api.get('/api/gex/historical', {
+      params: withDemoParam(
+        {
+          start_date: startDate,
+          end_date: endDate,
+          interval,
+        },
+        options
+      ),
+    });
     return response.data;
   }
 };
@@ -84,36 +140,62 @@ export const dataAPI = {
 };
 
 export const analyticsAPI = {
-  getSummaryStats: async (startDate?: string, endDate?: string) => {
-    const params = new URLSearchParams();
-    if (startDate) params.append('start_date', startDate);
-    if (endDate) params.append('end_date', endDate);
-    const response = await api.get(`/api/analytics/summary-statistics?${params.toString()}`);
+  getSummaryStats: async (
+    startDate?: string,
+    endDate?: string,
+    options?: DemoRequestOptions
+  ) => {
+    const response = await api.get('/api/analytics/summary-statistics', {
+      params: withDemoParam(
+        {
+          start_date: startDate,
+          end_date: endDate,
+        },
+        options
+      ),
+    });
     return response.data;
   },
-  getIVSurface: async (symbol: string) => {
-    const response = await api.get(`/api/analytics/iv-surface?symbol=${symbol}`);
+  getIVSurface: async (symbol: string, options?: DemoRequestOptions) => {
+    const response = await api.get('/api/analytics/iv-surface', {
+      params: withDemoParam({ symbol }, options),
+    });
     return response.data;
   },
-  getTechnicalIndicators: async (symbol: string, period: number, interval: string, indicators: string[]) => {
-    const params = new URLSearchParams();
-    params.append('symbol', symbol);
-    params.append('period', period.toString());
-    params.append('interval', interval);
-    indicators.forEach(ind => params.append('indicators', ind));
-    const response = await api.get(`/api/analytics/technical-indicators?${params.toString()}`);
+  getTechnicalIndicators: async (
+    symbol: string,
+    period: string,
+    interval: string,
+    indicators: string = 'ATR,RSI,BBANDS',
+    options?: DemoRequestOptions
+  ) => {
+    const response = await api.get('/api/analytics/technical-indicators', {
+      params: withDemoParam(
+        {
+          symbol,
+          period,
+          interval,
+          indicators,
+        },
+        options
+      ),
+    });
     return response.data;
   },
-  runVectorbtBacktest: async (params: any) => {
-    const response = await api.get(`/api/analytics/vectorbt-backtest`, { params });
+  runVectorbtBacktest: async (params: Record<string, unknown>, options?: DemoRequestOptions) => {
+    const response = await api.get('/api/analytics/vectorbt-backtest', {
+      params: withDemoParam(params, options),
+    });
     return response.data;
   },
   getGexVolatility: async () => {
     const response = await api.get('/api/analytics/gex-volatility');
     return response.data;
   },
-  getBacktest: async (params: any) => {
-    const response = await api.get('/api/analytics/backtest', { params });
+  getBacktest: async (params: Record<string, unknown>, options?: DemoRequestOptions) => {
+    const response = await api.get('/api/analytics/backtest', {
+      params: withDemoParam(params, options),
+    });
     return response.data;
   }
 };

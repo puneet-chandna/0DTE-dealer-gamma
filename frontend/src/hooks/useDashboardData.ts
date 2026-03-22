@@ -12,6 +12,8 @@ import { useEffect, useMemo, useState, useCallback, useReducer } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useGEXStream } from './useWebSocket';
 import { useCurrentGEX, useCurrentRegime, useGEXByStrikes, queryKeys } from './useGEXData';
+import { getAppDataMode } from '@/lib/appMode';
+import { useUIStore } from '@/stores/uiStore';
 import type { GEXSnapshot, RegimeData, GEXByStrike, ConnectionState } from '@/types';
 
 // Stale data threshold (milliseconds)
@@ -54,9 +56,11 @@ interface TimeSeriesPoint {
 export function useDashboardData(): DashboardData {
   const queryClient = useQueryClient();
   const [currentTime, setCurrentTime] = useState(() => Date.now());
+  const { demoModeEnabled } = useUIStore();
+  const mode = getAppDataMode(demoModeEnabled);
 
   // WebSocket stream for real-time updates
-  const wsStream = useGEXStream();
+  const wsStream = useGEXStream(demoModeEnabled);
 
   // REST polling hooks (used as fallback and for initial data)
   const polledGEX = useCurrentGEX();
@@ -94,7 +98,7 @@ export function useDashboardData(): DashboardData {
       };
 
       // Update React Query cache with WebSocket data
-      queryClient.setQueryData(queryKeys.gex.current, (old: GEXSnapshot | undefined) => ({
+      queryClient.setQueryData(queryKeys.gex.current(mode), (old: GEXSnapshot | undefined) => ({
         ...old,
         ...wsGexSnapshot,
       }));
@@ -113,13 +117,13 @@ export function useDashboardData(): DashboardData {
           }),
         };
 
-        queryClient.setQueryData(queryKeys.gex.regime, (old: RegimeData | undefined) => ({
+        queryClient.setQueryData(queryKeys.gex.regime(mode), (old: RegimeData | undefined) => ({
           ...old,
           ...wsRegimeData,
         }));
       }
     }
-  }, [wsStream.data, wsStream.isConnected, queryClient]);
+  }, [wsStream.data, wsStream.isConnected, queryClient, mode, polledGEX.data, polledRegime.data]);
 
   // Determine effective GEX data
   const gexData = useMemo((): GEXSnapshot | null => {
@@ -204,6 +208,7 @@ export function useDashboardData(): DashboardData {
  */
 export function useIntradayTimeSeries() {
   const { gexData, isRealtime, lastUpdateTime } = useDashboardData();
+  const { demoModeEnabled } = useUIStore();
 
   // Use reducer for accumulating time series to avoid setState in effect
   const [timeSeries, dispatch] = useReducer(
@@ -248,6 +253,10 @@ export function useIntradayTimeSeries() {
       });
     }
   }, [gexData, lastUpdateTime]);
+
+  useEffect(() => {
+    dispatch({ type: 'clear' });
+  }, [demoModeEnabled]);
 
   // Clear time series (e.g., on market close)
   const clearTimeSeries = useCallback(() => {

@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
 import { QueryProvider } from '@/providers/QueryProvider';
+import { AppShellEffects } from '@/components/app/AppShellEffects';
 
 const inter = Inter({
   variable: '--font-inter',
@@ -42,7 +43,10 @@ export default function RootLayout({
         className={`${inter.variable} font-sans antialiased`}
         suppressHydrationWarning
       >
-        <QueryProvider>{children}</QueryProvider>
+        <QueryProvider>
+          <AppShellEffects />
+          {children}
+        </QueryProvider>
       </body>
     </html>
   );
