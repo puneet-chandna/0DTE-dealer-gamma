@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 from app.config import get_settings
 from app.core.data_acquisition import is_market_open
-from app.core.provider_registry import get_data_client
+from app.core.provider_registry import ProviderRegistry, get_data_client
 from app.core.gex_calculator import GEXCalculator
 from app.services.cache import get_cache
 
@@ -86,7 +86,12 @@ async def periodic_gex_refresh() -> None:
                     )
 
                 # Cache the result
-                cache.set("gex:current", snapshot)
+                settings = get_settings()
+                default_provider = ProviderRegistry.resolve_provider_name(
+                    default_provider=settings.data_provider,
+                )
+                cache.set(f"gex:current:SPX:{default_provider}", snapshot)
+                cache.set("gex:current:SPX", snapshot)
 
                 logger.debug(
                     f"GEX refreshed: net_gex={snapshot.net_gex/1e9:.3f}B, "
@@ -184,7 +189,12 @@ async def cache_warmup() -> None:
                 spot_price=spot_price,
                 timestamp=datetime.now(ET),
             )
-        cache.set("gex:current", snapshot)
+        settings = get_settings()
+        default_provider = ProviderRegistry.resolve_provider_name(
+            default_provider=settings.data_provider,
+        )
+        cache.set(f"gex:current:SPX:{default_provider}", snapshot)
+        cache.set("gex:current:SPX", snapshot)
 
         logger.info(
             f"Cache warmup complete: net_gex={snapshot.net_gex/1e9:.3f}B, "

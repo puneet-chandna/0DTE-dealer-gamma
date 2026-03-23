@@ -25,6 +25,7 @@ from app.core.analytics import (
     generate_synthetic_price_data,
 )
 from app.core.demo_data import get_demo_data_service
+from app.core.provider_registry import ProviderUnavailableError
 from app.models.schemas import AnalyticsResult, BacktestResult, SummaryStatistics, IVSurfaceResponse
 from app.services.cache import get_cache
 
@@ -369,8 +370,10 @@ async def get_iv_surface(
 
     except HTTPException:
         raise
-    except ValueError as e:
+    except ProviderUnavailableError as e:
         raise HTTPException(status_code=503, detail=str(e)) from e
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
         logger.error(f"IV surface computation failed: {e}")
         raise HTTPException(status_code=500, detail=f"IV surface failed: {str(e)}")

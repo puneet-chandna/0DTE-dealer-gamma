@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.core.provider_registry import ProviderUnavailableError
 
 client = TestClient(app)
 
@@ -133,6 +134,30 @@ class TestIVSurfaceEndpoint:
         assert resp.status_code == 200
         mock_get_client.assert_called_once_with("tradier")
         mock_client.close.assert_not_awaited()
+
+    def test_invalid_provider_returns_400(self):
+        """Invalid provider names should be treated as client input errors."""
+        with patch(
+            "app.api.routes.analytics.get_data_client",
+            side_effect=ValueError("Unknown provider 'bogus'"),
+        ):
+            resp = client.get("/api/analytics/iv-surface?provider=bogus")
+
+        assert resp.status_code == 400
+        assert "Unknown provider" in resp.json()["detail"]
+
+    def test_unavailable_provider_returns_503(self):
+        """Unavailable providers should surface as service failures."""
+        with patch(
+            "app.api.routes.analytics.get_data_client",
+            side_effect=ProviderUnavailableError(
+                "TRADIER_API_KEY environment variable is missing"
+            ),
+        ):
+            resp = client.get("/api/analytics/iv-surface?provider=tradier")
+
+        assert resp.status_code == 503
+        assert "TRADIER_API_KEY" in resp.json()["detail"]
 
 
 # ---------------------------------------------------------------------------

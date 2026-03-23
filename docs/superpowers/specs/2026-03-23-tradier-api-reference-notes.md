@@ -76,7 +76,7 @@ Migrated from the repo-root `scratchpad.md` on 2026-03-23 because these notes ar
 - **URL Path:** `/v1/markets/options/expirations`
 - **Query Parameters:**
   - `symbol` (string, required): The underlying security symbol.
-  - `includeAllRoots` (boolean, required): Defaults to false. Include all option roots.
+  - `includeAllRoots` (boolean, optional): Defaults to false. Include all option roots.
   - `strikes` (boolean, optional): Defaults to false. Include strikes in response.
   - `contractSize` (boolean, optional): Defaults to false. Include contract size in response.
   - `expirationType` (boolean, optional): Defaults to false. Include expiration type in response.

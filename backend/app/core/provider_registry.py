@@ -16,6 +16,10 @@ from app.core.yfinance_provider import YFinanceClient
 logger = logging.getLogger(__name__)
 
 
+class ProviderUnavailableError(RuntimeError):
+    """Raised when a configured provider cannot be used at runtime."""
+
+
 class ProviderRegistry:
     """Factory and registry for DataProvider implementations."""
 
@@ -34,6 +38,47 @@ class ProviderRegistry:
         cls._registry[name] = provider_class
         logger.debug(f"Registered data provider: {name}")
 
+    @staticmethod
+    def _normalize_provider_name(name: Optional[str]) -> str:
+        """Normalize provider identifiers from config or request input."""
+        return (name or "").strip().lower()
+
+    @classmethod
+    def resolve_provider_name(
+        cls,
+        name: Optional[str] = None,
+        *,
+        default_provider: Optional[str] = None,
+    ) -> str:
+        """Resolve a provider name against the registry.
+
+        Unknown explicit provider requests are treated as client input
+        errors. Unknown configured defaults fall back to ``yfinance`` so
+        the app can continue serving traffic.
+        """
+        configured_default = default_provider
+        if configured_default is None:
+            configured_default = get_settings().data_provider
+
+        explicit_request = name is not None
+        requested_name = cls._normalize_provider_name(
+            name if explicit_request else configured_default
+        )
+
+        if not requested_name:
+            requested_name = "yfinance"
+
+        if requested_name in cls._registry:
+            return requested_name
+
+        if explicit_request:
+            raise ValueError(f"Unknown provider '{requested_name}'")
+
+        logger.warning(
+            f"Provider '{requested_name}' not found. Falling back to 'yfinance'."
+        )
+        return "yfinance"
+
     @classmethod
     def get_provider_availability(
         cls,
@@ -41,6 +86,7 @@ class ProviderRegistry:
         provider_cls: Optional[type[DataProvider]] = None,
     ) -> tuple[bool, Optional[str]]:
         """Return runtime availability metadata for a provider."""
+        name = cls._normalize_provider_name(name)
         provider_cls = provider_cls or cls._registry.get(name)
         if provider_cls is None:
             return False, f"Unknown provider '{name}'"
@@ -92,30 +138,18 @@ class ProviderRegistry:
         Instances are cached per-name to reuse HTTP clients.
         """
         settings = get_settings()
-        requested_name = name or settings.data_provider
-        explicit_request = name is not None
+        requested_name = cls.resolve_provider_name(name)
 
         # Check cache
         if requested_name in cls._instances:
             return cls._instances[requested_name]
-
-        # Ensure registered
-        if requested_name not in cls._registry:
-            if explicit_request:
-                raise ValueError(f"Unknown provider '{requested_name}'")
-
-            logger.warning(
-                f"Provider '{requested_name}' not found. "
-                "Falling back to 'yfinance'."
-            )
-            requested_name = "yfinance"
 
         provider_cls = cls._registry[requested_name]
         is_available, unavailable_reason = cls.get_provider_availability(
             requested_name, provider_cls
         )
         if not is_available:
-            raise ValueError(
+            raise ProviderUnavailableError(
                 unavailable_reason
                 or f"Provider '{requested_name}' is unavailable"
             )

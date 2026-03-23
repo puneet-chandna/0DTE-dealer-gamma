@@ -34,9 +34,13 @@ export default function AnalyticsPage() {
   const selectedProviderInfo = availableProviders.find(
     (provider) => provider.name === selectedProvider
   );
-  const providerFeatures = PROVIDER_FEATURES[selectedProvider];
+  const providerFeatures =
+    PROVIDER_FEATURES[selectedProvider as keyof typeof PROVIDER_FEATURES] ??
+    PROVIDER_FEATURES.yfinance;
   const providerDisplayName =
-    selectedProviderInfo?.display_name ?? providerFeatures.displayName;
+    selectedProviderInfo?.display_name ??
+    providerFeatures.displayName ??
+    selectedProvider;
   const technicalIndicatorsEnabled = providerFeatures.supportsTechnicalIndicators;
 
   const { data: ivData, isLoading: ivLoading, error: ivError } = useIVSurface(

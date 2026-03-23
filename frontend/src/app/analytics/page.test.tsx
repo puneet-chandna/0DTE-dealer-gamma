@@ -1,21 +1,29 @@
+import type { ReactNode } from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
 import AnalyticsPage from './page';
+
+const { mockUseUIStore } = vi.hoisted(() => ({
+  mockUseUIStore: vi.fn(() => ({
+    selectedProvider: 'tradier',
+    availableProviders: [],
+  })),
+}));
 
 vi.mock('@/components/ui/NavBar', () => ({
   NavBar: () => <div>NavBar</div>,
 }));
 
 vi.mock('@/components/ui', () => ({
-  Card: ({ children }: { children: React.ReactNode }) => <section>{children}</section>,
-  CardHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  CardContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  CardTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
+  Card: ({ children }: { children: ReactNode }) => <section>{children}</section>,
+  CardHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  CardContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  CardTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
 }));
 
 vi.mock('@/components/charts', () => ({
-  ChartErrorBoundary: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  ChartErrorBoundary: ({ children }: { children: ReactNode }) => <>{children}</>,
   IVSurfaceChart: () => <div>IV Surface Chart</div>,
   IVSkewChart: () => <div>IV Skew Chart</div>,
   TechnicalOverlayChart: () => <div>Technical Overlay Chart</div>,
@@ -38,9 +46,7 @@ vi.mock('@/hooks/useAnalyticsData', () => ({
 }));
 
 vi.mock('@/stores/uiStore', () => ({
-  useUIStore: () => ({
-    selectedProvider: 'tradier',
-  }),
+  useUIStore: mockUseUIStore,
 }));
 
 describe('AnalyticsPage provider gating', () => {
@@ -50,5 +56,28 @@ describe('AnalyticsPage provider gating', () => {
     expect(
       screen.getByText(/technical indicators are currently unavailable for tradier/i)
     ).toBeInTheDocument();
+  });
+
+  it('falls back safely when the persisted provider is unknown', () => {
+    mockUseUIStore.mockReturnValue({
+      selectedProvider: 'legacy-provider',
+      availableProviders: [
+        {
+          name: 'yfinance',
+          display_name: 'Yahoo Finance',
+          provides_greeks: false,
+          supports_spx_directly: false,
+          rate_limit: 10,
+          requires_api_key: false,
+          is_available: true,
+          unavailable_reason: null,
+          features: ['spot_price', 'options_chain'],
+        },
+      ],
+    });
+
+    render(<AnalyticsPage />);
+
+    expect(screen.getByText(/provider: yahoo finance/i)).toBeInTheDocument();
   });
 });

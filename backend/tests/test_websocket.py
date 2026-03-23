@@ -1,10 +1,12 @@
 """0DTE GEX Backend - WebSocket Integration Tests."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.websocket import _get_gex_update
+from app.config import Settings
 from app.main import app
 
 
@@ -160,6 +162,73 @@ class TestWebSocketEndpoints:
         mock_get_update.assert_awaited()
         _, kwargs = mock_get_update.await_args
         assert kwargs["provider"] == "tradier"
+
+
+class TestGEXUpdateHelper:
+    """Unit tests for provider-aware websocket payload generation."""
+
+    @pytest.mark.asyncio
+    async def test_cached_payload_uses_normalized_provider_name(self):
+        """Cached websocket payloads should use the provider's normalized name."""
+        cached_snapshot = {
+            "timestamp": "2099-01-15T10:30:00-05:00",
+            "spot_price": 5000.0,
+            "total_call_gex": 1.0,
+            "total_put_gex": -2.0,
+            "net_gex": -1.0,
+            "zero_gamma_level": 4995.0,
+            "gex_by_strike": {"5000.0": 1.0},
+            "dominant_strike": 5000.0,
+            "metrics": {},
+        }
+        mock_cache = MagicMock()
+        mock_cache.get.side_effect = (
+            lambda key: cached_snapshot if key == "gex:current:SPX:yfinance" else None
+        )
+        mock_cache.is_stale.return_value = False
+        mock_client = AsyncMock()
+        mock_client.provider_name = "yfinance"
+
+        with patch("app.api.websocket.get_cache", return_value=mock_cache):
+            with patch("app.api.websocket.get_data_client", return_value=mock_client):
+                payload = await _get_gex_update(
+                    Settings(data_provider="YFINANCE"),
+                    symbol="SPX",
+                )
+
+        mock_cache.get.assert_any_call("gex:current:SPX:yfinance")
+        assert payload["provider"] == "yfinance"
+
+    @pytest.mark.asyncio
+    async def test_default_provider_legacy_cache_lookup_includes_symbol(self):
+        """Legacy websocket cache fallback should be scoped by symbol."""
+        cached_snapshot = {
+            "timestamp": "2099-01-15T10:30:00-05:00",
+            "spot_price": 5000.0,
+            "total_call_gex": 1.0,
+            "total_put_gex": -2.0,
+            "net_gex": -1.0,
+            "zero_gamma_level": 4995.0,
+            "gex_by_strike": {"5000.0": 1.0},
+            "dominant_strike": 5000.0,
+            "metrics": {},
+        }
+        mock_cache = MagicMock()
+        mock_cache.get.side_effect = (
+            lambda key: cached_snapshot if key == "gex:current:QQQ" else None
+        )
+        mock_cache.is_stale.return_value = False
+        mock_client = AsyncMock()
+        mock_client.provider_name = "yfinance"
+
+        with patch("app.api.websocket.get_cache", return_value=mock_cache):
+            with patch("app.api.websocket.get_data_client", return_value=mock_client):
+                await _get_gex_update(
+                    Settings(data_provider="yfinance"),
+                    symbol="QQQ",
+                )
+
+        mock_cache.get.assert_any_call("gex:current:QQQ")
 
 
 class TestWebSocketErrorHandling:

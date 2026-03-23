@@ -146,17 +146,26 @@ async def get_current_gex(
     if demo:
         return get_demo_data_service().get_current_snapshot(symbol=symbol)
 
-    from app.config import get_settings
     settings = get_settings()
-    active_provider = provider or settings.data_provider
+    active_provider = ProviderRegistry.resolve_provider_name(
+        provider,
+        default_provider=settings.data_provider,
+    )
+    default_provider = ProviderRegistry.resolve_provider_name(
+        default_provider=settings.data_provider,
+    )
 
     cache = get_cache()
     cache_key = f"gex:current:{symbol}:{active_provider}"
-    legacy_key = "gex:current"
+    legacy_key = (
+        f"gex:current:{symbol}"
+        if active_provider == default_provider
+        else None
+    )
 
     # Try specific provider key first, then fallback to legacy key if it matches default provider
     cached_data = cache.get_if_fresh(cache_key)
-    if cached_data is None and active_provider == settings.data_provider:
+    if cached_data is None and legacy_key is not None:
         cached_data = cache.get_if_fresh(legacy_key)
 
     if cached_data is not None:
@@ -177,16 +186,16 @@ async def get_current_gex(
         
         # Save to specific cache
         cache.set(cache_key, snapshot_dict)
-        
+
         # Also save to legacy cache if it's the default provider
-        if active_provider == settings.data_provider:
+        if legacy_key is not None:
             cache.set(legacy_key, snapshot_dict)
             
         return snapshot_dict
     except Exception as e:
         logger.error(f"Failed to compute live GEX: {e}")
         # Try to return stale cache data
-        stale = cache.get(cache_key) or (cache.get(legacy_key) if active_provider == settings.data_provider else None)
+        stale = cache.get(cache_key) or (cache.get(legacy_key) if legacy_key is not None else None)
         if stale is not None:
             logger.warning("Returning stale cached GEX snapshot")
             if hasattr(stale, 'model_dump'):
@@ -288,14 +297,23 @@ async def get_gex_by_strikes(
     # Try to get from cache first
     cache = get_cache()
     
-    from app.config import get_settings
     settings = get_settings()
-    active_provider = provider or settings.data_provider
+    active_provider = ProviderRegistry.resolve_provider_name(
+        provider,
+        default_provider=settings.data_provider,
+    )
+    default_provider = ProviderRegistry.resolve_provider_name(
+        default_provider=settings.data_provider,
+    )
     cache_key = f"gex:current:{symbol}:{active_provider}"
-    legacy_key = "gex:current"
+    legacy_key = (
+        f"gex:current:{symbol}"
+        if active_provider == default_provider
+        else None
+    )
 
     cached_data = cache.get(cache_key)
-    if cached_data is None and active_provider == settings.data_provider:
+    if cached_data is None and legacy_key is not None:
         cached_data = cache.get(legacy_key)
 
     try:
@@ -352,14 +370,23 @@ async def get_market_regime(
 
     cache = get_cache()
     
-    from app.config import get_settings
     settings = get_settings()
-    active_provider = provider or settings.data_provider
+    active_provider = ProviderRegistry.resolve_provider_name(
+        provider,
+        default_provider=settings.data_provider,
+    )
+    default_provider = ProviderRegistry.resolve_provider_name(
+        default_provider=settings.data_provider,
+    )
     cache_key = f"gex:current:{symbol}:{active_provider}"
-    legacy_key = "gex:current"
+    legacy_key = (
+        f"gex:current:{symbol}"
+        if active_provider == default_provider
+        else None
+    )
 
     cached_data = cache.get_if_fresh(cache_key)
-    if cached_data is None and active_provider == settings.data_provider:
+    if cached_data is None and legacy_key is not None:
         cached_data = cache.get_if_fresh(legacy_key)
 
     try:

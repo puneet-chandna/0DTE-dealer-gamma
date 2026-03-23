@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from app.config import Settings, get_settings
 from app.core.data_acquisition import is_market_open
 from app.core.demo_data import get_demo_data_service
-from app.core.provider_registry import get_data_client
+from app.core.provider_registry import ProviderRegistry, get_data_client
 from app.core.gex_calculator import GEXCalculator
 from app.services.cache import get_cache
 
@@ -151,7 +151,13 @@ async def _get_gex_update(
     Returns:
         Dictionary with GEX data for broadcasting.
     """
-    active_provider = provider or settings.data_provider
+    active_provider = ProviderRegistry.resolve_provider_name(
+        provider,
+        default_provider=settings.data_provider,
+    )
+    default_provider = ProviderRegistry.resolve_provider_name(
+        default_provider=settings.data_provider,
+    )
 
     if demo:
         payload = get_demo_data_service().get_ws_update(symbol=symbol)
@@ -160,11 +166,17 @@ async def _get_gex_update(
 
     cache = get_cache()
     cache_key = f"gex:current:{symbol}:{active_provider}"
-    legacy_cache_key = "gex:current" if active_provider == settings.data_provider else None
+    legacy_cache_key = (
+        f"gex:current:{symbol}"
+        if active_provider == default_provider
+        else None
+    )
+    cached_key = cache_key
 
     # Try to get from cache first
     cached = cache.get(cache_key)
     if cached is None and legacy_cache_key is not None:
+        cached_key = legacy_cache_key
         cached = cache.get(legacy_cache_key)
     if cached is not None:
         if isinstance(cached, str):
@@ -186,7 +198,7 @@ async def _get_gex_update(
             "spot_price": cached.spot_price,
             "regime": regime,
             "is_mock": False,
-            "is_stale": cache.is_stale(cache_key),
+            "is_stale": cache.is_stale(cached_key),
             "provider": active_provider,
         }
         return payload if _is_reasonable_gex_payload(payload) else _generate_mock_gex_data()

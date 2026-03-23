@@ -130,11 +130,21 @@ class TestCacheWarmup:
                     with patch("app.services.background.get_cache") as mock_get_cache:
                         mock_cache = MagicMock()
                         mock_get_cache.return_value = mock_cache
+                        with patch("app.services.background.get_settings") as mock_get_settings:
+                            mock_get_settings.return_value.data_provider = "yfinance"
 
-                        await cache_warmup()
+                            await cache_warmup()
 
-                        mock_cache.update_spot_price.assert_called_once_with(5900.0)
-                        mock_cache.set.assert_called_once()
+                            mock_cache.update_spot_price.assert_called_once_with(5900.0)
+                            assert mock_cache.set.call_count == 2
+                            mock_cache.set.assert_any_call(
+                                "gex:current:SPX:yfinance",
+                                mock_snapshot,
+                            )
+                            mock_cache.set.assert_any_call(
+                                "gex:current:SPX",
+                                mock_snapshot,
+                            )
 
     @pytest.mark.asyncio
     async def test_handles_fetch_error_gracefully(self):

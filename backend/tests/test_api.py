@@ -95,6 +95,38 @@ class TestGEXEndpoints:
             assert "spot_price" in data
             assert len(data["strikes"]) == len(data["gex_values"])
 
+    def test_current_gex_uses_symbol_scoped_legacy_cache_key(self):
+        """Default-provider cache fallback should stay symbol-specific."""
+        cached_snapshot = {
+            "timestamp": "2099-01-15T10:30:00-05:00",
+            "spot_price": 5000.0,
+            "total_call_gex": 1.0,
+            "total_put_gex": -2.0,
+            "net_gex": -1.0,
+            "zero_gamma_level": 4995.0,
+            "gex_by_strike": {"5000.0": 1.0},
+            "dominant_strike": 5000.0,
+            "metrics": {},
+        }
+        mock_cache = MagicMock()
+        mock_cache.get_if_fresh.side_effect = (
+            lambda key: cached_snapshot if key == "gex:current:QQQ" else None
+        )
+
+        with patch("app.api.routes.gex.get_cache", return_value=mock_cache):
+            with patch("app.api.routes.gex.get_settings") as mock_get_settings:
+                mock_get_settings.return_value.data_provider = "yfinance"
+                with patch(
+                    "app.api.routes.gex._get_live_gex_snapshot",
+                    new_callable=AsyncMock,
+                ) as mock_live_snapshot:
+                    mock_live_snapshot.return_value = cached_snapshot
+                    response = client.get("/api/gex/current?symbol=QQQ")
+
+        assert response.status_code == 200
+        mock_cache.get_if_fresh.assert_any_call("gex:current:QQQ")
+        mock_live_snapshot.assert_not_awaited()
+
 
 class TestDataEndpoints:
     """Test Data API endpoints."""
