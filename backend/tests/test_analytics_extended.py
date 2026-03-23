@@ -100,6 +100,40 @@ class TestIVSurfaceEndpoint:
             # 404 (empty chain) is the expected outcome with a mock that returns empty
             assert resp.status_code in (200, 404, 503)
 
+    def test_provider_param_keeps_registry_managed_client_open(self):
+        """IV surface should honor provider selection without closing the cached provider."""
+        mock_df = pd.DataFrame(
+            [
+                {
+                    "symbol": "SPXW20990115C05000000",
+                    "strike": 5000.0,
+                    "expiration": "2099-01-15",
+                    "type": "call",
+                    "bid": 10.0,
+                    "ask": 12.0,
+                    "mid": 11.0,
+                    "T": 0.01,
+                    "implied_vol": 0.2,
+                    "open_interest": 100,
+                }
+            ]
+        )
+        mock_client = MagicMock()
+        mock_client.provider_name = "tradier"
+        mock_client.get_options_chain_for_gex = AsyncMock(return_value=(mock_df, 5005.0))
+        mock_client.close = AsyncMock()
+
+        with patch("app.api.routes.analytics.get_data_client", return_value=mock_client) as mock_get_client:
+            with patch("app.core.vollib_bridge.VolLibBridge.calculate_iv_surface", return_value=mock_df[["strike", "type", "implied_vol", "mid"]].rename(columns={"implied_vol": "iv", "mid": "mid_price"}).assign(moneyness=1.0)):
+                with patch("app.core.vollib_bridge.VolLibBridge.calculate_iv_skew", return_value=pd.DataFrame()):
+                    with patch("app.core.rate_provider.get_rate_provider") as mock_rate_provider:
+                        mock_rate_provider.return_value.get_rate.return_value = 0.05
+                        resp = client.get("/api/analytics/iv-surface?provider=tradier")
+
+        assert resp.status_code == 200
+        mock_get_client.assert_called_once_with("tradier")
+        mock_client.close.assert_not_awaited()
+
 
 # ---------------------------------------------------------------------------
 # /api/analytics/technical-indicators

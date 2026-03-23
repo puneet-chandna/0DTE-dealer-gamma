@@ -16,7 +16,7 @@
 
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, useReducer } from 'react';
 import { NavBar } from '@/components/ui/NavBar';
 import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui';
 import { ChartErrorBoundary, EquityCurveChart } from '@/components/charts';
@@ -32,8 +32,27 @@ interface BacktestParams {
   initial_cash: number;
 }
 
+interface BacktestRunState {
+  submitted: BacktestParams | null;
+  runEnabled: boolean;
+}
+
+type BacktestRunAction =
+  | { type: 'submit'; params: BacktestParams }
+  | { type: 'auto-submit-demo'; params: BacktestParams };
+
 function formatPct(value: number): string {
   return `${(value * 100).toFixed(2)}%`;
+}
+
+function backtestRunReducer(
+  _state: BacktestRunState,
+  action: BacktestRunAction
+): BacktestRunState {
+  return {
+    submitted: { ...action.params },
+    runEnabled: true,
+  };
 }
 
 export default function BacktestPage() {
@@ -46,18 +65,19 @@ export default function BacktestPage() {
     initial_cash: 100000,
   });
 
-  const [submitted, setSubmitted] = useState<BacktestParams | null>(null);
-  const [runEnabled, setRunEnabled] = useState(false);
+  const [runState, dispatchRun] = useReducer(backtestRunReducer, {
+    submitted: null,
+    runEnabled: false,
+  });
   const autoStartedDemoRef = useRef(false);
 
   const { data: result, isLoading, error, isFetching } = useVectorbtBacktest(
-    submitted,
-    runEnabled
+    runState.submitted,
+    runState.runEnabled
   );
 
   const handleRun = useCallback(() => {
-    setSubmitted({ ...params });
-    setRunEnabled(true);
+    dispatchRun({ type: 'submit', params });
   }, [params]);
 
   const isRunning = isLoading || isFetching;
@@ -68,14 +88,13 @@ export default function BacktestPage() {
       return;
     }
 
-    if (autoStartedDemoRef.current || submitted !== null) {
+    if (autoStartedDemoRef.current || runState.submitted !== null) {
       return;
     }
 
     autoStartedDemoRef.current = true;
-    setSubmitted({ ...params });
-    setRunEnabled(true);
-  }, [demoModeEnabled, params, submitted]);
+    dispatchRun({ type: 'auto-submit-demo', params });
+  }, [demoModeEnabled, params, runState.submitted]);
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-50">

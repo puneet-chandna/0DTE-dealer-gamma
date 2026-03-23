@@ -1,5 +1,7 @@
 """0DTE GEX Backend - WebSocket Integration Tests."""
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -135,6 +137,29 @@ class TestWebSocketEndpoints:
             # Without API key, should be mock data
             assert "is_mock" in gex_data
             assert isinstance(gex_data["is_mock"], bool)
+
+    def test_websocket_passes_provider_query_param_to_update_fetch(self):
+        """Provider-aware websocket connections should fetch using the selected provider."""
+        with patch("app.api.websocket._get_gex_update", new_callable=AsyncMock) as mock_get_update:
+            mock_get_update.return_value = {
+                "net_gex": 1.0,
+                "net_gex_billions": 1e-9,
+                "zero_gamma_level": 5000.0,
+                "spot_price": 5001.0,
+                "regime": "neutral",
+                "is_mock": False,
+                "provider": "tradier",
+            }
+
+            with client.websocket_connect("/ws/gex-stream?provider=tradier") as websocket:
+                websocket.receive_json()
+                update = websocket.receive_json()
+
+        assert update["type"] == "gex_update"
+        assert update["data"]["provider"] == "tradier"
+        mock_get_update.assert_awaited()
+        _, kwargs = mock_get_update.await_args
+        assert kwargs["provider"] == "tradier"
 
 
 class TestWebSocketErrorHandling:

@@ -3,19 +3,27 @@
 import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { MarketStatusAlert } from '@/components/ui/MarketStatusAlert';
+import { useProviders } from '@/hooks/useProviders';
 import { useUIStore } from '@/stores/uiStore';
 
 export function AppShellEffects() {
   const queryClient = useQueryClient();
-  const { demoModeEnabled } = useUIStore();
+  const { demoModeEnabled, selectedProvider } = useUIStore();
   const previousModeRef = useRef(demoModeEnabled);
+  const previousProviderRef = useRef(selectedProvider);
+
+  useProviders();
 
   useEffect(() => {
-    if (previousModeRef.current === demoModeEnabled) {
+    if (
+      previousModeRef.current === demoModeEnabled &&
+      previousProviderRef.current === selectedProvider
+    ) {
       return;
     }
 
     previousModeRef.current = demoModeEnabled;
+    previousProviderRef.current = selectedProvider;
 
     queryClient.invalidateQueries({
       predicate: (query) => {
@@ -23,7 +31,7 @@ export function AppShellEffects() {
         return rootKey === 'gex' || rootKey === 'analytics' || rootKey === 'iv-surface' || rootKey === 'technical-indicators' || rootKey === 'vectorbt-backtest';
       },
     });
-  }, [demoModeEnabled, queryClient]);
+  }, [demoModeEnabled, queryClient, selectedProvider]);
 
   return <MarketStatusAlert />;
 }

@@ -7,6 +7,33 @@
 
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import type { DataProviderInfo, ProviderName } from '@/types';
+
+function resolveSelectedProvider(
+  selectedProvider: ProviderName,
+  availableProviders: DataProviderInfo[],
+  activeDefaultProvider: ProviderName
+): ProviderName {
+  const availableNames = new Set(
+    availableProviders
+      .filter((provider) => provider.is_available)
+      .map((provider) => provider.name)
+  );
+
+  if (availableNames.has(selectedProvider)) {
+    return selectedProvider;
+  }
+
+  if (availableNames.has(activeDefaultProvider)) {
+    return activeDefaultProvider;
+  }
+
+  const firstAvailable = availableProviders.find(
+    (provider) => provider.is_available
+  )?.name;
+
+  return firstAvailable ?? activeDefaultProvider;
+}
 
 /**
  * UI Settings State
@@ -24,6 +51,17 @@ interface UIState {
   // Date Selection
   selectedDate: string | null;
   setSelectedDate: (date: string | null) => void;
+
+  // Provider Selection
+  selectedProvider: ProviderName;
+  availableProviders: DataProviderInfo[];
+  activeDefaultProvider: ProviderName;
+  setSelectedProvider: (provider: ProviderName) => void;
+  setAvailableProviders: (
+    providers: DataProviderInfo[],
+    activeDefaultProvider: ProviderName
+  ) => void;
+  syncSelectedProvider: () => void;
 
   // Chart Settings
   showCallGex: boolean;
@@ -64,6 +102,30 @@ export const useUIStore = create<UIState>()(
       selectedDate: null,
       setSelectedDate: (date) => set({ selectedDate: date }),
 
+      // Provider selection
+      selectedProvider: 'yfinance',
+      availableProviders: [],
+      activeDefaultProvider: 'yfinance',
+      setSelectedProvider: (provider) => set({ selectedProvider: provider }),
+      setAvailableProviders: (providers, activeDefaultProvider) =>
+        set((state) => ({
+          availableProviders: providers,
+          activeDefaultProvider,
+          selectedProvider: resolveSelectedProvider(
+            state.selectedProvider,
+            providers,
+            activeDefaultProvider
+          ),
+        })),
+      syncSelectedProvider: () =>
+        set((state) => ({
+          selectedProvider: resolveSelectedProvider(
+            state.selectedProvider,
+            state.availableProviders,
+            state.activeDefaultProvider
+          ),
+        })),
+
       // Chart toggles - all visible by default
       showCallGex: true,
       showPutGex: true,
@@ -95,6 +157,7 @@ export const useUIStore = create<UIState>()(
       partialize: (state) => ({
         // Only persist user preferences, not transient UI state
         alertThreshold: state.alertThreshold,
+        selectedProvider: state.selectedProvider,
         showCallGex: state.showCallGex,
         showPutGex: state.showPutGex,
         showNetGex: state.showNetGex,

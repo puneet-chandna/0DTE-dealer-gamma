@@ -56,11 +56,11 @@ interface TimeSeriesPoint {
 export function useDashboardData(): DashboardData {
   const queryClient = useQueryClient();
   const [currentTime, setCurrentTime] = useState(() => Date.now());
-  const { demoModeEnabled } = useUIStore();
+  const { demoModeEnabled, selectedProvider } = useUIStore();
   const mode = getAppDataMode(demoModeEnabled);
 
   // WebSocket stream for real-time updates
-  const wsStream = useGEXStream(demoModeEnabled);
+  const wsStream = useGEXStream(demoModeEnabled, selectedProvider);
 
   // REST polling hooks (used as fallback and for initial data)
   const polledGEX = useCurrentGEX();
@@ -76,9 +76,6 @@ export function useDashboardData(): DashboardData {
   }, []);
 
   // Sync WebSocket data to React Query cache for consistency
-  // NOTE: Intentionally omitting polledGEX.data and polledRegime.data from deps
-  // to avoid circular updates (setQueryData would trigger re-fetch which triggers this effect)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (wsStream.isConnected && wsStream.data) {
       // Create a GEXSnapshot-like object from WebSocket update
@@ -98,7 +95,7 @@ export function useDashboardData(): DashboardData {
       };
 
       // Update React Query cache with WebSocket data
-      queryClient.setQueryData(queryKeys.gex.current(mode), (old: GEXSnapshot | undefined) => ({
+      queryClient.setQueryData(queryKeys.gex.current(mode, selectedProvider), (old: GEXSnapshot | undefined) => ({
         ...old,
         ...wsGexSnapshot,
       }));
@@ -117,13 +114,13 @@ export function useDashboardData(): DashboardData {
           }),
         };
 
-        queryClient.setQueryData(queryKeys.gex.regime(mode), (old: RegimeData | undefined) => ({
+        queryClient.setQueryData(queryKeys.gex.regime(mode, selectedProvider), (old: RegimeData | undefined) => ({
           ...old,
           ...wsRegimeData,
         }));
       }
     }
-  }, [wsStream.data, wsStream.isConnected, queryClient, mode, polledGEX.data, polledRegime.data]);
+  }, [wsStream.data, wsStream.isConnected, queryClient, mode, polledGEX.data, polledRegime.data, selectedProvider]);
 
   // Determine effective GEX data
   const gexData = useMemo((): GEXSnapshot | null => {
@@ -207,7 +204,7 @@ export function useDashboardData(): DashboardData {
  * Uses useReducer pattern to avoid setState-in-effect lint warnings.
  */
 export function useIntradayTimeSeries() {
-  const { gexData, isRealtime, lastUpdateTime } = useDashboardData();
+  const { gexData, lastUpdateTime } = useDashboardData();
   const { demoModeEnabled } = useUIStore();
 
   // Use reducer for accumulating time series to avoid setState in effect

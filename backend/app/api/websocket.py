@@ -141,6 +141,7 @@ async def _get_gex_update(
     settings: Settings,
     demo: bool = False,
     symbol: str = "SPX",
+    provider: Optional[str] = None,
 ) -> dict:
     """Get current GEX data for WebSocket broadcast.
 
@@ -150,13 +151,21 @@ async def _get_gex_update(
     Returns:
         Dictionary with GEX data for broadcasting.
     """
+    active_provider = provider or settings.data_provider
+
     if demo:
-        return get_demo_data_service().get_ws_update(symbol=symbol)
+        payload = get_demo_data_service().get_ws_update(symbol=symbol)
+        payload["provider"] = active_provider
+        return payload
 
     cache = get_cache()
+    cache_key = f"gex:current:{symbol}:{active_provider}"
+    legacy_cache_key = "gex:current" if active_provider == settings.data_provider else None
 
     # Try to get from cache first
-    cached = cache.get("gex:current")
+    cached = cache.get(cache_key)
+    if cached is None and legacy_cache_key is not None:
+        cached = cache.get(legacy_cache_key)
     if cached is not None:
         if isinstance(cached, str):
             import json
@@ -177,51 +186,50 @@ async def _get_gex_update(
             "spot_price": cached.spot_price,
             "regime": regime,
             "is_mock": False,
-            "is_stale": cache.is_stale("gex:current"),
+            "is_stale": cache.is_stale(cache_key),
+            "provider": active_provider,
         }
         return payload if _is_reasonable_gex_payload(payload) else _generate_mock_gex_data()
 
     # If no cached data, fetch fresh data via data provider
     try:
-        data_client = get_data_client()
+        data_client = get_data_client(active_provider)
         provider_name = data_client.provider_name
 
-        try:
-            options_df, spot_price = await data_client.get_options_chain_for_gex()
-            cache.update_spot_price(spot_price)
+        options_df, spot_price = await data_client.get_options_chain_for_gex(
+            underlying=symbol
+        )
+        cache.update_spot_price(spot_price)
 
-            if options_df.empty:
-                 logger.warning(f"WebSocket update: empty chain returned by {provider_name}")
-                 return _generate_mock_gex_data()
+        if options_df.empty:
+             logger.warning(f"WebSocket update: empty chain returned by {provider_name}")
+             return _generate_mock_gex_data()
 
-            gex_calculator = get_gex_calculator()
-            snapshot = gex_calculator.calculate_gex_from_chain(
-                options_df=options_df,
-                spot_price=spot_price,
-                timestamp=datetime.now(ET),
-            )
+        gex_calculator = get_gex_calculator()
+        snapshot = gex_calculator.calculate_gex_from_chain(
+            options_df=options_df,
+            spot_price=spot_price,
+            timestamp=datetime.now(ET),
+        )
 
-            # Store in specific active provider cache and default cache
-            cache_key = f"gex:current:SPX:{provider_name}"
-            cache.set(cache_key, snapshot)
-            cache.set("gex:current", snapshot)
+        # Store in specific active provider cache and default cache
+        cache.set(cache_key, snapshot)
+        if legacy_cache_key is not None:
+            cache.set(legacy_cache_key, snapshot)
 
-            regime, _, _ = gex_calculator.determine_regime(snapshot.net_gex)
+        regime, _, _ = gex_calculator.determine_regime(snapshot.net_gex)
 
-            payload = {
-                "net_gex": snapshot.net_gex,
-                "net_gex_billions": snapshot.net_gex / 1e9,
-                "zero_gamma_level": snapshot.zero_gamma_level,
-                "spot_price": snapshot.spot_price,
-                "regime": regime,
-                "is_mock": False,
-                "is_stale": False,
-                "provider": provider_name,
-            }
-            return payload if _is_reasonable_gex_payload(payload) else _generate_mock_gex_data()
-
-        finally:
-            await data_client.close()
+        payload = {
+            "net_gex": snapshot.net_gex,
+            "net_gex_billions": snapshot.net_gex / 1e9,
+            "zero_gamma_level": snapshot.zero_gamma_level,
+            "spot_price": snapshot.spot_price,
+            "regime": regime,
+            "is_mock": False,
+            "is_stale": False,
+            "provider": provider_name,
+        }
+        return payload if _is_reasonable_gex_payload(payload) else _generate_mock_gex_data()
 
     except Exception as e:
         logger.warning(f"Failed to fetch GEX data for WebSocket: {e}")
@@ -249,6 +257,9 @@ async def websocket_gex_stream(websocket: WebSocket) -> None:
     """
     demo = websocket.query_params.get("demo", "false").lower() == "true"
     symbol = websocket.query_params.get("symbol", "SPX").strip().upper()
+    provider = websocket.query_params.get("provider")
+    if provider is not None:
+        provider = provider.strip().lower() or None
 
     if symbol not in SUPPORTED_SYMBOLS:
         logger.warning(f"Rejected websocket connection with unsupported symbol '{symbol}'")
@@ -270,6 +281,7 @@ async def websocket_gex_stream(websocket: WebSocket) -> None:
                 "market_open": is_market_open(),
                 "update_interval_seconds": WS_UPDATE_INTERVAL,
                 "mode": "demo" if demo else "live",
+                "provider": provider or settings.data_provider,
             },
             "timestamp": datetime.now(ET).isoformat(),
         })
@@ -277,7 +289,12 @@ async def websocket_gex_stream(websocket: WebSocket) -> None:
         while True:
             try:
                 # Get current GEX data
-                gex_data = await _get_gex_update(settings, demo=demo, symbol=symbol)
+                gex_data = await _get_gex_update(
+                    settings,
+                    demo=demo,
+                    symbol=symbol,
+                    provider=provider,
+                )
 
                 # Send update
                 message = {

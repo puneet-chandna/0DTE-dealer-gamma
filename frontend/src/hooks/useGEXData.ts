@@ -15,9 +15,12 @@ import { useUIStore } from '@/stores/uiStore';
  */
 export const queryKeys = {
   gex: {
-    current: (mode: 'live' | 'demo') => ['gex', mode, 'current'] as const,
-    strikes: (mode: 'live' | 'demo') => ['gex', mode, 'strikes'] as const,
-    regime: (mode: 'live' | 'demo') => ['gex', mode, 'regime'] as const,
+    current: (mode: 'live' | 'demo', provider: string) =>
+      ['gex', mode, provider, 'current'] as const,
+    strikes: (mode: 'live' | 'demo', provider: string) =>
+      ['gex', mode, provider, 'strikes'] as const,
+    regime: (mode: 'live' | 'demo', provider: string) =>
+      ['gex', mode, provider, 'regime'] as const,
     historical: (mode: 'live' | 'demo', startDate: string, endDate: string) =>
       ['gex', mode, 'historical', startDate, endDate] as const,
   },
@@ -35,12 +38,16 @@ export const queryKeys = {
  * Hook for current real-time GEX data.
  */
 export function useCurrentGEX() {
-  const { autoRefreshEnabled, refreshInterval, demoModeEnabled } = useUIStore();
+  const { autoRefreshEnabled, refreshInterval, demoModeEnabled, selectedProvider } = useUIStore();
   const mode = getAppDataMode(demoModeEnabled);
 
   return useQuery({
-    queryKey: queryKeys.gex.current(mode),
-    queryFn: () => gexAPI.getCurrentGEX({ demo: demoModeEnabled }),
+    queryKey: queryKeys.gex.current(mode, selectedProvider),
+    queryFn: () =>
+      gexAPI.getCurrentGEX({
+        demo: demoModeEnabled,
+        provider: selectedProvider,
+      }),
     refetchInterval: autoRefreshEnabled ? refreshInterval * 1000 : false,
     staleTime: 10000, // 10 seconds
   });
@@ -50,12 +57,16 @@ export function useCurrentGEX() {
  * Hook for GEX breakdown by strike.
  */
 export function useGEXByStrikes(minStrike?: number, maxStrike?: number) {
-  const { autoRefreshEnabled, refreshInterval, demoModeEnabled } = useUIStore();
+  const { autoRefreshEnabled, refreshInterval, demoModeEnabled, selectedProvider } = useUIStore();
   const mode = getAppDataMode(demoModeEnabled);
 
   return useQuery({
-    queryKey: [...queryKeys.gex.strikes(mode), minStrike, maxStrike],
-    queryFn: () => gexAPI.getGEXByStrikes(minStrike, maxStrike, { demo: demoModeEnabled }),
+    queryKey: [...queryKeys.gex.strikes(mode, selectedProvider), minStrike, maxStrike],
+    queryFn: () =>
+      gexAPI.getGEXByStrikes(minStrike, maxStrike, {
+        demo: demoModeEnabled,
+        provider: selectedProvider,
+      }),
     refetchInterval: autoRefreshEnabled ? refreshInterval * 1000 : false,
     staleTime: 10000,
   });
@@ -65,12 +76,16 @@ export function useGEXByStrikes(minStrike?: number, maxStrike?: number) {
  * Hook for current market regime.
  */
 export function useCurrentRegime() {
-  const { autoRefreshEnabled, demoModeEnabled } = useUIStore();
+  const { autoRefreshEnabled, demoModeEnabled, selectedProvider } = useUIStore();
   const mode = getAppDataMode(demoModeEnabled);
 
   return useQuery({
-    queryKey: queryKeys.gex.regime(mode),
-    queryFn: () => gexAPI.getCurrentRegime({ demo: demoModeEnabled }),
+    queryKey: queryKeys.gex.regime(mode, selectedProvider),
+    queryFn: () =>
+      gexAPI.getCurrentRegime({
+        demo: demoModeEnabled,
+        provider: selectedProvider,
+      }),
     refetchInterval: autoRefreshEnabled ? 10000 : false, // More frequent for regime
     staleTime: 5000,
   });

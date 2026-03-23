@@ -12,6 +12,7 @@ import { usePathname } from 'next/navigation';
 import { useMarketStatus } from '@/hooks/useMarketStatus';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
+import { ProviderSelector } from '@/components/ui/ProviderSelector';
 import {
   BarChart3,
   LineChart,
@@ -85,6 +86,8 @@ function NavBarComponent() {
         </div>
 
         <div className="flex items-center gap-2">
+          <ProviderSelector />
+
           <button
             type="button"
             onClick={toggleDemoMode}

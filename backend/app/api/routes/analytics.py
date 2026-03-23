@@ -308,13 +308,13 @@ async def get_iv_surface(
         # In a real scenario, we'd fetch multiple expirations. 
         # For now, we'll fetch the nearest chain and generate a realistic surface from it.
         try:
-            options_df, spot_price = await data_client.get_options_chain_for_gex(symbol)
+            options_df, spot_price = await data_client.get_options_chain_for_gex(
+                underlying=symbol
+            )
         except Exception as e:
             logger.warning(f"Could not fetch live options for IV surface via {data_client.provider_name}: {e}")
             options_df = pd.DataFrame()
             spot_price = 5950.0  # Fallback
-        finally:
-             await data_client.close()
 
         # Get live rate
         rate = get_rate_provider().get_rate()
@@ -369,6 +369,8 @@ async def get_iv_surface(
 
     except HTTPException:
         raise
+    except ValueError as e:
+        raise HTTPException(status_code=503, detail=str(e)) from e
     except Exception as e:
         logger.error(f"IV surface computation failed: {e}")
         raise HTTPException(status_code=500, detail=f"IV surface failed: {str(e)}")

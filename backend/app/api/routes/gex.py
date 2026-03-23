@@ -60,44 +60,35 @@ async def _get_live_gex_snapshot(
         provider: Optional data provider name (e.g. "yfinance", "tradier").
     """
     gex_calculator = get_gex_calculator()
-    data_client = None
+    data_client = get_data_client(provider)
 
-    try:
-        # Initialise data client via registry
-        data_client = get_data_client(provider)
+    # Log appropriate message
+    request_symbol = getattr(data_client, "_get_ticker_symbol", lambda s: s)(symbol)
+    logger.info(f"Fetching live options data for {symbol} ({request_symbol}) via {data_client.provider_name}")
 
-        # Log appropriate message
-        request_symbol = getattr(data_client, "_get_ticker_symbol", lambda s: s)(symbol)
-        logger.info(f"Fetching live options data for {symbol} ({request_symbol}) via {data_client.provider_name}")
+    # Fetch filtered data
+    options_df, spot_price = await data_client.get_options_chain_for_gex(
+        underlying=symbol
+    )
 
-        # Fetch filtered data
-        options_df, spot_price = await data_client.get_options_chain_for_gex(
-            underlying=symbol
-        )
-
-        if options_df.empty:
-            logger.warning(f"No valid 0DTE options data found for {symbol} (possibly weekend). Falling back to mock data.")
-            mock_snapshot = _generate_mock_gex_snapshot(spot_price=spot_price)
-            raw = mock_snapshot.model_dump()
-            raw["provider"] = f"mock ({data_client.provider_name} empty)"
-            return raw
-
-        # Calculate live GEX
-
-        snapshot = gex_calculator.calculate_gex_from_chain(
-            options_df=options_df,
-            spot_price=spot_price,
-            timestamp=datetime.now(ET),
-        )
-        
-        # Add provider info
-        raw = snapshot.model_dump()
-        raw["provider"] = data_client.provider_name
+    if options_df.empty:
+        logger.warning(f"No valid 0DTE options data found for {symbol} (possibly weekend). Falling back to mock data.")
+        mock_snapshot = _generate_mock_gex_snapshot(spot_price=spot_price)
+        raw = mock_snapshot.model_dump()
+        raw["provider"] = f"mock ({data_client.provider_name} empty)"
         return raw
 
-    finally:
-        if data_client:
-            await data_client.close()
+    # Calculate live GEX
+    snapshot = gex_calculator.calculate_gex_from_chain(
+        options_df=options_df,
+        spot_price=spot_price,
+        timestamp=datetime.now(ET),
+    )
+
+    # Add provider info
+    raw = snapshot.model_dump()
+    raw["provider"] = data_client.provider_name
+    return raw
 
 
 def _generate_mock_gex_snapshot(spot_price: float = 5950.0) -> GEXSnapshot:

@@ -18,14 +18,16 @@ import type {
  */
 export const analyticsQueryKeys = {
   riskFreeRate: ['risk-free-rate'] as const,
-  ivSurface: (mode: 'live' | 'demo', symbol: string) => ['iv-surface', mode, symbol] as const,
+  ivSurface: (mode: 'live' | 'demo', provider: string, symbol: string) =>
+    ['iv-surface', mode, provider, symbol] as const,
   technicalIndicators: (
     mode: 'live' | 'demo',
+    provider: string,
     symbol: string,
     period: string,
     interval: string,
     indicators: string
-  ) => ['technical-indicators', mode, symbol, period, interval, indicators] as const,
+  ) => ['technical-indicators', mode, provider, symbol, period, interval, indicators] as const,
   vectorbtBacktest: (mode: 'live' | 'demo', params: Record<string, unknown>) =>
     ['vectorbt-backtest', mode, params] as const,
 };
@@ -48,12 +50,16 @@ export function useRiskFreeRate() {
  * Fetch IV surface and skew data.
  */
 export function useIVSurface(symbol: string = 'SPY', enabled: boolean = true) {
-  const { demoModeEnabled } = useUIStore();
+  const { demoModeEnabled, selectedProvider } = useUIStore();
   const mode = getAppDataMode(demoModeEnabled);
 
   return useQuery<IVSurfaceResponse>({
-    queryKey: analyticsQueryKeys.ivSurface(mode, symbol),
-    queryFn: () => analyticsAPI.getIVSurface(symbol, { demo: demoModeEnabled }),
+    queryKey: analyticsQueryKeys.ivSurface(mode, selectedProvider, symbol),
+    queryFn: () =>
+      analyticsAPI.getIVSurface(symbol, {
+        demo: demoModeEnabled,
+        provider: selectedProvider,
+      }),
     enabled,
     staleTime: 60 * 1000, // 1 minute
     retry: 1,
@@ -70,11 +76,18 @@ export function useTechnicalIndicators(
   indicators: string = 'ATR,RSI,BBANDS',
   enabled: boolean = true
 ) {
-  const { demoModeEnabled } = useUIStore();
+  const { demoModeEnabled, selectedProvider } = useUIStore();
   const mode = getAppDataMode(demoModeEnabled);
 
   return useQuery<TechnicalIndicatorResponse>({
-    queryKey: analyticsQueryKeys.technicalIndicators(mode, symbol, period, interval, indicators),
+    queryKey: analyticsQueryKeys.technicalIndicators(
+      mode,
+      selectedProvider,
+      symbol,
+      period,
+      interval,
+      indicators
+    ),
     queryFn: () =>
       analyticsAPI.getTechnicalIndicators(symbol, period, interval, indicators, {
         demo: demoModeEnabled,

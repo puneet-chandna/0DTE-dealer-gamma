@@ -8,7 +8,7 @@ import { memo } from 'react';
 import { Moon, Sun, RefreshCw, Wifi, WifiOff, Radio } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
-import { Badge, ConnectionStatus } from '@/components/ui';
+import { Badge, ConnectionStatus, ProviderSelector } from '@/components/ui';
 import type { ConnectionState } from '@/types';
 
 interface DashboardHeaderProps {
@@ -98,6 +98,8 @@ function DashboardHeaderComponent({
 
       {/* Right: Controls */}
       <div className="flex items-center gap-2">
+        <ProviderSelector />
+
         {/* Auto-refresh toggle */}
         <button
           onClick={() => setAutoRefresh(!autoRefreshEnabled)}

@@ -106,6 +106,7 @@ export interface GEXUpdate {
   zero_gamma_level: number;
   spot_price: number;
   regime: RegimeType;
+  provider?: string;
   is_mock?: boolean;
   is_demo?: boolean;
   is_stale?: boolean;
@@ -154,6 +155,50 @@ export interface APIError {
 export interface HealthStatus {
   status: 'healthy' | 'unhealthy';
 }
+
+export type ProviderName = 'yfinance' | 'tradier';
+
+export interface DataProviderInfo {
+  name: ProviderName;
+  display_name: string;
+  provides_greeks: boolean;
+  supports_spx_directly: boolean;
+  rate_limit: number;
+  requires_api_key: boolean;
+  is_available: boolean;
+  unavailable_reason: string | null;
+  features: string[];
+}
+
+export interface ProvidersResponse {
+  providers: DataProviderInfo[];
+  active_default: ProviderName;
+}
+
+export interface ProviderFeatureConfig {
+  displayName: string;
+  supportsDashboard: boolean;
+  supportsIvSurface: boolean;
+  supportsTechnicalIndicators: boolean;
+  technicalIndicatorsUnavailableReason?: string;
+}
+
+export const PROVIDER_FEATURES: Record<ProviderName, ProviderFeatureConfig> = {
+  yfinance: {
+    displayName: 'Yahoo Finance',
+    supportsDashboard: true,
+    supportsIvSurface: true,
+    supportsTechnicalIndicators: true,
+  },
+  tradier: {
+    displayName: 'Tradier',
+    supportsDashboard: true,
+    supportsIvSurface: true,
+    supportsTechnicalIndicators: false,
+    technicalIndicatorsUnavailableReason:
+      'Technical indicators are currently unavailable for Tradier.',
+  },
+};
 
 // ============================================================================
 // New Integration Types

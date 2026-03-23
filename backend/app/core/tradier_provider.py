@@ -3,7 +3,7 @@
 Production-grade data provider using the Tradier brokerage API.
 Provides real SPX/SPXW options chains with ORATS-sourced Greeks.
 
-Tradier API Docs: https://documentation.tradier.com/brokerage-api
+Official docs: https://docs.tradier.com/reference
 """
 
 import asyncio
@@ -35,7 +35,7 @@ class TradierClient(DataProvider):
     - Real SPX / SPXW options chains (no SPY proxy)
     - ORATS-sourced Greeks (delta, gamma, theta, vega, rho, phi)
     - Multiple IV values (bid_iv, mid_iv, ask_iv, smv_vol)
-    - 120 requests/minute rate limit
+    - Up to 120 requests/minute in production (60/minute in sandbox)
     - Production-quality data
 
     Requires a Tradier API key (production or sandbox).
@@ -158,8 +158,8 @@ class TradierClient(DataProvider):
         quotes = data.get("quotes", {})
         quote = quotes.get("quote")
 
-        # When a single symbol is requested Tradier returns an object,
-        # for multiple symbols it returns a list.
+        # Tradier responses can flip between an object and a list depending
+        # on symbol count, so normalize the single-symbol shape here.
         if isinstance(quote, list):
             quote = quote[0] if quote else {}
         if quote is None:
@@ -257,7 +257,8 @@ class TradierClient(DataProvider):
             )
             return pd.DataFrame()
 
-        # Normalise to a flat list (Tradier returns dict for single item)
+        # Tradier returns a dict for a single contract and a list for
+        # multiple contracts, so normalize the payload before mapping.
         if isinstance(option_list, dict):
             option_list = [option_list]
 

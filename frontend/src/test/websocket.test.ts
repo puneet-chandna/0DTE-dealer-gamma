@@ -299,6 +299,17 @@ describe('useGEXStream', () => {
     expect(ws.url).toContain('/gex-stream?demo=true');
   });
 
+  it('should include provider in the stream query string', async () => {
+    renderHook(() => useGEXStream(false, 'tradier'));
+
+    await act(async () => {
+      vi.runAllTimers();
+    });
+
+    const ws = MockWebSocket.instances[MockWebSocket.instances.length - 1];
+    expect(ws.url).toContain('/gex-stream?provider=tradier');
+  });
+
   it('should return GEXUpdate typed data', async () => {
     const { result } = renderHook(() => useGEXStream());
 

@@ -1,5 +1,9 @@
 """0DTE GEX Backend - API Tests."""
 
+from datetime import date
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
@@ -111,6 +115,87 @@ class TestDataEndpoints:
         response = client.get("/api/data/options-chain")
         # YFinance may succeed (200) or have network issues (503)
         assert response.status_code in (200, 503)
+
+    def test_providers_endpoint_includes_availability_metadata(self):
+        """Provider metadata should expose runtime availability for the UI."""
+        response = client.get("/api/data/providers")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "providers" in data
+        assert "active_default" in data
+        assert data["providers"]
+        for provider in data["providers"]:
+            assert "is_available" in provider
+            assert "unavailable_reason" in provider
+
+    def test_options_chain_uses_snapshot_and_spot_price_for_provider_requests(self):
+        """Options chain should fetch an explicit expiration via snapshot path."""
+        mock_client = MagicMock()
+        mock_client.provider_name = "tradier"
+        mock_client.get_options_chain_snapshot = AsyncMock(
+            return_value=pd.DataFrame(
+                [
+                    {
+                        "symbol": "SPXW20990115C05000000",
+                        "strike": 5000.0,
+                        "expiration": date(2099, 1, 15),
+                        "type": "call",
+                        "bid": 10.0,
+                        "ask": 12.0,
+                        "mid": 11.0,
+                        "open_interest": 100,
+                        "volume": 50,
+                        "implied_vol": 0.21,
+                    }
+                ]
+            )
+        )
+        mock_client.get_spot_price = AsyncMock(return_value=5005.0)
+        mock_client.close = AsyncMock()
+
+        mock_cache = MagicMock()
+        mock_cache.get_if_fresh.return_value = None
+        mock_cache.get.return_value = None
+
+        with patch("app.api.routes.data.get_data_client", return_value=mock_client) as mock_get_client:
+            with patch("app.api.routes.data.get_cache", return_value=mock_cache):
+                response = client.get(
+                    "/api/data/options-chain",
+                    params={"provider": "tradier", "expiration": "2099-01-15"},
+                )
+
+        assert response.status_code == 200
+        mock_get_client.assert_called_once_with("tradier")
+        mock_client.get_options_chain_snapshot.assert_awaited_once_with(
+            underlying="SPX",
+            expiration_date=date(2099, 1, 15),
+        )
+        mock_client.get_spot_price.assert_awaited_once_with(symbol="SPX")
+        mock_client.close.assert_not_awaited()
+
+    def test_spot_price_keeps_registry_managed_provider_open(self):
+        """Spot price requests should not close registry-managed providers."""
+        mock_client = MagicMock()
+        mock_client.provider_name = "tradier"
+        mock_client.get_spot_price = AsyncMock(return_value=5001.25)
+        mock_client.close = AsyncMock()
+
+        mock_cache = MagicMock()
+        mock_cache.get_if_fresh.return_value = None
+        mock_cache.get.return_value = None
+
+        with patch("app.api.routes.data.get_data_client", return_value=mock_client):
+            with patch("app.api.routes.data.get_cache", return_value=mock_cache):
+                response = client.get(
+                    "/api/data/spot-price",
+                    params={"provider": "tradier", "symbol": "SPX"},
+                )
+
+        assert response.status_code == 200
+        assert response.json()["provider"] == "tradier"
+        mock_client.get_spot_price.assert_awaited_once_with(symbol="SPX")
+        mock_client.close.assert_not_awaited()
 
     def test_spot_price_endpoint(self):
         """Spot price should return data via YFinance (no API key required)."""

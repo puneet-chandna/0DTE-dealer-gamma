@@ -42,8 +42,11 @@ import type { GEXChartDataPoint, TimeSeriesDataPoint } from '@/types';
 
 export default function DashboardPage() {
   const queryClient = useQueryClient();
-  const { demoModeEnabled } = useUIStore();
+  const { demoModeEnabled, selectedProvider, availableProviders } = useUIStore();
   const mode = getAppDataMode(demoModeEnabled);
+  const selectedProviderInfo = availableProviders.find(
+    (provider) => provider.name === selectedProvider
+  );
 
   // Hybrid data hook - prefers WebSocket, falls back to polling
   const {
@@ -96,9 +99,15 @@ export default function DashboardPage() {
 
   // Refresh handler - invalidate all queries
   const handleRefresh = () => {
-    queryClient.invalidateQueries({ queryKey: queryKeys.gex.current(mode) });
-    queryClient.invalidateQueries({ queryKey: queryKeys.gex.regime(mode) });
-    queryClient.invalidateQueries({ queryKey: queryKeys.gex.strikes(mode) });
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.gex.current(mode, selectedProvider),
+    });
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.gex.regime(mode, selectedProvider),
+    });
+    queryClient.invalidateQueries({
+      queryKey: queryKeys.gex.strikes(mode, selectedProvider),
+    });
     // Also reconnect WebSocket if disconnected
     if (!isRealtime) {
       reconnect();
@@ -168,7 +177,7 @@ export default function DashboardPage() {
                     )}
                     {gexData?.spot_price !== undefined && (
                       <span className="text-xs text-zinc-500">
-                        SPX @ {gexData.spot_price.toLocaleString()}
+                        {selectedProviderInfo?.display_name ?? selectedProvider} • SPX @ {gexData.spot_price.toLocaleString()}
                       </span>
                     )}
                   </div>

@@ -9,7 +9,7 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import type { GEXUpdate, ConnectionState } from '@/types';
+import type { GEXUpdate, ConnectionState, ProviderName } from '@/types';
 
 const WS_URL = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:8000/ws';
 
@@ -410,9 +410,18 @@ export function useWebSocket<T>(
  */
 export function useGEXStream(
   demoModeEnabled: boolean = false,
+  provider?: ProviderName,
   options?: Omit<UseWebSocketOptions, 'onConnected' | 'onDisconnected'>
 ) {
-  const endpoint = demoModeEnabled ? '/gex-stream?demo=true' : '/gex-stream';
+  const params = new URLSearchParams();
+  if (provider) {
+    params.set('provider', provider);
+  }
+  if (demoModeEnabled) {
+    params.set('demo', 'true');
+  }
+  const queryString = params.toString();
+  const endpoint = queryString ? `/gex-stream?${queryString}` : '/gex-stream';
 
   return useWebSocket<GEXUpdate>(endpoint, {
     autoReconnect: true,

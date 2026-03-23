@@ -35,12 +35,31 @@ class ProviderRegistry:
         logger.debug(f"Registered data provider: {name}")
 
     @classmethod
+    def get_provider_availability(
+        cls,
+        name: str,
+        provider_cls: Optional[type[DataProvider]] = None,
+    ) -> tuple[bool, Optional[str]]:
+        """Return runtime availability metadata for a provider."""
+        provider_cls = provider_cls or cls._registry.get(name)
+        if provider_cls is None:
+            return False, f"Unknown provider '{name}'"
+
+        settings = get_settings()
+
+        if name == "tradier" and not settings.tradier_api_key:
+            return False, "TRADIER_API_KEY environment variable is missing"
+
+        return True, None
+
+    @classmethod
     def list_providers(cls) -> list[dict]:
         """Return a list of capabilities for all registered providers."""
         caps = []
         for name, provider_cls in cls._registry.items():
-            # Create a dummy instance just to read the class-level metadata properly,
-            # or rely on the class attributes directly.
+            is_available, unavailable_reason = cls.get_provider_availability(
+                name, provider_cls
+            )
             caps.append(
                 {
                     "name": name,
@@ -49,6 +68,8 @@ class ProviderRegistry:
                     "supports_spx_directly": provider_cls.supports_spx_directly,
                     "rate_limit": provider_cls.rate_limit,
                     "requires_api_key": provider_cls.requires_api_key,
+                    "is_available": is_available,
+                    "unavailable_reason": unavailable_reason,
                     "features": [
                         "spot_price",
                         "options_chain",
@@ -72,6 +93,7 @@ class ProviderRegistry:
         """
         settings = get_settings()
         requested_name = name or settings.data_provider
+        explicit_request = name is not None
 
         # Check cache
         if requested_name in cls._instances:
@@ -79,7 +101,9 @@ class ProviderRegistry:
 
         # Ensure registered
         if requested_name not in cls._registry:
-            # Fallback to yfinance if the requested provider is missing
+            if explicit_request:
+                raise ValueError(f"Unknown provider '{requested_name}'")
+
             logger.warning(
                 f"Provider '{requested_name}' not found. "
                 "Falling back to 'yfinance'."
@@ -87,16 +111,18 @@ class ProviderRegistry:
             requested_name = "yfinance"
 
         provider_cls = cls._registry[requested_name]
+        is_available, unavailable_reason = cls.get_provider_availability(
+            requested_name, provider_cls
+        )
+        if not is_available:
+            raise ValueError(
+                unavailable_reason
+                or f"Provider '{requested_name}' is unavailable"
+            )
 
         # Instantiate based on provider type
         try:
             if requested_name == "tradier":
-                settings = get_settings()
-                if not settings.tradier_api_key:
-                    raise ValueError(
-                        "TRADIER_API_KEY environment variable is missing"
-                    )
-
                 instance = provider_cls(
                     api_key=settings.tradier_api_key,
                     base_url=settings.tradier_base_url,
@@ -107,11 +133,7 @@ class ProviderRegistry:
 
         except Exception as e:
             logger.error(f"Failed to initialise provider '{requested_name}': {e}")
-            if requested_name != "yfinance":
-                logger.warning("Falling back to yfinance")
-                instance = YFinanceClient()
-            else:
-                raise
+            raise
 
         # Cache and return
         cls._instances[requested_name] = instance
@@ -132,6 +154,7 @@ class ProviderRegistry:
 # ---- Auto-registration ----
 ProviderRegistry.register(YFinanceClient)
 ProviderRegistry.register(TradierClient)
+
 
 def get_data_client(provider: Optional[str] = None) -> DataProvider:
     """Convenience dependency function for FastAPI routes."""

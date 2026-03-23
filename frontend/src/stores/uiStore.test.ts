@@ -12,12 +12,16 @@ describe('useUIStore', () => {
       isSidebarOpen: true,
       alertThreshold: 1.0,
       selectedDate: null,
+      selectedProvider: 'yfinance',
+      availableProviders: [],
+      activeDefaultProvider: 'yfinance',
       showCallGex: true,
       showPutGex: true,
       showNetGex: true,
       isDarkMode: false,
       autoRefreshEnabled: true,
       refreshInterval: 30,
+      demoModeEnabled: false,
     });
   });
 
@@ -167,6 +171,61 @@ describe('useUIStore', () => {
       // Then reset without specifying interval
       setAutoRefresh(true);
       expect(useUIStore.getState().refreshInterval).toBe(30);
+    });
+  });
+
+  describe('provider selection', () => {
+    it('defaults to yfinance provider', () => {
+      const state = useUIStore.getState();
+      expect(state.selectedProvider).toBe('yfinance');
+      expect(state.activeDefaultProvider).toBe('yfinance');
+      expect(state.availableProviders).toEqual([]);
+    });
+
+    it('updates selected provider directly', () => {
+      const { setSelectedProvider } = useUIStore.getState();
+
+      setSelectedProvider('tradier');
+      expect(useUIStore.getState().selectedProvider).toBe('tradier');
+    });
+
+    it('syncs unavailable persisted provider back to the active default', () => {
+      useUIStore.setState({
+        selectedProvider: 'tradier',
+      });
+
+      const { setAvailableProviders, syncSelectedProvider } = useUIStore.getState();
+
+      setAvailableProviders(
+        [
+          {
+            name: 'yfinance',
+            display_name: 'Yahoo Finance',
+            provides_greeks: false,
+            supports_spx_directly: false,
+            rate_limit: 10,
+            requires_api_key: false,
+            is_available: true,
+            unavailable_reason: null,
+            features: ['spot_price', 'options_chain'],
+          },
+          {
+            name: 'tradier',
+            display_name: 'Tradier',
+            provides_greeks: true,
+            supports_spx_directly: true,
+            rate_limit: 120,
+            requires_api_key: true,
+            is_available: false,
+            unavailable_reason: 'Missing API key',
+            features: ['spot_price', 'options_chain', 'greeks', 'spx_direct'],
+          },
+        ],
+        'yfinance'
+      );
+      syncSelectedProvider();
+
+      expect(useUIStore.getState().selectedProvider).toBe('yfinance');
     });
   });
 });

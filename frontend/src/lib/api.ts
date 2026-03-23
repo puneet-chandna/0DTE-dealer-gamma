@@ -1,4 +1,5 @@
 import axios from 'axios';
+import type { ProviderName, ProvidersResponse } from '@/types';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -10,9 +11,13 @@ interface DemoRequestOptions {
   demo?: boolean;
 }
 
-function withDemoParam(
+interface ProviderRequestOptions extends DemoRequestOptions {
+  provider?: ProviderName;
+}
+
+function withRequestParams(
   params: Record<string, unknown>,
-  options?: DemoRequestOptions
+  options?: ProviderRequestOptions
 ) {
   const normalizedParams = Object.entries(params).reduce<Record<string, string | number | boolean>>(
     (accumulator, [key, value]) => {
@@ -29,14 +34,15 @@ function withDemoParam(
     {}
   );
 
-  if (!options?.demo) {
-    return normalizedParams;
+  if (options?.provider) {
+    normalizedParams.provider = options.provider;
   }
 
-  return {
-    ...normalizedParams,
-    demo: true,
-  };
+  if (options?.demo) {
+    normalizedParams.demo = true;
+  }
+
+  return normalizedParams;
 }
 
 export const healthAPI = {
@@ -51,19 +57,19 @@ export const healthAPI = {
 };
 
 export const gexAPI = {
-  getCurrentGEX: async (options?: DemoRequestOptions) => {
+  getCurrentGEX: async (options?: ProviderRequestOptions) => {
     const response = await api.get('/api/gex/current', {
-      params: withDemoParam({}, options),
+      params: withRequestParams({}, options),
     });
     return response.data;
   },
   getGEXByStrikes: async (
     minStrike?: number,
     maxStrike?: number,
-    options?: DemoRequestOptions
+    options?: ProviderRequestOptions
   ) => {
     const response = await api.get('/api/gex/strikes', {
-      params: withDemoParam(
+      params: withRequestParams(
         {
           min_strike: minStrike,
           max_strike: maxStrike,
@@ -73,9 +79,9 @@ export const gexAPI = {
     });
     return response.data;
   },
-  getCurrentRegime: async (options?: DemoRequestOptions) => {
+  getCurrentRegime: async (options?: ProviderRequestOptions) => {
     const response = await api.get('/api/gex/regime', {
-      params: withDemoParam({}, options),
+      params: withRequestParams({}, options),
     });
     return response.data;
   },
@@ -83,10 +89,10 @@ export const gexAPI = {
     startDate: string,
     endDate: string,
     interval?: string,
-    options?: DemoRequestOptions
+    options?: ProviderRequestOptions
   ) => {
     const response = await api.get('/api/gex/historical', {
-      params: withDemoParam(
+      params: withRequestParams(
         {
           start_date: startDate,
           end_date: endDate,
@@ -121,16 +127,20 @@ export const dataAPI = {
     const response = await api.get('/api/data/market-status');
     return response.data;
   },
-  getProviders: async () => {
+  getProviders: async (): Promise<ProvidersResponse> => {
     const response = await api.get('/api/data/providers');
     return response.data;
   },
-  getOptionsChain: async (symbol?: string) => {
-    const response = await api.get(`/api/data/options-chain${symbol ? `?symbol=${symbol}` : ''}`);
+  getOptionsChain: async (symbol?: string, options?: ProviderRequestOptions) => {
+    const response = await api.get('/api/data/options-chain', {
+      params: withRequestParams({ symbol }, options),
+    });
     return response.data;
   },
-  getSpotPrice: async (symbol?: string) => {
-    const response = await api.get(`/api/data/spot-price${symbol ? `?symbol=${symbol}` : ''}`);
+  getSpotPrice: async (symbol?: string, options?: ProviderRequestOptions) => {
+    const response = await api.get('/api/data/spot-price', {
+      params: withRequestParams({ symbol }, options),
+    });
     return response.data;
   },
   getRiskFreeRate: async () => {
@@ -143,10 +153,10 @@ export const analyticsAPI = {
   getSummaryStats: async (
     startDate?: string,
     endDate?: string,
-    options?: DemoRequestOptions
+    options?: ProviderRequestOptions
   ) => {
     const response = await api.get('/api/analytics/summary-statistics', {
-      params: withDemoParam(
+      params: withRequestParams(
         {
           start_date: startDate,
           end_date: endDate,
@@ -156,9 +166,9 @@ export const analyticsAPI = {
     });
     return response.data;
   },
-  getIVSurface: async (symbol: string, options?: DemoRequestOptions) => {
+  getIVSurface: async (symbol: string, options?: ProviderRequestOptions) => {
     const response = await api.get('/api/analytics/iv-surface', {
-      params: withDemoParam({ symbol }, options),
+      params: withRequestParams({ symbol }, options),
     });
     return response.data;
   },
@@ -167,7 +177,7 @@ export const analyticsAPI = {
     period: string | number,
     interval: string,
     indicators: string | string[] = 'ATR,RSI,BBANDS',
-    options?: DemoRequestOptions
+    options?: ProviderRequestOptions
   ) => {
     const normalizedPeriod = typeof period === 'number' ? String(period) : period;
     const normalizedIndicators = Array.isArray(indicators)
@@ -175,7 +185,7 @@ export const analyticsAPI = {
       : indicators;
 
     const response = await api.get('/api/analytics/technical-indicators', {
-      params: withDemoParam(
+      params: withRequestParams(
         {
           symbol,
           period: normalizedPeriod,
@@ -187,9 +197,9 @@ export const analyticsAPI = {
     });
     return response.data;
   },
-  runVectorbtBacktest: async (params: Record<string, unknown>, options?: DemoRequestOptions) => {
+  runVectorbtBacktest: async (params: Record<string, unknown>, options?: ProviderRequestOptions) => {
     const response = await api.get('/api/analytics/vectorbt-backtest', {
-      params: withDemoParam(params, options),
+      params: withRequestParams(params, options),
     });
     return response.data;
   },
@@ -197,9 +207,9 @@ export const analyticsAPI = {
     const response = await api.get('/api/analytics/gex-volatility');
     return response.data;
   },
-  getBacktest: async (params: Record<string, unknown>, options?: DemoRequestOptions) => {
+  getBacktest: async (params: Record<string, unknown>, options?: ProviderRequestOptions) => {
     const response = await api.get('/api/analytics/backtest', {
-      params: withDemoParam(params, options),
+      params: withRequestParams(params, options),
     });
     return response.data;
   }

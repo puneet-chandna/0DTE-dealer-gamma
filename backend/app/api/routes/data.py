@@ -4,7 +4,7 @@ Provides access to options chain data, spot prices, and market status.
 """
 
 import logging
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Optional
 from zoneinfo import ZoneInfo
 
@@ -77,10 +77,18 @@ async def get_options_chain(
     
     Returns standard GEX dataset including bid/ask, volume, open interest, and implied volatility.
     """
-    client = None
     try:
         # Use provider registry
         client = get_data_client(provider)
+        expiration_date: Optional[date] = None
+        if expiration:
+            try:
+                expiration_date = date.fromisoformat(expiration)
+            except ValueError as e:
+                raise HTTPException(
+                    status_code=400,
+                    detail="expiration must be in YYYY-MM-DD format",
+                ) from e
         
         # Determine actual symbol to request (YFinance needs SPY substitution, Tradier doesn't)
         # Note: the provider abstracts this detail now, but if we need to log it:
@@ -98,11 +106,13 @@ async def get_options_chain(
             logger.debug(f"Returning cached options chain for {symbol} from {client.provider_name}")
             return OptionsChainResponse(**cached)
 
-        # Get options chain via client
-        options_df, spot_price = await client.get_options_chain_for_gex(
+        # Fetch the full snapshot for the requested expiration, not the
+        # provider's filtered GEX subset.
+        options_df = await client.get_options_chain_snapshot(
             underlying=symbol,
-            expiration_date=expiration
+            expiration_date=expiration_date,
         )
+        spot_price = await client.get_spot_price(symbol=symbol)
 
         # Update spot price in cache
         cache.update_spot_price(spot_price)
@@ -124,10 +134,23 @@ async def get_options_chain(
             }
             options_list.append(contract)
 
+        if expiration_date is not None:
+            resolved_expiration = expiration_date.isoformat()
+        else:
+            resolved_expiration = today
+
+        if not options_df.empty and "expiration" in options_df.columns:
+            first_expiration = options_df.iloc[0]["expiration"]
+            resolved_expiration = (
+                first_expiration.isoformat()
+                if hasattr(first_expiration, "isoformat")
+                else str(first_expiration)
+            )
+
         result = {
             "underlying": symbol,
             "spot_price": spot_price,
-            "expiration_date": expiration or today, # Use actual expiration if provided, else today
+            "expiration_date": resolved_expiration,
             "contract_count": len(options_list),
             "contracts": options_list,
             "timestamp": datetime.now(ET).isoformat(),
@@ -155,9 +178,6 @@ async def get_options_chain(
             status_code=503,
             detail=f"Unable to fetch options chain: {str(e)}",
         )
-    finally:
-        if client:
-            await client.close()
 
 
 @router.get("/spot-price", tags=["Data"])
@@ -170,7 +190,6 @@ async def get_spot_price(
     Returns the latest underlying price.
     """
 
-    client = None
     try:
         # Use provider registry
         client = get_data_client(provider)
@@ -214,9 +233,6 @@ async def get_spot_price(
             status_code=503,
             detail=f"Unable to fetch spot price: {str(e)}",
         )
-    finally:
-        if client:
-            await client.close()
 
 
 
@@ -232,4 +248,3 @@ async def get_risk_free_rate() -> dict:
 
     provider = get_rate_provider()
     return provider.get_rate_info()
-

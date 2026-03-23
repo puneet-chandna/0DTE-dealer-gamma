@@ -51,6 +51,7 @@ vi.mock('@/stores/uiStore', () => ({
     autoRefreshEnabled: true,
     refreshInterval: 5,
     demoModeEnabled: true,
+    selectedProvider: 'tradier',
   }),
 }));
 
@@ -74,9 +75,9 @@ function createWrapper() {
 
 describe('queryKeys', () => {
   it('should have correct structure for gex keys', () => {
-    expect(queryKeys.gex.current('demo')).toEqual(['gex', 'demo', 'current']);
-    expect(queryKeys.gex.strikes('demo')).toEqual(['gex', 'demo', 'strikes']);
-    expect(queryKeys.gex.regime('demo')).toEqual(['gex', 'demo', 'regime']);
+    expect(queryKeys.gex.current('demo', 'tradier')).toEqual(['gex', 'demo', 'tradier', 'current']);
+    expect(queryKeys.gex.strikes('demo', 'tradier')).toEqual(['gex', 'demo', 'tradier', 'strikes']);
+    expect(queryKeys.gex.regime('demo', 'tradier')).toEqual(['gex', 'demo', 'tradier', 'regime']);
   });
 
   it('should generate historical keys with dates', () => {
@@ -123,7 +124,7 @@ describe('useCurrentGEX', () => {
     });
 
     expect(result.current.data).toEqual(mockData);
-    expect(gexAPI.getCurrentGEX).toHaveBeenCalledWith({ demo: true });
+    expect(gexAPI.getCurrentGEX).toHaveBeenCalledWith({ demo: true, provider: 'tradier' });
   });
 
   it('should handle API errors', async () => {
@@ -178,7 +179,7 @@ describe('useGEXByStrikes', () => {
     });
 
     expect(result.current.data).toEqual(mockData);
-    expect(gexAPI.getGEXByStrikes).toHaveBeenCalledWith(undefined, undefined, { demo: true });
+    expect(gexAPI.getGEXByStrikes).toHaveBeenCalledWith(undefined, undefined, { demo: true, provider: 'tradier' });
   });
 
   it('should fetch strikes data with filters', async () => {
@@ -199,7 +200,7 @@ describe('useGEXByStrikes', () => {
       expect(result.current.isSuccess).toBe(true);
     });
 
-    expect(gexAPI.getGEXByStrikes).toHaveBeenCalledWith(5850, 5950, { demo: true });
+    expect(gexAPI.getGEXByStrikes).toHaveBeenCalledWith(5850, 5950, { demo: true, provider: 'tradier' });
   });
 });
 
@@ -230,7 +231,7 @@ describe('useCurrentRegime', () => {
 
     expect(result.current.data?.regime).toBe('short_gamma');
     expect(result.current.data?.color).toBe('red');
-    expect(gexAPI.getCurrentRegime).toHaveBeenCalledWith({ demo: true });
+    expect(gexAPI.getCurrentRegime).toHaveBeenCalledWith({ demo: true, provider: 'tradier' });
   });
 
   it('should return long_gamma regime', async () => {

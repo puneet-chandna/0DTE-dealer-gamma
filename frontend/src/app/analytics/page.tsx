@@ -19,6 +19,8 @@ import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui';
 import { ChartErrorBoundary, IVSurfaceChart, IVSkewChart, TechnicalOverlayChart } from '@/components/charts';
 import { useIVSurface, useTechnicalIndicators, useRiskFreeRate } from '@/hooks/useAnalyticsData';
 import { cn } from '@/lib/utils';
+import { useUIStore } from '@/stores/uiStore';
+import { PROVIDER_FEATURES } from '@/types';
 
 const SYMBOLS = ['SPY', 'QQQ', 'IWM'] as const;
 const PERIODS = ['5d', '1mo', '3mo', '6mo', '1y'] as const;
@@ -28,10 +30,25 @@ export default function AnalyticsPage() {
   const [symbol, setSymbol] = useState<string>('SPY');
   const [period, setPeriod] = useState<string>('1mo');
   const [interval, setInterval] = useState<string>('1d');
+  const { selectedProvider, availableProviders = [] } = useUIStore();
+  const selectedProviderInfo = availableProviders.find(
+    (provider) => provider.name === selectedProvider
+  );
+  const providerFeatures = PROVIDER_FEATURES[selectedProvider];
+  const providerDisplayName =
+    selectedProviderInfo?.display_name ?? providerFeatures.displayName;
+  const technicalIndicatorsEnabled = providerFeatures.supportsTechnicalIndicators;
 
-  const { data: ivData, isLoading: ivLoading, error: ivError } = useIVSurface(symbol);
+  const { data: ivData, isLoading: ivLoading, error: ivError } = useIVSurface(
+    symbol,
+    providerFeatures.supportsIvSurface
+  );
   const { data: techData, isLoading: techLoading, error: techError } = useTechnicalIndicators(
-    symbol, period, interval
+    symbol,
+    period,
+    interval,
+    'ATR,RSI,BBANDS',
+    technicalIndicatorsEnabled
   );
   const { data: rateData } = useRiskFreeRate();
 
@@ -46,6 +63,9 @@ export default function AnalyticsPage() {
             <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
             <p className="mt-1 text-sm text-zinc-400">
               IV surface, skew analysis, and technical overlays
+            </p>
+            <p className="mt-2 text-xs uppercase tracking-[0.18em] text-zinc-500">
+              Provider: {providerDisplayName}
             </p>
           </div>
 
@@ -190,7 +210,14 @@ export default function AnalyticsPage() {
           </CardHeader>
           <CardContent>
             <ChartErrorBoundary chartName="Technical Indicators">
-              {techError ? (
+              {!technicalIndicatorsEnabled ? (
+                <div className="flex h-[400px] items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/50">
+                  <p className="text-sm text-amber-300">
+                    {providerFeatures.technicalIndicatorsUnavailableReason ??
+                      `Technical indicators are currently unavailable for ${providerDisplayName}.`}
+                  </p>
+                </div>
+              ) : techError ? (
                 <div className="flex h-[400px] items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/50">
                   <p className="text-sm text-rose-400">Failed to load indicator data</p>
                 </div>
