@@ -78,6 +78,13 @@ export function useDashboardData(): DashboardData {
   // Sync WebSocket data to React Query cache for consistency
   useEffect(() => {
     if (wsStream.isConnected && wsStream.data) {
+      const currentGexCache = queryClient.getQueryData<GEXSnapshot>(
+        queryKeys.gex.current(mode, selectedProvider)
+      );
+      const currentRegimeCache = queryClient.getQueryData<RegimeData>(
+        queryKeys.gex.regime(mode, selectedProvider)
+      );
+
       // Create a GEXSnapshot-like object from WebSocket update
       const wsGexSnapshot: Partial<GEXSnapshot> = {
         net_gex: wsStream.data.net_gex,
@@ -85,12 +92,12 @@ export function useDashboardData(): DashboardData {
         spot_price: wsStream.data.spot_price,
         timestamp: wsStream.data.timestamp || new Date().toISOString(),
         // Preserve other fields from cached data if available
-        ...(polledGEX.data && {
-          total_call_gex: polledGEX.data.total_call_gex,
-          total_put_gex: polledGEX.data.total_put_gex,
-          gex_by_strike: polledGEX.data.gex_by_strike,
-          dominant_strike: polledGEX.data.dominant_strike,
-          metrics: polledGEX.data.metrics,
+        ...(currentGexCache && {
+          total_call_gex: currentGexCache.total_call_gex,
+          total_put_gex: currentGexCache.total_put_gex,
+          gex_by_strike: currentGexCache.gex_by_strike,
+          dominant_strike: currentGexCache.dominant_strike,
+          metrics: currentGexCache.metrics,
         }),
       };
 
@@ -108,9 +115,9 @@ export function useDashboardData(): DashboardData {
           net_gex_billions: wsStream.data.net_gex_billions,
           timestamp: wsStream.data.timestamp || new Date().toISOString(),
           // Preserve description and color from cached data
-          ...(polledRegime.data && {
-            description: polledRegime.data.description,
-            color: polledRegime.data.color,
+          ...(currentRegimeCache && {
+            description: currentRegimeCache.description,
+            color: currentRegimeCache.color,
           }),
         };
 
@@ -120,7 +127,7 @@ export function useDashboardData(): DashboardData {
         }));
       }
     }
-  }, [wsStream.data, wsStream.isConnected, queryClient, mode, polledGEX.data, polledRegime.data, selectedProvider]);
+  }, [wsStream.data, wsStream.isConnected, queryClient, mode, selectedProvider]);
 
   // Determine effective GEX data
   const gexData = useMemo((): GEXSnapshot | null => {

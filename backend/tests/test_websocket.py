@@ -1,11 +1,12 @@
 """0DTE GEX Backend - WebSocket Integration Tests."""
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.websocket import _get_gex_update
+from app.api.websocket import ConnectionManager, _get_gex_update
 from app.config import Settings
 from app.main import app
 
@@ -168,6 +169,40 @@ class TestGEXUpdateHelper:
     """Unit tests for provider-aware websocket payload generation."""
 
     @pytest.mark.asyncio
+    async def test_cached_json_payload_is_parsed_for_provider_specific_requests(self):
+        """Cached JSON strings should be parsed before generating websocket payloads."""
+        cached_snapshot = json.dumps(
+            {
+                "timestamp": "2099-01-15T10:30:00-05:00",
+                "spot_price": 5000.0,
+                "total_call_gex": 1.0,
+                "total_put_gex": -2.0,
+                "net_gex": -1.0,
+                "zero_gamma_level": 4995.0,
+                "gex_by_strike": {"5000.0": 1.0},
+                "dominant_strike": 5000.0,
+                "metrics": {},
+            }
+        )
+        mock_cache = MagicMock()
+        mock_cache.get.side_effect = (
+            lambda key: cached_snapshot if key == "gex:current:SPX:tradier" else None
+        )
+        mock_cache.is_stale.return_value = True
+
+        with patch("app.api.websocket.get_cache", return_value=mock_cache):
+            payload = await _get_gex_update(
+                Settings(data_provider="yfinance"),
+                symbol="SPX",
+                provider=" TRADIER ",
+            )
+
+        mock_cache.get.assert_any_call("gex:current:SPX:tradier")
+        assert payload["provider"] == "tradier"
+        assert payload["is_stale"] is True
+        assert payload["net_gex"] == -1.0
+
+    @pytest.mark.asyncio
     async def test_cached_payload_uses_normalized_provider_name(self):
         """Cached websocket payloads should use the provider's normalized name."""
         cached_snapshot = {
@@ -229,6 +264,67 @@ class TestGEXUpdateHelper:
                 )
 
         mock_cache.get.assert_any_call("gex:current:QQQ")
+
+    @pytest.mark.asyncio
+    async def test_unreasonable_cached_payload_falls_back_to_mock_data(self):
+        """Sanity checks should prevent obviously broken cached payloads reaching clients."""
+        cached_snapshot = {
+            "timestamp": "2099-01-15T10:30:00-05:00",
+            "spot_price": 50.0,
+            "total_call_gex": 1.0,
+            "total_put_gex": -2.0,
+            "net_gex": 6.0e9,
+            "zero_gamma_level": 4995.0,
+            "gex_by_strike": {"5000.0": 1.0},
+            "dominant_strike": 5000.0,
+            "metrics": {},
+        }
+        mock_cache = MagicMock()
+        mock_cache.get.side_effect = (
+            lambda key: cached_snapshot if key == "gex:current:SPX:yfinance" else None
+        )
+        mock_cache.is_stale.return_value = False
+        mock_fallback = {
+            "net_gex": 0.0,
+            "net_gex_billions": 0.0,
+            "zero_gamma_level": 5000.0,
+            "spot_price": 5000.0,
+            "regime": "neutral",
+            "is_mock": True,
+        }
+
+        with patch("app.api.websocket.get_cache", return_value=mock_cache):
+            with patch(
+                "app.api.websocket._generate_mock_gex_data",
+                return_value=mock_fallback,
+            ) as mock_generate:
+                payload = await _get_gex_update(
+                    Settings(data_provider="yfinance"),
+                    symbol="SPX",
+                )
+
+        mock_generate.assert_called_once()
+        assert payload == mock_fallback
+
+
+class TestConnectionManager:
+    """Unit tests for low-level websocket connection bookkeeping."""
+
+    @pytest.mark.asyncio
+    async def test_broadcast_removes_failed_connections(self):
+        """Dead sockets should be removed after failed broadcast attempts."""
+        manager = ConnectionManager()
+        healthy_connection = AsyncMock()
+        failed_connection = AsyncMock()
+        failed_connection.send_json.side_effect = RuntimeError("socket closed")
+        manager.active_connections = [healthy_connection, failed_connection]
+
+        await manager.broadcast({"type": "heartbeat"})
+
+        healthy_connection.send_json.assert_awaited_once_with({"type": "heartbeat"})
+        failed_connection.send_json.assert_awaited_once_with({"type": "heartbeat"})
+        assert manager.active_connections == [healthy_connection]
+        assert manager.connection_count == 1
 
 
 class TestWebSocketErrorHandling:
