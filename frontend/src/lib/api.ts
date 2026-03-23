@@ -13,6 +13,7 @@ interface DemoRequestOptions {
 
 interface ProviderRequestOptions extends DemoRequestOptions {
   provider?: ProviderName;
+  symbol?: string;
 }
 
 function withRequestParams(
@@ -94,6 +95,7 @@ export const gexAPI = {
     const response = await api.get('/api/gex/historical', {
       params: withRequestParams(
         {
+          symbol: options?.symbol ?? 'SPX',
           start_date: startDate,
           end_date: endDate,
           interval,
@@ -153,11 +155,12 @@ export const analyticsAPI = {
   getSummaryStats: async (
     startDate?: string,
     endDate?: string,
-    options?: ProviderRequestOptions
+    options?: ProviderRequestOptions & { symbol?: string }
   ) => {
     const response = await api.get('/api/analytics/summary-statistics', {
       params: withRequestParams(
         {
+          symbol: options?.symbol ?? 'SPX',
           start_date: startDate,
           end_date: endDate,
         },
@@ -199,7 +202,13 @@ export const analyticsAPI = {
   },
   runVectorbtBacktest: async (params: Record<string, unknown>, options?: ProviderRequestOptions) => {
     const response = await api.get('/api/analytics/vectorbt-backtest', {
-      params: withRequestParams(params, options),
+      params: withRequestParams(
+        {
+          symbol: 'SPX',
+          ...params,
+        },
+        options
+      ),
     });
     return response.data;
   },
@@ -209,7 +218,13 @@ export const analyticsAPI = {
   },
   getBacktest: async (params: Record<string, unknown>, options?: ProviderRequestOptions) => {
     const response = await api.get('/api/analytics/backtest', {
-      params: withRequestParams(params, options),
+      params: withRequestParams(
+        {
+          symbol: 'SPX',
+          ...params,
+        },
+        options
+      ),
     });
     return response.data;
   }

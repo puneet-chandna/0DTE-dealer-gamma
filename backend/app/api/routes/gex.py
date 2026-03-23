@@ -28,6 +28,7 @@ from app.models.schemas import (
     MarketStatusResponse,
 )
 from app.services.cache import get_cache
+from app.services.historical_data import get_historical_data_service
 from app.core.rate_provider import get_rate_provider
 
 logger = logging.getLogger(__name__)
@@ -91,6 +92,25 @@ async def _get_live_gex_snapshot(
     return raw
 
 
+async def _get_replay_snapshot(
+    symbol: str,
+    provider: str,
+) -> Optional[GEXSnapshot]:
+    """Return the latest stored snapshot for replay/demo mode when available."""
+    today_et = datetime.now(ET).date()
+    snapshots = await get_historical_data_service().get_historical_snapshots(
+        provider=provider,
+        symbol=symbol,
+        start_date=today_et,
+        end_date=today_et,
+        interval="5s",
+        prefer_replay=True,
+    )
+    if not snapshots:
+        return None
+    return snapshots[-1]
+
+
 def _generate_mock_gex_snapshot(spot_price: float = 5950.0) -> GEXSnapshot:
     """Generate a mock GEX snapshot for demo/testing purposes."""
     import numpy as np
@@ -143,14 +163,25 @@ async def get_current_gex(
     """
     Get the most recent 0DTE GEX calculation.
     """
-    if demo:
-        return get_demo_data_service().get_current_snapshot(symbol=symbol)
-
     settings = get_settings()
     active_provider = ProviderRegistry.resolve_provider_name(
         provider,
         default_provider=settings.data_provider,
     )
+
+    if demo:
+        replay_snapshot = await _get_replay_snapshot(symbol=symbol, provider=active_provider)
+        if replay_snapshot is not None:
+            replay_payload = replay_snapshot.model_dump()
+            replay_payload["provider"] = active_provider
+            replay_payload.setdefault("metrics", {})
+            replay_payload["metrics"]["is_replay_data"] = 1.0
+            return replay_payload
+        demo_snapshot = get_demo_data_service().get_current_snapshot(symbol=symbol)
+        replay_payload = demo_snapshot.model_dump()
+        replay_payload["provider"] = active_provider
+        return replay_payload
+
     default_provider = ProviderRegistry.resolve_provider_name(
         default_provider=settings.data_provider,
     )
@@ -210,9 +241,11 @@ async def get_current_gex(
 
 @router.get("/historical", response_model=GEXHistorical)
 async def get_historical_gex(
+    symbol: str = Query("SPX", description="Underlying symbol (default: SPX)"),
+    provider: Optional[str] = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
     start_date: date = Query(..., description="Start date (YYYY-MM-DD)"),
     end_date: date = Query(..., description="End date (YYYY-MM-DD)"),
-    interval: str = Query("1h", description="Data interval: 5m, 15m, 1h, 1d"),
+    interval: str = Query("1h", description="Data interval: 5s, 1m, 5m, 15m, 1h, 1d, 1wk"),
     demo: bool = Query(False, description="Return deterministic demo data"),
 ) -> GEXHistorical:
     """Get historical GEX data for date range.
@@ -227,10 +260,31 @@ async def get_historical_gex(
     try:
         start_dt = datetime.combine(start_date, datetime.min.time())
         end_dt = datetime.combine(end_date, datetime.max.time())
+        settings = get_settings()
+        active_provider = ProviderRegistry.resolve_provider_name(
+            provider,
+            default_provider=settings.data_provider,
+        )
+
+        persisted_snapshots = await get_historical_data_service().get_historical_snapshots(
+            provider=active_provider,
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            interval=interval,
+            prefer_replay=demo,
+        )
+        if persisted_snapshots:
+            return GEXHistorical(
+                data=persisted_snapshots,
+                start_date=start_dt,
+                end_date=end_dt,
+                count=len(persisted_snapshots),
+            )
 
         if demo:
             snapshots = get_demo_data_service().get_historical_snapshots(
-                symbol="SPX",
+                symbol=symbol,
                 start_date=start_date,
                 end_date=end_date,
                 interval=interval,
@@ -284,7 +338,14 @@ async def get_gex_by_strikes(
 ):
     """Get GEX values separated by strike price."""
     if demo:
-        snapshot = get_demo_data_service().get_current_snapshot(symbol=symbol)
+        settings = get_settings()
+        active_provider = ProviderRegistry.resolve_provider_name(
+            provider,
+            default_provider=settings.data_provider,
+        )
+        snapshot = await _get_replay_snapshot(symbol=symbol, provider=active_provider)
+        if snapshot is None:
+            snapshot = get_demo_data_service().get_current_snapshot(symbol=symbol)
         sorted_strikes = sorted(snapshot.gex_by_strike.keys())
         sorted_values = [snapshot.gex_by_strike[strike] for strike in sorted_strikes]
         return GEXByStrike(
@@ -357,7 +418,14 @@ async def get_market_regime(
 ):
     """Get current market regime based on GEX positioning."""
     if demo:
-        snapshot = get_demo_data_service().get_current_snapshot(symbol=symbol)
+        settings = get_settings()
+        active_provider = ProviderRegistry.resolve_provider_name(
+            provider,
+            default_provider=settings.data_provider,
+        )
+        snapshot = await _get_replay_snapshot(symbol=symbol, provider=active_provider)
+        if snapshot is None:
+            snapshot = get_demo_data_service().get_current_snapshot(symbol=symbol)
         regime, description, color = get_gex_calculator().determine_regime(snapshot.net_gex)
         return RegimeData(
             regime=regime,

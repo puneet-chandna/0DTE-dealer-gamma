@@ -81,13 +81,20 @@ describe('queryKeys', () => {
   });
 
   it('should generate historical keys with dates', () => {
-    const key = queryKeys.gex.historical('demo', '2025-01-01', '2025-01-31');
-    expect(key).toEqual(['gex', 'demo', 'historical', '2025-01-01', '2025-01-31']);
+    const key = queryKeys.gex.historical(
+      'demo',
+      'tradier',
+      'SPX',
+      '2025-01-01',
+      '2025-01-31',
+      '1h'
+    );
+    expect(key).toEqual(['gex', 'demo', 'tradier', 'SPX', 'historical', '2025-01-01', '2025-01-31', '1h']);
   });
 
   it('should generate analytics summary keys', () => {
-    const key = queryKeys.analytics.summary('demo', '2025-01-01', '2025-01-31');
-    expect(key).toEqual(['analytics', 'demo', 'summary', '2025-01-01', '2025-01-31']);
+    const key = queryKeys.analytics.summary('demo', 'tradier', 'SPX', '2025-01-01', '2025-01-31');
+    expect(key).toEqual(['analytics', 'demo', 'tradier', 'SPX', 'summary', '2025-01-01', '2025-01-31']);
   });
 });
 
@@ -337,7 +344,7 @@ describe('useHistoricalGEX', () => {
       '2025-01-14',
       '2025-01-14',
       '1h',
-      { demo: true }
+      { demo: true, provider: 'tradier', symbol: 'SPX' }
     );
   });
 
@@ -378,6 +385,12 @@ describe('useSummaryStats', () => {
       expect(result.current.isSuccess).toBe(true);
     });
 
+    expect(analyticsAPI.getSummaryStats).toHaveBeenCalledWith(
+      undefined,
+      undefined,
+      { demo: true, provider: 'tradier', symbol: 'SPX' }
+    );
+
     expect(result.current.data?.mean_gex).toBe(-800000000);
   });
 
@@ -401,7 +414,7 @@ describe('useSummaryStats', () => {
       expect(analyticsAPI.getSummaryStats).toHaveBeenCalledWith(
         '2025-01-01',
         '2025-01-31',
-        { demo: true }
+        { demo: true, provider: 'tradier', symbol: 'SPX' }
       );
     });
   });

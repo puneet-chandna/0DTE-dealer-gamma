@@ -13,14 +13,32 @@ const storeState = vi.hoisted(() => ({
     autoRefreshEnabled: false,
     refreshInterval: 5,
     demoModeEnabled: false,
-    selectedProvider: 'yfinance' as const,
+    selectedProvider: 'yfinance' as 'yfinance' | 'tradier',
   },
 }));
 
 const websocketState = vi.hoisted(() => {
   const reconnect = vi.fn();
   const disconnect = vi.fn();
-  const createStream = () => ({
+  const createStream = (): {
+    data:
+      | {
+          net_gex: number;
+          net_gex_billions: number;
+          zero_gamma_level: number;
+          spot_price: number;
+          regime: 'short_gamma';
+          timestamp: string;
+        }
+      | null;
+    isConnected: boolean;
+    connectionState: 'connected' | 'disconnected';
+    error: string | null;
+    retryCount: number;
+    lastUpdateTime: number | null;
+    reconnect: typeof reconnect;
+    disconnect: typeof disconnect;
+  } => ({
     data: {
       net_gex: -1450000000,
       net_gex_billions: -1.45,
@@ -30,7 +48,7 @@ const websocketState = vi.hoisted(() => {
       timestamp: '2026-03-23T10:30:00.000Z',
     },
     isConnected: true,
-    connectionState: 'connected' as const,
+    connectionState: 'connected',
     error: null,
     retryCount: 0,
     lastUpdateTime: Date.parse('2026-03-23T10:30:00.000Z'),
@@ -51,6 +69,7 @@ vi.mock('@/lib/api', () => ({
     getCurrentGEX: vi.fn(),
     getGEXByStrikes: vi.fn(),
     getCurrentRegime: vi.fn(),
+    getHistoricalGEX: vi.fn(),
   },
 }));
 
@@ -90,6 +109,25 @@ const liveStrikes: GEXByStrike = {
   zero_gamma_level: 5920,
 };
 
+const persistedHistorical = {
+  data: [
+    {
+      timestamp: '2026-03-23T10:30:00.000Z',
+      net_gex: -1450000000,
+      spot_price: 5898,
+      total_call_gex: -2000000000,
+      total_put_gex: 550000000,
+      zero_gamma_level: 5915,
+      gex_by_strike: {},
+      dominant_strike: 5900,
+      metrics: {},
+    },
+  ],
+  start_date: '2026-03-23T00:00:00.000Z',
+  end_date: '2026-03-23T23:59:59.999Z',
+  count: 1,
+};
+
 function createPendingPromise<T>() {
   return new Promise<T>(() => {});
 }
@@ -126,6 +164,7 @@ describe('useDashboardData', () => {
       selectedProvider: 'yfinance',
     };
     websocketState.stream = websocketState.createStream();
+    vi.mocked(gexAPI.getHistoricalGEX).mockResolvedValue(persistedHistorical);
   });
 
   afterEach(() => {
@@ -259,12 +298,16 @@ describe('useIntradayTimeSeries', () => {
     vi.mocked(gexAPI.getCurrentGEX).mockImplementation(() => createPendingPromise());
     vi.mocked(gexAPI.getCurrentRegime).mockImplementation(() => createPendingPromise());
     vi.mocked(gexAPI.getGEXByStrikes).mockImplementation(() => createPendingPromise());
+    vi.mocked(gexAPI.getHistoricalGEX).mockResolvedValue(persistedHistorical);
   });
 
   it('deduplicates near-identical timestamps and resets accumulation on demo-mode changes', async () => {
-    const { result, rerender } = renderHook(() => useIntradayTimeSeries(), {
-      wrapper: createWrapper(createQueryClient()),
-    });
+    const { result, rerender } = renderHook(
+      () => useIntradayTimeSeries(liveCurrentGex, websocketState.stream.lastUpdateTime),
+      {
+        wrapper: createWrapper(createQueryClient()),
+      }
+    );
 
     await waitFor(() => {
       expect(result.current.dataPointCount).toBe(1);

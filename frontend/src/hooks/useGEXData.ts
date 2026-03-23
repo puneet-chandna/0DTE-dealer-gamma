@@ -21,12 +21,23 @@ export const queryKeys = {
       ['gex', mode, provider, 'strikes'] as const,
     regime: (mode: 'live' | 'demo', provider: string) =>
       ['gex', mode, provider, 'regime'] as const,
-    historical: (mode: 'live' | 'demo', startDate: string, endDate: string) =>
-      ['gex', mode, 'historical', startDate, endDate] as const,
+    historical: (
+      mode: 'live' | 'demo',
+      provider: string,
+      symbol: string,
+      startDate: string,
+      endDate: string,
+      interval?: string
+    ) => ['gex', mode, provider, symbol, 'historical', startDate, endDate, interval] as const,
   },
   analytics: {
-    summary: (mode: 'live' | 'demo', startDate?: string, endDate?: string) =>
-      ['analytics', mode, 'summary', startDate, endDate] as const,
+    summary: (
+      mode: 'live' | 'demo',
+      provider: string,
+      symbol: string,
+      startDate?: string,
+      endDate?: string
+    ) => ['analytics', mode, provider, symbol, 'summary', startDate, endDate] as const,
     gexVolatility: (startDate: string, endDate: string) =>
       ['analytics', 'gex-volatility', startDate, endDate] as const,
   },
@@ -94,13 +105,23 @@ export function useCurrentRegime() {
 /**
  * Hook for historical GEX data.
  */
-export function useHistoricalGEX(startDate: string, endDate: string, interval?: string) {
-  const { demoModeEnabled } = useUIStore();
+export function useHistoricalGEX(
+  startDate: string,
+  endDate: string,
+  interval?: string,
+  symbol: string = 'SPX'
+) {
+  const { demoModeEnabled, selectedProvider } = useUIStore();
   const mode = getAppDataMode(demoModeEnabled);
 
   return useQuery({
-    queryKey: queryKeys.gex.historical(mode, startDate, endDate),
-    queryFn: () => gexAPI.getHistoricalGEX(startDate, endDate, interval, { demo: demoModeEnabled }),
+    queryKey: queryKeys.gex.historical(mode, selectedProvider, symbol, startDate, endDate, interval),
+    queryFn: () =>
+      gexAPI.getHistoricalGEX(startDate, endDate, interval, {
+        demo: demoModeEnabled,
+        provider: selectedProvider,
+        symbol,
+      }),
     enabled: Boolean(startDate && endDate),
     staleTime: 60000, // 1 minute - historical data changes less
   });
@@ -109,13 +130,18 @@ export function useHistoricalGEX(startDate: string, endDate: string, interval?: 
 /**
  * Hook for summary statistics.
  */
-export function useSummaryStats(startDate?: string, endDate?: string) {
-  const { demoModeEnabled } = useUIStore();
+export function useSummaryStats(startDate?: string, endDate?: string, symbol: string = 'SPX') {
+  const { demoModeEnabled, selectedProvider } = useUIStore();
   const mode = getAppDataMode(demoModeEnabled);
 
   return useQuery({
-    queryKey: queryKeys.analytics.summary(mode, startDate, endDate),
-    queryFn: () => analyticsAPI.getSummaryStats(startDate, endDate, { demo: demoModeEnabled }),
+    queryKey: queryKeys.analytics.summary(mode, selectedProvider, symbol, startDate, endDate),
+    queryFn: () =>
+      analyticsAPI.getSummaryStats(startDate, endDate, {
+        demo: demoModeEnabled,
+        provider: selectedProvider,
+        symbol,
+      }),
     staleTime: 60000,
   });
 }

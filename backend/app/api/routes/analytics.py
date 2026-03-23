@@ -12,13 +12,12 @@ import pandas as pd
 
 from fastapi import APIRouter, HTTPException, Query
 
+from app.config import get_settings
 from app.core import (
     VolatilityAnalyzer,
     TradingStrategy,
     ProviderRegistry,
     get_data_client,
-    get_current_trading_date,
-    is_market_open,
 )
 from app.core.analytics import (
     generate_synthetic_gex_data,
@@ -28,6 +27,7 @@ from app.core.demo_data import get_demo_data_service
 from app.core.provider_registry import ProviderUnavailableError
 from app.models.schemas import AnalyticsResult, BacktestResult, SummaryStatistics, IVSurfaceResponse
 from app.services.cache import get_cache
+from app.services.historical_data import get_historical_data_service
 
 logger = logging.getLogger(__name__)
 
@@ -110,6 +110,8 @@ async def analyze_gex_volatility(
 
 @router.get("/backtest", response_model=BacktestResult)
 async def backtest_strategy(
+    symbol: str = Query("SPX", description="Underlying symbol (default: SPX)"),
+    provider: Optional[str] = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
     strategy: str = Query("volatility_breakout", description="Strategy name"),
     start_date: date = Query(..., description="Backtest start date"),
     end_date: date = Query(..., description="Backtest end date"),
@@ -140,7 +142,7 @@ async def backtest_strategy(
             detail="start_date must be before or equal to end_date",
         )
 
-    if (end_date - start_date).days < 5:
+    if not demo and (end_date - start_date).days < 5:
         raise HTTPException(
             status_code=400,
             detail="Backtest period must be at least 5 days",
@@ -172,13 +174,47 @@ async def backtest_strategy(
         )
 
     try:
+        settings = get_settings()
+        active_provider = ProviderRegistry.resolve_provider_name(
+            provider,
+            default_provider=settings.data_provider,
+        )
+
+        persisted_result = await get_historical_data_service().run_backtest(
+            provider=active_provider,
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            strategy=strategy,
+            entry_threshold=entry_threshold,
+            exit_threshold=exit_threshold,
+            stop_loss_pct=stop_loss_pct,
+            take_profit_pct=take_profit_pct,
+            prefer_replay=demo,
+        )
+        if persisted_result is not None:
+            return BacktestResult(
+                total_trades=persisted_result.total_trades,
+                winning_trades=persisted_result.winning_trades,
+                losing_trades=persisted_result.losing_trades,
+                win_rate=persisted_result.win_rate,
+                total_return=persisted_result.total_return,
+                average_return=persisted_result.average_return,
+                sharpe_ratio=persisted_result.sharpe_ratio,
+                max_drawdown=persisted_result.max_drawdown,
+                profit_factor=persisted_result.profit_factor,
+                average_trade_duration=persisted_result.average_trade_duration,
+                start_date=persisted_result.start_date,
+                end_date=persisted_result.end_date,
+            )
+
         # Generate synthetic data for demo
         start_dt = datetime.combine(start_date, datetime.min.time())
         end_dt = datetime.combine(end_date, datetime.max.time())
 
         if demo:
             price_data, gex_data = get_demo_data_service().get_time_series(
-                symbol="SPX",
+                symbol=symbol,
                 start_date=start_date,
                 end_date=end_date,
             )
@@ -227,6 +263,8 @@ async def backtest_strategy(
 
 @router.get("/summary-statistics", response_model=SummaryStatistics)
 async def get_summary_stats(
+    symbol: str = Query("SPX", description="Underlying symbol (default: SPX)"),
+    provider: Optional[str] = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
     start_date: Optional[date] = Query(None, description="Start date"),
     end_date: Optional[date] = Query(None, description="End date"),
     demo: bool = Query(False, description="Return deterministic demo data"),
@@ -252,15 +290,34 @@ async def get_summary_stats(
 
     # Check cache
     cache = get_cache()
-    cache_key = f"analytics:summary:{'demo' if demo else 'live'}:{start_date}:{end_date}"
+    settings = get_settings()
+    active_provider = ProviderRegistry.resolve_provider_name(
+        provider,
+        default_provider=settings.data_provider,
+    )
+    cache_key = (
+        f"analytics:summary:{'demo' if demo else 'live'}:"
+        f"{active_provider}:{symbol}:{start_date}:{end_date}"
+    )
     cached = cache.get_if_fresh(cache_key)
     if cached is not None:
         return cached
 
     try:
+        persisted_result = await get_historical_data_service().get_summary_statistics(
+            provider=active_provider,
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            prefer_replay=demo,
+        )
+        if persisted_result is not None:
+            cache.set(cache_key, persisted_result)
+            return persisted_result
+
         if demo:
             result = get_demo_data_service().get_summary_statistics(
-                symbol="SPX",
+                symbol=symbol,
                 start_date=start_date,
                 end_date=end_date,
             )
@@ -301,10 +358,24 @@ async def get_iv_surface(
     from app.core.vollib_bridge import VolLibBridge
 
     try:
+        settings = get_settings()
+        active_provider = ProviderRegistry.resolve_provider_name(
+            provider,
+            default_provider=settings.data_provider,
+        )
+
+        persisted_surface = await get_historical_data_service().get_iv_surface(
+            provider=active_provider,
+            symbol=symbol,
+            prefer_replay=demo,
+        )
+        if persisted_surface is not None:
+            return persisted_surface
+
         if demo:
             return get_demo_data_service().get_iv_surface(symbol=symbol)
 
-        data_client = get_data_client(provider)
+        data_client = get_data_client(active_provider)
 
         # In a real scenario, we'd fetch multiple expirations. 
         # For now, we'll fetch the nearest chain and generate a realistic surface from it.
@@ -382,6 +453,7 @@ async def get_iv_surface(
 @router.get("/technical-indicators")
 async def get_technical_indicators(
     symbol: str = Query("SPY", description="Symbol to analyze"),
+    provider: Optional[str] = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
     period: str = Query("1mo", description="Data period (1d, 5d, 1mo, 3mo, 6mo, 1y)"),
     interval: str = Query("1d", description="Data interval (1m, 5m, 15m, 1h, 1d)"),
     indicators: str = Query("ATR,RSI,BBANDS", description="Comma-separated indicators"),
@@ -397,8 +469,25 @@ async def get_technical_indicators(
     from app.core.technical_indicators import TechnicalIndicatorEngine
 
     try:
+        settings = get_settings()
+        active_provider = ProviderRegistry.resolve_provider_name(
+            provider,
+            default_provider=settings.data_provider,
+        )
+        indicator_list = [item.strip().upper() for item in indicators.split(",")]
+
+        persisted_indicators = await get_historical_data_service().get_technical_indicators(
+            provider=active_provider,
+            symbol=symbol,
+            period=period,
+            interval=interval,
+            indicators=indicator_list,
+            prefer_replay=demo,
+        )
+        if persisted_indicators is not None:
+            return persisted_indicators
+
         if demo:
-            indicator_list = [item.strip().upper() for item in indicators.split(",")]
             return get_demo_data_service().get_technical_indicators(
                 symbol=symbol,
                 period=period,
@@ -418,7 +507,6 @@ async def get_technical_indicators(
             )
 
         # Compute indicators
-        indicator_list = [i.strip().upper() for i in indicators.split(",")]
         result_df = TechnicalIndicatorEngine.compute_indicators(
             hist, indicators=indicator_list
         )
@@ -462,6 +550,8 @@ async def get_technical_indicators(
 
 @router.get("/vectorbt-backtest")
 async def run_vectorbt_backtest(
+    symbol: str = Query("SPX", description="Underlying symbol (default: SPX)"),
+    provider: Optional[str] = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
     start_date: date = Query(..., description="Backtest start date"),
     end_date: date = Query(..., description="Backtest end date"),
     entry_threshold: float = Query(-1e9, description="GEX entry threshold (dollars)"),
@@ -482,19 +572,56 @@ async def run_vectorbt_backtest(
     if start_date > end_date:
         raise HTTPException(status_code=400, detail="start_date must be before end_date")
 
-    if (end_date - start_date).days < 5:
+    if not demo and (end_date - start_date).days < 5:
         raise HTTPException(status_code=400, detail="Period must be at least 5 days")
 
     if (end_date - start_date).days > 365:
         raise HTTPException(status_code=400, detail="Period cannot exceed 365 days")
 
     try:
+        settings = get_settings()
+        active_provider = ProviderRegistry.resolve_provider_name(
+            provider,
+            default_provider=settings.data_provider,
+        )
+
+        persisted_result = await get_historical_data_service().run_vectorbt_backtest(
+            provider=active_provider,
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            entry_threshold=entry_threshold,
+            exit_threshold=exit_threshold,
+            initial_cash=initial_cash,
+            prefer_replay=demo,
+        )
+        if persisted_result is not None:
+            return {
+                "total_return": persisted_result.total_return,
+                "sharpe_ratio": persisted_result.sharpe_ratio,
+                "sortino_ratio": persisted_result.sortino_ratio,
+                "calmar_ratio": persisted_result.calmar_ratio,
+                "max_drawdown": persisted_result.max_drawdown,
+                "total_trades": persisted_result.total_trades,
+                "winning_trades": persisted_result.winning_trades,
+                "losing_trades": persisted_result.losing_trades,
+                "win_rate": persisted_result.win_rate,
+                "profit_factor": persisted_result.profit_factor,
+                "avg_trade_return": persisted_result.avg_trade_return,
+                "best_trade": persisted_result.best_trade,
+                "worst_trade": persisted_result.worst_trade,
+                "avg_trade_duration_minutes": persisted_result.avg_trade_duration_minutes,
+                "start_date": persisted_result.start_date.isoformat(),
+                "end_date": persisted_result.end_date.isoformat(),
+                "equity_curve": persisted_result.equity_curve,
+            }
+
         start_dt = datetime.combine(start_date, datetime.min.time())
         end_dt = datetime.combine(end_date, datetime.max.time())
 
         if demo:
             price_data, gex_data = get_demo_data_service().get_time_series(
-                symbol="SPX",
+                symbol=symbol,
                 start_date=start_date,
                 end_date=end_date,
             )

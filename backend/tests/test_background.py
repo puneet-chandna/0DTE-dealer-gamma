@@ -18,6 +18,7 @@ from app.services.background import (
     get_data_client,
     periodic_gex_refresh,
     periodic_spot_refresh,
+    periodic_historical_capture,
     cache_warmup,
     start_background_tasks,
     stop_background_tasks,
@@ -354,14 +355,15 @@ class TestStartBackgroundTasks:
         with patch("app.services.background.cache_warmup", new_callable=AsyncMock):
             with patch("app.services.background.periodic_gex_refresh", new_callable=AsyncMock):
                 with patch("app.services.background.periodic_spot_refresh", new_callable=AsyncMock):
-                    await start_background_tasks()
-                    assert background._shutdown_event is not None
-                    assert isinstance(background._shutdown_event, asyncio.Event)
-                    # Clean up tasks
-                    background._shutdown_event.set()
-                    for task in background._background_tasks:
-                        task.cancel()
-                    background._background_tasks = []
+                    with patch("app.services.background.periodic_historical_capture", new_callable=AsyncMock):
+                        await start_background_tasks()
+                        assert background._shutdown_event is not None
+                        assert isinstance(background._shutdown_event, asyncio.Event)
+                        # Clean up tasks
+                        background._shutdown_event.set()
+                        for task in background._background_tasks:
+                            task.cancel()
+                        background._background_tasks = []
 
     @pytest.mark.asyncio
     async def test_runs_cache_warmup(self):
@@ -369,13 +371,14 @@ class TestStartBackgroundTasks:
         with patch("app.services.background.cache_warmup", new_callable=AsyncMock) as mock_warmup:
             with patch("app.services.background.periodic_gex_refresh", new_callable=AsyncMock):
                 with patch("app.services.background.periodic_spot_refresh", new_callable=AsyncMock):
-                    await start_background_tasks()
-                    mock_warmup.assert_called_once()
-                    # Clean up tasks
-                    background._shutdown_event.set()
-                    for task in background._background_tasks:
-                        task.cancel()
-                    background._background_tasks = []
+                    with patch("app.services.background.periodic_historical_capture", new_callable=AsyncMock):
+                        await start_background_tasks()
+                        mock_warmup.assert_called_once()
+                        # Clean up tasks
+                        background._shutdown_event.set()
+                        for task in background._background_tasks:
+                            task.cancel()
+                        background._background_tasks = []
 
     @pytest.mark.asyncio
     async def test_always_starts_background_tasks(self):
@@ -383,14 +386,15 @@ class TestStartBackgroundTasks:
         with patch("app.services.background.cache_warmup", new_callable=AsyncMock):
             with patch("app.services.background.periodic_gex_refresh", new_callable=AsyncMock):
                 with patch("app.services.background.periodic_spot_refresh", new_callable=AsyncMock):
-                    await start_background_tasks()
-                    # Should have created 2 tasks (GEX + Spot)
-                    assert len(background._background_tasks) == 2
-                    # Clean up
-                    background._shutdown_event.set()
-                    for task in background._background_tasks:
-                        task.cancel()
-                    background._background_tasks = []
+                    with patch("app.services.background.periodic_historical_capture", new_callable=AsyncMock):
+                        await start_background_tasks()
+                        # Should have created 3 tasks (GEX + Spot + Historical capture)
+                        assert len(background._background_tasks) == 3
+                        # Clean up
+                        background._shutdown_event.set()
+                        for task in background._background_tasks:
+                            task.cancel()
+                        background._background_tasks = []
 
 
 # ---------------------------------------------------------------------------

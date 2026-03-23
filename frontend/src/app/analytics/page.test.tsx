@@ -3,11 +3,12 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
 import AnalyticsPage from './page';
+import type { DataProviderInfo } from '@/types';
 
 const { mockUseUIStore } = vi.hoisted(() => ({
   mockUseUIStore: vi.fn(() => ({
     selectedProvider: 'tradier',
-    availableProviders: [],
+    availableProviders: [] as DataProviderInfo[],
   })),
 }));
 

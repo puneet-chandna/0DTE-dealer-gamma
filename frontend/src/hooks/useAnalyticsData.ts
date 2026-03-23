@@ -28,8 +28,8 @@ export const analyticsQueryKeys = {
     interval: string,
     indicators: string
   ) => ['technical-indicators', mode, provider, symbol, period, interval, indicators] as const,
-  vectorbtBacktest: (mode: 'live' | 'demo', params: Record<string, unknown>) =>
-    ['vectorbt-backtest', mode, params] as const,
+  vectorbtBacktest: (mode: 'live' | 'demo', provider: string, params: Record<string, unknown>) =>
+    ['vectorbt-backtest', mode, provider, params] as const,
 };
 
 /**
@@ -91,6 +91,7 @@ export function useTechnicalIndicators(
     queryFn: () =>
       analyticsAPI.getTechnicalIndicators(symbol, period, interval, indicators, {
         demo: demoModeEnabled,
+        provider: selectedProvider,
       }),
     enabled,
     staleTime: 60 * 1000,
@@ -112,13 +113,18 @@ export function useVectorbtBacktest(
   } | null,
   enabled: boolean = false
 ) {
-  const { demoModeEnabled } = useUIStore();
+  const { demoModeEnabled, selectedProvider } = useUIStore();
   const mode = getAppDataMode(demoModeEnabled);
+  const requestParams = params ? { symbol: 'SPX', ...params } : null;
 
   return useQuery<VectorBTBacktestResult>({
-    queryKey: analyticsQueryKeys.vectorbtBacktest(mode, params ?? {}),
-    queryFn: () => analyticsAPI.runVectorbtBacktest(params!, { demo: demoModeEnabled }),
-    enabled: enabled && params !== null,
+    queryKey: analyticsQueryKeys.vectorbtBacktest(mode, selectedProvider, requestParams ?? {}),
+    queryFn: () =>
+      analyticsAPI.runVectorbtBacktest(requestParams!, {
+        demo: demoModeEnabled,
+        provider: selectedProvider,
+      }),
+    enabled: enabled && requestParams !== null,
     staleTime: Infinity, // Don't auto-refetch backtests
     retry: 0,
   });

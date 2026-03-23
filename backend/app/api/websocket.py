@@ -17,6 +17,7 @@ from app.core.demo_data import get_demo_data_service
 from app.core.provider_registry import ProviderRegistry, get_data_client
 from app.core.gex_calculator import GEXCalculator
 from app.services.cache import get_cache
+from app.services.historical_data import get_historical_data_service
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +121,32 @@ def _generate_mock_gex_data() -> dict:
     }
 
 
+def _build_ws_payload_from_snapshot(
+    *,
+    snapshot,
+    provider: str,
+    is_demo: bool,
+    is_replay: bool,
+) -> dict:
+    """Convert a stored or synthetic snapshot into the websocket payload shape."""
+    gex_calculator = get_gex_calculator()
+    regime, _, _ = gex_calculator.determine_regime(snapshot.net_gex)
+    payload = {
+        "net_gex": snapshot.net_gex,
+        "net_gex_billions": snapshot.net_gex / 1e9,
+        "zero_gamma_level": snapshot.zero_gamma_level,
+        "spot_price": snapshot.spot_price,
+        "regime": regime,
+        "provider": provider,
+        "timestamp": snapshot.timestamp.isoformat() if hasattr(snapshot.timestamp, "isoformat") else str(snapshot.timestamp),
+        "is_mock": is_demo and not is_replay,
+        "is_demo": is_demo,
+        "is_replay": is_replay,
+        "is_stale": False,
+    }
+    return payload
+
+
 def _is_reasonable_gex_payload(payload: dict) -> bool:
     """Reject obviously broken live payloads before they reach clients."""
     net_gex = payload.get("net_gex")
@@ -160,8 +187,27 @@ async def _get_gex_update(
     )
 
     if demo:
+        replay_snapshots = await get_historical_data_service().get_historical_snapshots(
+            provider=active_provider,
+            symbol=symbol,
+            start_date=datetime.now(ET).date(),
+            end_date=datetime.now(ET).date(),
+            interval="5s",
+            prefer_replay=True,
+        )
+        if replay_snapshots:
+            bucket_index = int(datetime.now(ET).timestamp()) // WS_UPDATE_INTERVAL
+            snapshot = replay_snapshots[bucket_index % len(replay_snapshots)]
+            return _build_ws_payload_from_snapshot(
+                snapshot=snapshot,
+                provider=active_provider,
+                is_demo=True,
+                is_replay=True,
+            )
+
         payload = get_demo_data_service().get_ws_update(symbol=symbol)
         payload["provider"] = active_provider
+        payload["is_replay"] = False
         return payload
 
     cache = get_cache()

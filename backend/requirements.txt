@@ -7,6 +7,7 @@ python-socketio==5.12.1
 # Async Database
 sqlalchemy[asyncio]==2.0.36
 asyncpg==0.30.0
+aiosqlite==0.20.0
 alembic==1.14.0
 
 # Data Processing

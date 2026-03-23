@@ -38,6 +38,7 @@ Real-time dashboard to monitor Dealer Gamma Exposure for 0DTE (zero-days-to-expi
 - **WebSocket Streaming** - Live updates every 5 seconds during market hours
 - **Interactive Charts** - Strike-by-strike GEX visualization with Recharts
 - **Historical Analysis** - Backtesting and volatility analysis tools
+- **Persistent Historical Storage** - Provider-separated Postgres storage for GEX snapshots, IV surfaces, and replay sessions
 - **Provider-Based Data Layer** - Configurable market-data providers with a free local-development path
 
 ---
@@ -48,7 +49,7 @@ Real-time dashboard to monitor Dealer Gamma Exposure for 0DTE (zero-days-to-expi
 | ------------- | ------------------------------------------------------------------- |
 | **Frontend**  | Next.js 16, TypeScript, TailwindCSS, React Query, Zustand, Recharts |
 | **Backend**   | Python 3.13, FastAPI, NumPy (vectorized), SciPy, Pydantic v2        |
-| **Database**  | PostgreSQL 16 (via Docker Compose / Railway)                        |
+| **Database**  | PostgreSQL 18 (local Docker first, cloud-ready schema)              |
 | **Real-time** | WebSocket                                                           |
 | **Data**      | YFinance (default), Tradier, provider registry architecture         |
 
@@ -125,19 +126,27 @@ Frontend (`frontend/.env.local`):
 docker compose up -d
 ```
 
-### 3. Backend
+### 3. Run Database Migrations
+
+```bash
+cd backend
+alembic upgrade head
+```
+
+### 4. Backend
 
 ```bash
 cd backend
 python -m venv .venv
 source .venv/bin/activate  # Linux/Mac
 pip install -r requirements.txt
+alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
 API available at: http://localhost:8000/docs
 
-### 4. Frontend
+### 5. Frontend
 
 ```bash
 cd frontend
@@ -146,6 +155,26 @@ pnpm dev
 ```
 
 Dashboard available at: http://localhost:3000
+
+### Local Database Defaults
+
+The repo is now wired for local-first Postgres persistence. If you use the
+default `docker-compose.yml`, the backend default `DATABASE_URL` already
+matches it:
+
+```txt
+postgresql+asyncpg://odte_user:odte_password@localhost:5432/odte_gex
+```
+
+That means the normal local flow is:
+
+```bash
+docker compose up -d
+cd backend
+source .venv/bin/activate
+alembic upgrade head
+uvicorn app.main:app --reload
+```
 
 ---
 

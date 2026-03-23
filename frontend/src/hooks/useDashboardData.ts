@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useState, useCallback, useReducer } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useGEXStream } from './useWebSocket';
-import { useCurrentGEX, useCurrentRegime, useGEXByStrikes, queryKeys } from './useGEXData';
+import { useCurrentGEX, useCurrentRegime, useGEXByStrikes, useHistoricalGEX, queryKeys } from './useGEXData';
 import { getAppDataMode } from '@/lib/appMode';
 import { useUIStore } from '@/stores/uiStore';
 import type { GEXSnapshot, RegimeData, GEXByStrike, ConnectionState } from '@/types';
@@ -210,15 +210,40 @@ export function useDashboardData(): DashboardData {
  * Hook that tracks intraday time series data by accumulating WebSocket updates.
  * Uses useReducer pattern to avoid setState-in-effect lint warnings.
  */
-export function useIntradayTimeSeries() {
-  const { gexData, lastUpdateTime } = useDashboardData();
-  const { demoModeEnabled } = useUIStore();
+export function useIntradayTimeSeries(
+  gexData: GEXSnapshot | null,
+  lastUpdateTime: number | null
+) {
+  const { demoModeEnabled, selectedProvider } = useUIStore();
+  const currentDate = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const persistedHistory = useHistoricalGEX(currentDate, currentDate, '1m', 'SPX');
 
   // Use reducer for accumulating time series to avoid setState in effect
   const [timeSeries, dispatch] = useReducer(
-    (state: TimeSeriesPoint[], action: { type: 'add'; point: TimeSeriesPoint } | { type: 'clear' }) => {
+    (
+      state: TimeSeriesPoint[],
+      action:
+        | { type: 'seed'; points: TimeSeriesPoint[] }
+        | { type: 'add'; point: TimeSeriesPoint }
+        | { type: 'clear' }
+    ) => {
       if (action.type === 'clear') {
         return [];
+      }
+
+      if (action.type === 'seed') {
+        const seen = new Set<number>();
+        const deduped = action.points
+          .slice()
+          .sort((left, right) => left.timestamp - right.timestamp)
+          .filter((point) => {
+            if (seen.has(point.timestamp)) {
+              return false;
+            }
+            seen.add(point.timestamp);
+            return true;
+          });
+        return deduped.slice(-1500);
       }
 
       if (action.type === 'add') {
@@ -244,6 +269,21 @@ export function useIntradayTimeSeries() {
     []
   );
 
+  useEffect(() => {
+    if (!persistedHistory.data?.data?.length) {
+      return;
+    }
+
+    dispatch({
+      type: 'seed',
+      points: persistedHistory.data.data.map((snapshot: GEXSnapshot) => ({
+        timestamp: Date.parse(snapshot.timestamp),
+        netGex: snapshot.net_gex ?? 0,
+        spotPrice: snapshot.spot_price ?? 0,
+      })),
+    });
+  }, [persistedHistory.data]);
+
   // Accumulate data points from WebSocket OR REST updates
   useEffect(() => {
     if (gexData && lastUpdateTime) {
@@ -260,7 +300,7 @@ export function useIntradayTimeSeries() {
 
   useEffect(() => {
     dispatch({ type: 'clear' });
-  }, [demoModeEnabled]);
+  }, [demoModeEnabled, selectedProvider]);
 
   // Clear time series (e.g., on market close)
   const clearTimeSeries = useCallback(() => {

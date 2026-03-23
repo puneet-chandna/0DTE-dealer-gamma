@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     )
 
     # Database
-    database_url: str = "postgresql+asyncpg://odte_user:password@localhost:5432/odte_gex"
+    database_url: str = "postgresql+asyncpg://odte_user:odte_password@localhost:5432/odte_gex"
 
     # Data Providers
     data_provider: str = "yfinance"

@@ -63,7 +63,7 @@ export default function DashboardPage() {
   } = useDashboardData();
 
   // Intraday time series from WebSocket accumulation
-  const { timeSeries: intradayData, dataPointCount } = useIntradayTimeSeries();
+  const { timeSeries: intradayData, dataPointCount } = useIntradayTimeSeries(gexData, lastUpdateTime);
 
   // Additional strikes data from REST (for full breakdown)
   const { data: strikesDataRest, isLoading: strikesLoading } = useGEXByStrikes();
@@ -224,11 +224,11 @@ export default function DashboardPage() {
                           <div className="text-center">
                             <p className="text-sm text-zinc-500">
                               {isLoading
-                                ? 'Accumulating real-time data...'
-                                : 'Waiting for telemetry...'}
+                                ? 'Loading persisted intraday history...'
+                                : 'No persisted intraday history yet'}
                             </p>
                             <p className="mt-1 text-xs text-zinc-600">
-                              Intraday GEX timeline will build up as data arrives
+                              The chart will load saved history first, then append live updates
                             </p>
                           </div>
                         </div>

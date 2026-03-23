@@ -14,6 +14,8 @@ from app.core.data_acquisition import is_market_open
 from app.core.provider_registry import ProviderRegistry, get_data_client
 from app.core.gex_calculator import GEXCalculator
 from app.services.cache import get_cache
+from app.db.session import dispose_engine
+from app.services.historical_data import WATCHLIST_SYMBOLS, get_historical_data_service
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,7 @@ ET = ZoneInfo("America/New_York")
 # Background task interval (seconds)
 GEX_REFRESH_INTERVAL = 5
 SPOT_REFRESH_INTERVAL = 2
+HISTORICAL_CAPTURE_INTERVAL = 5
 
 # Task management
 _background_tasks: list[asyncio.Task] = []
@@ -159,6 +162,89 @@ async def periodic_spot_refresh() -> None:
     logger.info("Spot refresh task stopped")
 
 
+async def periodic_historical_capture() -> None:
+    """Persist historical snapshots for the configured watchlist and providers."""
+    global _shutdown_event
+    cache = get_cache()
+    gex_calculator = get_gex_calculator()
+    historical_data_service = get_historical_data_service()
+
+    logger.info("Starting historical capture task")
+
+    while True:
+        try:
+            if _shutdown_event and _shutdown_event.is_set():
+                logger.info("Historical capture task received shutdown signal")
+                break
+
+            if not is_market_open():
+                await historical_data_service.finalize_stale_sessions()
+                await asyncio.sleep(60)
+                continue
+
+            settings = get_settings()
+            default_provider = ProviderRegistry.resolve_provider_name(
+                default_provider=settings.data_provider,
+            )
+            available_providers = [
+                provider_info["name"]
+                for provider_info in ProviderRegistry.list_providers()
+                if provider_info["is_available"]
+            ]
+
+            for provider_name in available_providers:
+                data_client = get_data_client(provider_name)
+                for symbol in WATCHLIST_SYMBOLS:
+                    try:
+                        options_df, spot_price = await data_client.get_options_chain_for_gex(
+                            underlying=symbol
+                        )
+                        cache.update_spot_price(spot_price)
+
+                        if options_df.empty:
+                            logger.warning(
+                                "Skipping historical capture for %s via %s because the provider returned no contracts",
+                                symbol,
+                                provider_name,
+                            )
+                            continue
+
+                        snapshot = gex_calculator.calculate_gex_from_chain(
+                            options_df=options_df,
+                            spot_price=spot_price,
+                            timestamp=datetime.now(ET),
+                        )
+
+                        cache.set(f"gex:current:{symbol}:{provider_name}", snapshot)
+                        if provider_name == default_provider:
+                            cache.set(f"gex:current:{symbol}", snapshot)
+
+                        await historical_data_service.persist_capture(
+                            provider=provider_name,
+                            symbol=symbol,
+                            snapshot=snapshot,
+                            options_df=options_df,
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "Historical capture failed for %s via %s: %s",
+                            symbol,
+                            provider_name,
+                            exc,
+                        )
+
+            await asyncio.sleep(HISTORICAL_CAPTURE_INTERVAL)
+
+        except asyncio.CancelledError:
+            logger.info("Historical capture task cancelled")
+            break
+        except Exception as exc:
+            logger.error("Unexpected error in historical capture task: %s", exc)
+            await asyncio.sleep(HISTORICAL_CAPTURE_INTERVAL)
+
+    logger.info("Historical capture task stopped")
+
+
 async def cache_warmup() -> None:
     """Warm up cache with initial data on startup.
 
@@ -226,6 +312,10 @@ async def start_background_tasks() -> None:
     spot_task.set_name("spot_refresh")
     _background_tasks.append(spot_task)
 
+    historical_capture_task = asyncio.create_task(periodic_historical_capture())
+    historical_capture_task.set_name("historical_capture")
+    _background_tasks.append(historical_capture_task)
+
     logger.info(f"Started {len(_background_tasks)} background tasks")
     logger.info("Background tasks initialization complete")
 
@@ -256,5 +346,6 @@ async def stop_background_tasks() -> None:
     # Close data provider instances
     from app.core.provider_registry import ProviderRegistry
     await ProviderRegistry.close_all()
+    await dispose_engine()
 
     logger.info("Background tasks stopped")
