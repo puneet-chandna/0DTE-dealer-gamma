@@ -227,6 +227,62 @@ describe('useDashboardData', () => {
     expect(result.current.error).toBeNull();
   });
 
+  it('treats websocket snapshots flagged stale by the backend as stale data', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-23T10:30:00.000Z'));
+
+    websocketState.stream = {
+      ...websocketState.createStream(),
+      data: {
+        ...websocketState.createStream().data!,
+        is_stale: true,
+        timestamp: '2026-03-23T10:00:00.000Z',
+      },
+      lastUpdateTime: Date.parse('2026-03-23T10:30:00.000Z'),
+    };
+
+    vi.mocked(gexAPI.getCurrentGEX).mockResolvedValue(liveCurrentGex);
+    vi.mocked(gexAPI.getCurrentRegime).mockResolvedValue(liveRegime);
+    vi.mocked(gexAPI.getGEXByStrikes).mockResolvedValue(liveStrikes);
+
+    const { result } = renderHook(() => useDashboardData(), {
+      wrapper: createWrapper(createQueryClient()),
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(result.current.isStale).toBe(true);
+    expect(result.current.lastUpdateTime).toBe(Date.parse('2026-03-23T10:00:00.000Z'));
+  });
+
+  it('falls back to REST data when the websocket payload is mock data', async () => {
+    websocketState.stream = {
+      ...websocketState.createStream(),
+      data: {
+        ...websocketState.createStream().data!,
+        is_mock: true,
+      },
+    };
+
+    vi.mocked(gexAPI.getCurrentGEX).mockResolvedValue(liveCurrentGex);
+    vi.mocked(gexAPI.getCurrentRegime).mockResolvedValue(liveRegime);
+    vi.mocked(gexAPI.getGEXByStrikes).mockResolvedValue(liveStrikes);
+
+    const { result } = renderHook(() => useDashboardData(), {
+      wrapper: createWrapper(createQueryClient()),
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(result.current.isRealtime).toBe(false);
+    expect(result.current.gexData).toEqual(liveCurrentGex);
+    expect(result.current.regimeData).toEqual(liveRegime);
+  });
+
   it('marks realtime data stale after the freshness threshold elapses', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-03-23T10:30:00.000Z'));

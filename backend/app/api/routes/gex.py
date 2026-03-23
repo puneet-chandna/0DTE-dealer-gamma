@@ -373,9 +373,9 @@ async def get_gex_by_strikes(
         else None
     )
 
-    cached_data = cache.get(cache_key)
+    cached_data = cache.get_if_fresh(cache_key)
     if cached_data is None and legacy_key is not None:
-        cached_data = cache.get(legacy_key)
+        cached_data = cache.get_if_fresh(legacy_key)
 
     try:
         if cached_data is None:
@@ -407,7 +407,28 @@ async def get_gex_by_strikes(
         raise
     except Exception as e:
         logger.error(f"Failed to get GEX by strikes for {symbol}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to get GEX by strikes: {e}")
+        stale_data = cache.get(cache_key)
+        if stale_data is None and legacy_key is not None:
+            stale_data = cache.get(legacy_key)
+
+        if stale_data is not None:
+            logger.warning("Returning stale cached GEX strikes for %s (%s)", symbol, active_provider)
+            snapshot_dict = (
+                stale_data.model_dump()
+                if hasattr(stale_data, "model_dump")
+                else stale_data
+            )
+            snapshot = GEXSnapshot(**snapshot_dict)
+            sorted_strikes = sorted(snapshot.gex_by_strike.keys())
+            sorted_values = [snapshot.gex_by_strike[s] for s in sorted_strikes]
+            return GEXByStrike(
+                strikes=sorted_strikes,
+                gex_values=sorted_values,
+                spot_price=snapshot.spot_price,
+                zero_gamma_level=snapshot.zero_gamma_level,
+            )
+
+        raise HTTPException(status_code=503, detail=f"Failed to get GEX by strikes: {e}")
 
 
 @router.get("/regime", response_model=RegimeData)
@@ -483,4 +504,4 @@ async def get_market_regime(
         )
     except Exception as e:
         logger.error(f"Failed to get regime for {symbol}: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to determine regime: {e}")
+        raise HTTPException(status_code=503, detail=f"Failed to determine regime: {e}")

@@ -1,8 +1,12 @@
 """0DTE GEX Backend - WebSocket Integration Tests."""
 
 import json
+import math
+from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
+from zoneinfo import ZoneInfo
 
+import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
@@ -12,6 +16,7 @@ from app.main import app
 
 
 client = TestClient(app)
+ET = ZoneInfo("America/New_York")
 
 
 class TestWebSocketEndpoints:
@@ -77,8 +82,8 @@ class TestWebSocketEndpoints:
             assert isinstance(gex_data["zero_gamma_level"], (int, float))
             assert isinstance(gex_data["spot_price"], (int, float))
 
-            # Check reasonable ranges (mock data: net_gex between -3B and 2B)
-            assert -5e9 <= gex_data["net_gex"] <= 5e9
+            assert math.isfinite(gex_data["net_gex"])
+            assert math.isfinite(gex_data["zero_gamma_level"])
             assert gex_data["net_gex_billions"] == gex_data["net_gex"] / 1e9
 
             # Spot price should be a positive realistic number
@@ -169,6 +174,57 @@ class TestGEXUpdateHelper:
     """Unit tests for provider-aware websocket payload generation."""
 
     @pytest.mark.asyncio
+    async def test_stale_cache_triggers_live_refresh_before_reuse(self):
+        """Stale cached websocket data should be refreshed when live fetch succeeds."""
+        stale_snapshot = {
+            "timestamp": "2099-01-15T10:30:00-05:00",
+            "spot_price": 5900.0,
+            "total_call_gex": 1.0,
+            "total_put_gex": -2.0,
+            "net_gex": -1.0,
+            "zero_gamma_level": 5895.0,
+            "gex_by_strike": {"5900.0": 1.0},
+            "dominant_strike": 5900.0,
+            "metrics": {},
+        }
+        refreshed_snapshot = MagicMock()
+        refreshed_snapshot.net_gex = -2.5e8
+        refreshed_snapshot.zero_gamma_level = 6570.0
+        refreshed_snapshot.spot_price = 6575.0
+        refreshed_snapshot.timestamp = datetime(2026, 3, 23, 14, 20, tzinfo=ET)
+
+        mock_cache = MagicMock()
+        mock_cache.get_if_fresh.return_value = None
+        mock_cache.get.side_effect = (
+            lambda key: stale_snapshot if key == "gex:current:SPX:yfinance" else None
+        )
+
+        mock_client = AsyncMock()
+        mock_client.provider_name = "yfinance"
+        mock_client.get_options_chain_for_gex.return_value = (
+            pd.DataFrame([{"contract": 1}]),
+            6575.0,
+        )
+
+        mock_calculator = MagicMock()
+        mock_calculator.calculate_gex_from_chain.return_value = refreshed_snapshot
+        mock_calculator.determine_regime.return_value = ("neutral", "Neutral", "yellow")
+
+        with patch("app.api.websocket.get_cache", return_value=mock_cache):
+            with patch("app.api.websocket.get_data_client", return_value=mock_client):
+                with patch("app.api.websocket.get_gex_calculator", return_value=mock_calculator):
+                    payload = await _get_gex_update(
+                        Settings(data_provider="yfinance"),
+                        symbol="SPX",
+                    )
+
+        mock_cache.get_if_fresh.assert_any_call("gex:current:SPX:yfinance")
+        mock_client.get_options_chain_for_gex.assert_awaited_once_with(underlying="SPX")
+        assert payload["spot_price"] == 6575.0
+        assert payload["is_stale"] is False
+        assert payload["timestamp"] == refreshed_snapshot.timestamp.isoformat()
+
+    @pytest.mark.asyncio
     async def test_cached_json_payload_is_parsed_for_provider_specific_requests(self):
         """Cached JSON strings should be parsed before generating websocket payloads."""
         cached_snapshot = json.dumps(
@@ -185,17 +241,22 @@ class TestGEXUpdateHelper:
             }
         )
         mock_cache = MagicMock()
+        mock_cache.get_if_fresh.return_value = None
         mock_cache.get.side_effect = (
             lambda key: cached_snapshot if key == "gex:current:SPX:tradier" else None
         )
         mock_cache.is_stale.return_value = True
+        mock_client = AsyncMock()
+        mock_client.provider_name = "tradier"
+        mock_client.get_options_chain_for_gex.side_effect = RuntimeError("provider unavailable")
 
         with patch("app.api.websocket.get_cache", return_value=mock_cache):
-            payload = await _get_gex_update(
-                Settings(data_provider="yfinance"),
-                symbol="SPX",
-                provider=" TRADIER ",
-            )
+            with patch("app.api.websocket.get_data_client", return_value=mock_client):
+                payload = await _get_gex_update(
+                    Settings(data_provider="yfinance"),
+                    symbol="SPX",
+                    provider=" TRADIER ",
+                )
 
         mock_cache.get.assert_any_call("gex:current:SPX:tradier")
         assert payload["provider"] == "tradier"
@@ -217,7 +278,7 @@ class TestGEXUpdateHelper:
             "metrics": {},
         }
         mock_cache = MagicMock()
-        mock_cache.get.side_effect = (
+        mock_cache.get_if_fresh.side_effect = (
             lambda key: cached_snapshot if key == "gex:current:SPX:yfinance" else None
         )
         mock_cache.is_stale.return_value = False
@@ -231,7 +292,7 @@ class TestGEXUpdateHelper:
                     symbol="SPX",
                 )
 
-        mock_cache.get.assert_any_call("gex:current:SPX:yfinance")
+        mock_cache.get_if_fresh.assert_any_call("gex:current:SPX:yfinance")
         assert payload["provider"] == "yfinance"
 
     @pytest.mark.asyncio
@@ -249,7 +310,7 @@ class TestGEXUpdateHelper:
             "metrics": {},
         }
         mock_cache = MagicMock()
-        mock_cache.get.side_effect = (
+        mock_cache.get_if_fresh.side_effect = (
             lambda key: cached_snapshot if key == "gex:current:QQQ" else None
         )
         mock_cache.is_stale.return_value = False
@@ -263,7 +324,7 @@ class TestGEXUpdateHelper:
                     symbol="QQQ",
                 )
 
-        mock_cache.get.assert_any_call("gex:current:QQQ")
+        mock_cache.get_if_fresh.assert_any_call("gex:current:QQQ")
 
     @pytest.mark.asyncio
     async def test_unreasonable_cached_payload_falls_back_to_mock_data(self):
@@ -280,7 +341,7 @@ class TestGEXUpdateHelper:
             "metrics": {},
         }
         mock_cache = MagicMock()
-        mock_cache.get.side_effect = (
+        mock_cache.get_if_fresh.side_effect = (
             lambda key: cached_snapshot if key == "gex:current:SPX:yfinance" else None
         )
         mock_cache.is_stale.return_value = False
@@ -305,6 +366,35 @@ class TestGEXUpdateHelper:
 
         mock_generate.assert_called_once()
         assert payload == mock_fallback
+
+    @pytest.mark.asyncio
+    async def test_large_but_finite_live_gex_payload_is_not_rejected(self):
+        """Real same-day GEX values can be very large and should not be replaced by mock data."""
+        cached_snapshot = {
+            "timestamp": "2099-01-15T10:30:00-05:00",
+            "spot_price": 6575.0,
+            "total_call_gex": -2.8e12,
+            "total_put_gex": 1.2e12,
+            "net_gex": -1.6e12,
+            "zero_gamma_level": 5600.0,
+            "gex_by_strike": {"6570.0": 4.0},
+            "dominant_strike": 6570.0,
+            "metrics": {},
+        }
+        mock_cache = MagicMock()
+        mock_cache.get_if_fresh.side_effect = (
+            lambda key: cached_snapshot if key == "gex:current:SPX:yfinance" else None
+        )
+
+        with patch("app.api.websocket.get_cache", return_value=mock_cache):
+            payload = await _get_gex_update(
+                Settings(data_provider="yfinance"),
+                symbol="SPX",
+            )
+
+        assert payload["is_mock"] is False
+        assert payload["spot_price"] == 6575.0
+        assert payload["net_gex"] == -1.6e12
 
 
 class TestConnectionManager:

@@ -5,6 +5,7 @@ Provides real-time GEX updates to connected clients with 5-second intervals.
 
 import asyncio
 import logging
+import math
 from datetime import datetime
 from typing import List, Optional
 from zoneinfo import ZoneInfo
@@ -151,17 +152,55 @@ def _is_reasonable_gex_payload(payload: dict) -> bool:
     """Reject obviously broken live payloads before they reach clients."""
     net_gex = payload.get("net_gex")
     spot_price = payload.get("spot_price")
+    zero_gamma_level = payload.get("zero_gamma_level")
 
-    if not isinstance(net_gex, (int, float)) or not isinstance(spot_price, (int, float)):
-        return False
-
-    if abs(net_gex) > 5e9:
+    numeric_fields = (net_gex, spot_price, zero_gamma_level)
+    if not all(isinstance(value, (int, float)) and math.isfinite(value) for value in numeric_fields):
         return False
 
     if not 100 <= spot_price <= 10_000:
         return False
 
+    if not 100 <= zero_gamma_level <= 10_000:
+        return False
+
     return True
+
+
+def _coerce_gex_snapshot(snapshot_like):
+    """Normalize cached snapshot shapes into a GEXSnapshot model."""
+    if isinstance(snapshot_like, str):
+        import json
+
+        snapshot_like = json.loads(snapshot_like)
+
+    if isinstance(snapshot_like, dict):
+        from app.models.schemas import GEXSnapshot
+
+        snapshot_like = GEXSnapshot(**snapshot_like)
+
+    return snapshot_like
+
+
+def _build_live_ws_payload_from_snapshot(snapshot, provider: str, *, is_stale: bool) -> dict:
+    """Build a websocket payload from a live or cached snapshot."""
+    gex_calculator = get_gex_calculator()
+    regime, _, _ = gex_calculator.determine_regime(snapshot.net_gex)
+
+    payload = {
+        "net_gex": snapshot.net_gex,
+        "net_gex_billions": snapshot.net_gex / 1e9,
+        "zero_gamma_level": snapshot.zero_gamma_level,
+        "spot_price": snapshot.spot_price,
+        "regime": regime,
+        "is_mock": False,
+        "is_stale": is_stale,
+        "provider": provider,
+        "timestamp": snapshot.timestamp.isoformat()
+        if hasattr(snapshot.timestamp, "isoformat")
+        else str(snapshot.timestamp),
+    }
+    return payload if _is_reasonable_gex_payload(payload) else _generate_mock_gex_data()
 
 
 async def _get_gex_update(
@@ -219,35 +258,18 @@ async def _get_gex_update(
     )
     cached_key = cache_key
 
-    # Try to get from cache first
-    cached = cache.get(cache_key)
+    # Prefer fresh cache only; stale data is handled as a fallback after live fetch fails.
+    cached = cache.get_if_fresh(cache_key)
     if cached is None and legacy_cache_key is not None:
         cached_key = legacy_cache_key
-        cached = cache.get(legacy_cache_key)
+        cached = cache.get_if_fresh(legacy_cache_key)
     if cached is not None:
-        if isinstance(cached, str):
-            import json
-            cached = json.loads(cached)
-            
-        if isinstance(cached, dict):
-            from app.models.schemas import GEXSnapshot
-            # Some fields might be missing or date strings, GEXSnapshot handles them
-            cached = GEXSnapshot(**cached)
-            
-        gex_calculator = get_gex_calculator()
-        regime, _, _ = gex_calculator.determine_regime(cached.net_gex)
-
-        payload = {
-            "net_gex": cached.net_gex,
-            "net_gex_billions": cached.net_gex / 1e9,
-            "zero_gamma_level": cached.zero_gamma_level,
-            "spot_price": cached.spot_price,
-            "regime": regime,
-            "is_mock": False,
-            "is_stale": cache.is_stale(cached_key),
-            "provider": active_provider,
-        }
-        return payload if _is_reasonable_gex_payload(payload) else _generate_mock_gex_data()
+        cached = _coerce_gex_snapshot(cached)
+        return _build_live_ws_payload_from_snapshot(
+            cached,
+            active_provider,
+            is_stale=False,
+        )
 
     # If no cached data, fetch fresh data via data provider
     try:
@@ -286,11 +308,24 @@ async def _get_gex_update(
             "is_mock": False,
             "is_stale": False,
             "provider": provider_name,
+            "timestamp": snapshot.timestamp.isoformat(),
         }
         return payload if _is_reasonable_gex_payload(payload) else _generate_mock_gex_data()
 
     except Exception as e:
         logger.warning(f"Failed to fetch GEX data for WebSocket: {e}")
+        stale = cache.get(cache_key)
+        stale_key = cache_key
+        if stale is None and legacy_cache_key is not None:
+            stale = cache.get(legacy_cache_key)
+            stale_key = legacy_cache_key
+        if stale is not None:
+            stale_snapshot = _coerce_gex_snapshot(stale)
+            return _build_live_ws_payload_from_snapshot(
+                stale_snapshot,
+                active_provider,
+                is_stale=cache.is_stale(stale_key),
+            )
         return _generate_mock_gex_data()
 
 

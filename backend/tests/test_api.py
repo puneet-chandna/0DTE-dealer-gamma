@@ -95,6 +95,50 @@ class TestGEXEndpoints:
             assert "spot_price" in data
             assert len(data["strikes"]) == len(data["gex_values"])
 
+    def test_strikes_refreshes_when_cached_snapshot_is_stale(self):
+        """Strike breakdown should prefer a fresh live snapshot over stale cache data."""
+        stale_snapshot = {
+            "timestamp": "2099-01-15T10:30:00-05:00",
+            "spot_price": 5900.0,
+            "total_call_gex": 1.0,
+            "total_put_gex": -2.0,
+            "net_gex": -1.0,
+            "zero_gamma_level": 5895.0,
+            "gex_by_strike": {"5900.0": 1.0},
+            "dominant_strike": 5900.0,
+            "metrics": {},
+        }
+        fresh_snapshot = {
+            "timestamp": "2099-01-15T10:35:00-05:00",
+            "spot_price": 6575.0,
+            "total_call_gex": -3.0,
+            "total_put_gex": 2.0,
+            "net_gex": -1.0,
+            "zero_gamma_level": 6570.0,
+            "gex_by_strike": {"6570.0": 4.0, "6580.0": -5.0},
+            "dominant_strike": 6580.0,
+            "metrics": {},
+        }
+        mock_cache = MagicMock()
+        mock_cache.get_if_fresh.return_value = None
+        mock_cache.get.side_effect = (
+            lambda key: stale_snapshot if key == "gex:current:SPX:yfinance" else None
+        )
+
+        with patch("app.api.routes.gex.get_cache", return_value=mock_cache):
+            with patch("app.api.routes.gex.get_settings") as mock_get_settings:
+                mock_get_settings.return_value.data_provider = "yfinance"
+                with patch(
+                    "app.api.routes.gex._get_live_gex_snapshot",
+                    new_callable=AsyncMock,
+                ) as mock_live_snapshot:
+                    mock_live_snapshot.return_value = fresh_snapshot
+                    response = client.get("/api/gex/strikes")
+
+        assert response.status_code == 200
+        assert response.json()["spot_price"] == 6575.0
+        mock_live_snapshot.assert_awaited_once()
+
     def test_current_gex_uses_symbol_scoped_legacy_cache_key(self):
         """Default-provider cache fallback should stay symbol-specific."""
         cached_snapshot = {

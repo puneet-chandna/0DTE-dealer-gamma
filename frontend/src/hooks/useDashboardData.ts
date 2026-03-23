@@ -61,6 +61,9 @@ export function useDashboardData(): DashboardData {
 
   // WebSocket stream for real-time updates
   const wsStream = useGEXStream(demoModeEnabled, selectedProvider);
+  const hasUsableRealtimeData = Boolean(
+    wsStream.isConnected && wsStream.data && !wsStream.data.is_mock && !wsStream.data.is_stale
+  );
 
   // REST polling hooks (used as fallback and for initial data)
   const polledGEX = useCurrentGEX();
@@ -132,7 +135,7 @@ export function useDashboardData(): DashboardData {
   // Determine effective GEX data
   const gexData = useMemo((): GEXSnapshot | null => {
     // Prefer WebSocket data when connected and available
-    if (wsStream.isConnected && wsStream.data) {
+    if (hasUsableRealtimeData && wsStream.data) {
       // Merge WebSocket update with polled data for complete snapshot
       return {
         timestamp: wsStream.data.timestamp || new Date().toISOString(),
@@ -148,11 +151,11 @@ export function useDashboardData(): DashboardData {
     }
     // Fall back to polled data
     return polledGEX.data ?? null;
-  }, [wsStream.isConnected, wsStream.data, polledGEX.data]);
+  }, [hasUsableRealtimeData, wsStream.data, polledGEX.data]);
 
   // Determine effective regime data
   const regimeData = useMemo((): RegimeData | null => {
-    if (wsStream.isConnected && wsStream.data?.regime) {
+    if (hasUsableRealtimeData && wsStream.data?.regime) {
       return {
         regime: wsStream.data.regime,
         net_gex: wsStream.data.net_gex,
@@ -163,16 +166,30 @@ export function useDashboardData(): DashboardData {
       };
     }
     return polledRegime.data ?? null;
-  }, [wsStream.isConnected, wsStream.data, polledRegime.data]);
+  }, [hasUsableRealtimeData, wsStream.data, polledRegime.data]);
+
+  const effectiveLastUpdateTime = useMemo(() => {
+    if (wsStream.data?.timestamp) {
+      const parsedTimestamp = Date.parse(wsStream.data.timestamp);
+      if (!Number.isNaN(parsedTimestamp)) {
+        return parsedTimestamp;
+      }
+    }
+
+    return wsStream.lastUpdateTime ?? polledGEX.dataUpdatedAt ?? null;
+  }, [wsStream.data, wsStream.lastUpdateTime, polledGEX.dataUpdatedAt]);
 
   // Calculate staleness using state-based current time
   const isStale = useMemo(() => {
-    const lastUpdate = wsStream.lastUpdateTime ?? polledGEX.dataUpdatedAt ?? null;
-    if (!lastUpdate) return true;
+    if (wsStream.isConnected && wsStream.data?.is_stale) {
+      return true;
+    }
 
-    const timeSinceUpdate = currentTime - lastUpdate;
+    if (!effectiveLastUpdateTime) return true;
+
+    const timeSinceUpdate = currentTime - effectiveLastUpdateTime;
     return timeSinceUpdate > STALE_THRESHOLD;
-  }, [wsStream.lastUpdateTime, polledGEX.dataUpdatedAt, currentTime]);
+  }, [wsStream.isConnected, wsStream.data, effectiveLastUpdateTime, currentTime]);
 
   // Calculate loading state
   const isLoading =
@@ -192,13 +209,13 @@ export function useDashboardData(): DashboardData {
     regimeData,
     strikesData: polledStrikes.data ?? null,
 
-    isRealtime: wsStream.isConnected,
+    isRealtime: hasUsableRealtimeData,
     connectionState: wsStream.connectionState,
     isLoading,
     isStale,
     error,
 
-    lastUpdateTime: wsStream.lastUpdateTime ?? polledGEX.dataUpdatedAt ?? null,
+    lastUpdateTime: effectiveLastUpdateTime,
     retryCount: wsStream.retryCount,
 
     reconnect: wsStream.reconnect,
