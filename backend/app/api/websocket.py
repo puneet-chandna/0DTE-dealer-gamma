@@ -214,8 +214,8 @@ async def _get_gex_update(
         cache.update_spot_price(spot_price)
 
         if options_df.empty:
-             logger.warning(f"WebSocket update: empty chain returned by {provider_name}")
-             return _generate_mock_gex_data()
+            logger.warning(f"WebSocket update: empty chain returned by {provider_name}")
+            return _generate_mock_gex_data()
 
         gex_calculator = get_gex_calculator()
         snapshot = gex_calculator.calculate_gex_from_chain(
