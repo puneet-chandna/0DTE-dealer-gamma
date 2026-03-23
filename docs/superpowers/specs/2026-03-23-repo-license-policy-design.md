@@ -186,10 +186,11 @@ The main README should be updated alongside the license docs.
 Based on the current repository snapshot, the README should be corrected to match the code:
 
 - remove or revise the `Polygon.io` data-source reference if the project no longer uses it
-- update setup instructions that currently reference missing
-  `backend/.env.example` and `frontend/.env.example` files
+- document which environment template files are canonical, because the repository contains
+  a top-level `.env.example` as well as `backend/.env.example` and `frontend/.env.example`
 - align the frontend test command with the actual script exposed by `frontend/package.json`
-- consider documenting the top-level `.env.example` if that is the actual template in use
+- revise outdated environment variable examples if they still reference deprecated
+  provider settings such as Polygon
 
 ### Recommended Content Additions
 
