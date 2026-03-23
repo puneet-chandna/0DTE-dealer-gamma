@@ -4,6 +4,10 @@ Real-time dashboard to monitor Dealer Gamma Exposure for 0DTE (zero-days-to-expi
 
 **Goal:** Identify the "Zero Gamma Level" and "Net GEX" to predict intraday volatility regimes.
 
+> Source-available under `PolyForm Noncommercial 1.0.0`. Personal study, research,
+> and other noncommercial use are allowed under the license. Commercial use requires
+> separate written permission from the copyright holders.
+
 <img
   src="assets/0dte-poster-brutalist.svg"
   alt="0DTE Dealer GEX Monitor brutalist poster"
@@ -15,15 +19,18 @@ Real-time dashboard to monitor Dealer Gamma Exposure for 0DTE (zero-days-to-expi
 ## Table of Contents
 - [Features](#features)
 - [Tech Stack](#tech-stack)
+- [Project Structure](#project-structure)
 - [Quick Start](#quick-start)
 - [Key Concepts](#key-concepts)
 - [Tests](#tests)
 - [Documentation](#documentation)
 - [Deployment](#deployment)
 - [Architecture Rules](#architecture-rules)
-- [License](#license)
+- [License and Commercial Use](#license-and-commercial-use)
+- [Contributing](#contributing)
+- [Security](#security)
 
-## ✨ Features
+## Features
 
 - **Real-time GEX Calculation** - Vectorized Black-Scholes Greeks (1000+ contracts in <1ms)
 - **Zero Gamma Level** - Linear interpolation where cumulative GEX crosses zero
@@ -31,10 +38,11 @@ Real-time dashboard to monitor Dealer Gamma Exposure for 0DTE (zero-days-to-expi
 - **WebSocket Streaming** - Live updates every 5 seconds during market hours
 - **Interactive Charts** - Strike-by-strike GEX visualization with Recharts
 - **Historical Analysis** - Backtesting and volatility analysis tools
+- **Provider-Based Data Layer** - Configurable market-data providers with a free local-development path
 
 ---
 
-## 🔧 Tech Stack
+## Tech Stack
 
 | Layer         | Technology                                                          |
 | ------------- | ------------------------------------------------------------------- |
@@ -42,11 +50,11 @@ Real-time dashboard to monitor Dealer Gamma Exposure for 0DTE (zero-days-to-expi
 | **Backend**   | Python 3.13, FastAPI, NumPy (vectorized), SciPy, Pydantic v2        |
 | **Database**  | PostgreSQL 16 (via Docker Compose / Railway)                        |
 | **Real-time** | WebSocket                                                           |
-| **Data**      | Polygon.io                                                          |
+| **Data**      | YFinance (default), Tradier, provider registry architecture         |
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 odte-dealer-gamma/
@@ -56,21 +64,21 @@ odte-dealer-gamma/
 │   │   ├── core/      # Greeks, GEX calculator, analytics
 │   │   ├── models/    # Pydantic schemas
 │   │   └── services/  # Background tasks, caching
-│   └── tests/         # pytest (193 tests)
+│   └── tests/         # pytest suite
 ├── frontend/          # Next.js 16 app
 │   └── src/
 │       ├── app/       # App Router pages
 │       ├── components/# UI & chart components
 │       ├── hooks/     # React Query & WebSocket hooks
 │       ├── lib/       # API client, utilities
-│       └── test/      # Vitest (129 tests)
+│       └── test/      # Vitest suite
 ├── docs/              # Documentation
 └── docker-compose.yml # PostgreSQL service
 ```
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -84,17 +92,25 @@ odte-dealer-gamma/
 git clone https://github.com/<your-org>/odte-dealer-gamma.git
 cd odte-dealer-gamma
 
-# Copy environment files
+# Copy the canonical app environment templates
 cp backend/.env.example backend/.env
 cp frontend/.env.example frontend/.env.local
 
-# Add your Polygon.io API key to backend/.env
+# Optional: if you want to use Tradier instead of the default provider,
+# set TRADIER_API_KEY in backend/.env
 ```
+
+The canonical setup templates are [backend/.env.example](backend/.env.example)
+and [frontend/.env.example](frontend/.env.example). The root [.env.example](.env.example)
+is a combined reference for local development, but the backend/frontend templates should
+be treated as the primary setup docs.
 
 ### Environment Variables (minimum)
 
 Backend (`backend/.env`):
 - `DATABASE_URL` (Postgres connection string)
+- `DATA_PROVIDER` (`yfinance` by default, `tradier` if configured)
+- `TRADIER_API_KEY` (only required when using `tradier`)
 - `HOST`, `PORT`
 - `ENVIRONMENT` (development | staging | production)
 - `CORS_ORIGINS` (JSON array string)
@@ -133,7 +149,7 @@ Dashboard available at: http://localhost:3000
 
 ---
 
-## 📊 Key Concepts
+## Key Concepts
 
 ### GEX Formula
 
@@ -175,14 +191,14 @@ Then the project applies the sign convention by option type:
 
 ---
 
-## 🧪 Tests
+## Tests
 
 ```bash
-# Backend (193 tests)
+# Backend
 cd backend && pytest -v
 
-# Frontend (129 tests)
-cd frontend && pnpm vitest run
+# Frontend
+cd frontend && pnpm test:run
 
 # Type checking
 cd backend && mypy app
@@ -191,17 +207,18 @@ cd frontend && pnpm tsc --noEmit
 
 ---
 
-## 📖 Documentation
+## Documentation
 
 | Document                                | Description                         |
 | --------------------------------------- | ----------------------------------- |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, data flow diagrams   |
 | [API.md](docs/API.md)                   | Complete REST & WebSocket reference |
 | [DEPLOYMENT.md](docs/DEPLOYMENT.md)     | Railway + Vercel deployment guide   |
+| [PROVIDER_INTEGRATION_PLAN.md](docs/PROVIDER_INTEGRATION_PLAN.md) | Provider architecture and rollout notes |
 
 ---
 
-## 🚀 Deployment
+## Deployment
 
 Deploy to Vercel (frontend) and Railway (backend):
 
@@ -217,7 +234,7 @@ docs/DEPLOYMENT.md
 
 ---
 
-## 🏗️ Architecture Rules
+## Architecture Rules
 
 1. **Vectorization** - All Greeks calculations use NumPy (no Python loops)
 2. **State Management** - Server state in React Query, UI state in Zustand
@@ -226,9 +243,38 @@ docs/DEPLOYMENT.md
 
 ---
 
-## 📄 License
+## License and Commercial Use
 
-MIT
+This project is `source-available`, not open source.
+
+- Public license: [PolyForm Noncommercial 1.0.0](LICENSE)
+- Ownership notice: [NOTICE](NOTICE)
+- Commercial-use policy: [COMMERCIAL-LICENSING.md](COMMERCIAL-LICENSING.md)
+- Commercial licensing contact: `puneetchandna21@gmail.com`
+
+The public license allows personal study, research, testing, and other noncommercial uses
+allowed by the license text. Commercial use, monetized services, business deployment,
+commercial derivatives, and other revenue-generating use cases require a separate written
+license from Puneet Chandna and Gunjana Sahoo.
+
+---
+
+## Contributing
+
+Issues and pull requests are welcome. Contributions are submitted under the repository's
+license terms, and no separate CLA is required.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and contribution expectations.
+
+---
+
+## Security
+
+Please report security vulnerabilities privately to `puneetchandna21@gmail.com` rather
+than opening a public issue.
+
+See [SECURITY.md](SECURITY.md) for reporting guidance and [SUPPORT.md](SUPPORT.md) for
+general support routing.
 
 ---
 
