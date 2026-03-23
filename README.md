@@ -240,6 +240,7 @@ cd frontend && pnpm tsc --noEmit
 
 | Document                                | Description                         |
 | --------------------------------------- | ----------------------------------- |
+| [UNDERSTANDING_GEX_DASHBOARD.md](docs/UNDERSTANDING_GEX_DASHBOARD.md) | Beginner guide for traders and non-quant reviewers |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, data flow diagrams   |
 | [API.md](docs/API.md)                   | Complete REST & WebSocket reference |
 | [DEPLOYMENT.md](docs/DEPLOYMENT.md)     | Railway + Vercel deployment guide   |

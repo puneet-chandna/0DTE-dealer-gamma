@@ -12,6 +12,7 @@ import { useEffect, useMemo, useState, useCallback, useReducer } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useGEXStream } from './useWebSocket';
 import { useCurrentGEX, useCurrentRegime, useGEXByStrikes, useHistoricalGEX, queryKeys } from './useGEXData';
+import { useMarketStatus } from './useMarketStatus';
 import { getAppDataMode } from '@/lib/appMode';
 import { useUIStore } from '@/stores/uiStore';
 import type { GEXSnapshot, RegimeData, GEXByStrike, ConnectionState } from '@/types';
@@ -232,8 +233,12 @@ export function useIntradayTimeSeries(
   lastUpdateTime: number | null
 ) {
   const { demoModeEnabled, selectedProvider } = useUIStore();
-  const currentDate = useMemo(() => new Date().toISOString().slice(0, 10), []);
-  const persistedHistory = useHistoricalGEX(currentDate, currentDate, '1m', 'SPX');
+  const { data: marketStatus } = useMarketStatus();
+  const tradingDateEt = useMemo(
+    () => marketStatus?.current_time_et?.slice(0, 10) ?? '',
+    [marketStatus?.current_time_et]
+  );
+  const persistedHistory = useHistoricalGEX(tradingDateEt, tradingDateEt, '1m', 'SPX');
 
   // Use reducer for accumulating time series to avoid setState in effect
   const [timeSeries, dispatch] = useReducer(

@@ -29,6 +29,8 @@ const websocketState = vi.hoisted(() => {
           spot_price: number;
           regime: 'short_gamma';
           timestamp: string;
+          is_stale?: boolean;
+          is_mock?: boolean;
         }
       | null;
     isConnected: boolean;
@@ -79,6 +81,17 @@ vi.mock('@/stores/uiStore', () => ({
 
 vi.mock('./useWebSocket', () => ({
   useGEXStream: vi.fn(() => websocketState.stream),
+}));
+
+vi.mock('./useMarketStatus', () => ({
+  useMarketStatus: vi.fn(() => ({
+    data: {
+      is_open: true,
+      status: 'open',
+      next_open: null,
+      current_time_et: '2026-03-23T10:30:00-04:00',
+    },
+  })),
 }));
 
 const liveCurrentGex: GEXSnapshot = {
@@ -368,6 +381,13 @@ describe('useIntradayTimeSeries', () => {
     await waitFor(() => {
       expect(result.current.dataPointCount).toBe(1);
     });
+
+    expect(gexAPI.getHistoricalGEX).toHaveBeenCalledWith(
+      '2026-03-23',
+      '2026-03-23',
+      '1m',
+      { demo: false, provider: 'yfinance', symbol: 'SPX' }
+    );
 
     websocketState.stream = {
       ...websocketState.stream,
