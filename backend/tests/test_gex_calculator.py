@@ -124,6 +124,19 @@ class TestGEXCalculator:
         assert len(result.gex_by_strike) == 1
         assert 5800.0 in result.gex_by_strike
 
+    def test_same_day_date_only_expiration_uses_market_close(self, gex_calculator):
+        """Date-only 0DTE expirations should retain time value until the close."""
+        timestamp = datetime(2024, 1, 15, 12, 0, 0, tzinfo=ET)
+        df = pd.DataFrame([
+            {"strike": 5750.0, "type": "call", "open_interest": 1000, "implied_vol": 0.20, "expiration": "2024-01-15"},
+            {"strike": 5750.0, "type": "put", "open_interest": 1000, "implied_vol": 0.22, "expiration": "2024-01-15"},
+        ])
+
+        result = gex_calculator.calculate_gex_from_chain(df, 5750.0, timestamp)
+
+        assert result.total_call_gex < 0
+        assert result.total_put_gex > 0
+
     def test_zero_gamma_level_calculation(self, gex_calculator):
         """Test zero gamma level is between strikes."""
         timestamp = datetime(2024, 1, 15, 12, 0, 0, tzinfo=ET)

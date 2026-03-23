@@ -109,10 +109,10 @@ class GEXCalculator:
         implied_vol = df["implied_vol"].values.astype(np.float64)
 
         # Calculate time to expiration in years
-        expiration = pd.to_datetime(df["expiration"])
-        # Handle timezone-aware timestamps
-        if timestamp.tzinfo is not None:
-            expiration = expiration.dt.tz_localize(timestamp.tzinfo)
+        expiration = self._normalize_expiration_timestamps(
+            expiration_values=df["expiration"],
+            timestamp=timestamp,
+        )
         T = ((expiration - timestamp).dt.total_seconds() / (365.25 * 24 * 3600)).values
 
         # Ensure T is positive (filter out expired)
@@ -171,6 +171,29 @@ class GEXCalculator:
             dominant_strike=dominant_strike,
             metrics=metrics,
         )
+
+    def _normalize_expiration_timestamps(
+        self,
+        expiration_values: pd.Series,
+        timestamp: datetime,
+    ) -> pd.Series:
+        """Normalize expirations so date-only 0DTE values expire at the close."""
+        expiration = pd.to_datetime(expiration_values)
+        expiration_strings = expiration_values.astype(str).str.strip()
+        date_only_mask = expiration_strings.str.fullmatch(r"\d{4}-\d{2}-\d{2}")
+
+        if date_only_mask.any():
+            expiration.loc[date_only_mask] = (
+                expiration.loc[date_only_mask] + pd.Timedelta(hours=16)
+            )
+
+        if timestamp.tzinfo is not None:
+            if expiration.dt.tz is None:
+                expiration = expiration.dt.tz_localize(timestamp.tzinfo)
+            else:
+                expiration = expiration.dt.tz_convert(timestamp.tzinfo)
+
+        return expiration
 
     def _filter_valid_contracts(self, df: pd.DataFrame) -> pd.DataFrame:
         """
