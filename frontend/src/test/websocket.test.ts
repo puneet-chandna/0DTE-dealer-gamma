@@ -170,7 +170,7 @@ describe('useWebSocket', () => {
       ws.simulateError();
     });
 
-    expect(result.current.error).toBe('WebSocket error');
+    expect(result.current.error).toBe('WebSocket connection error');
   });
 
   it('should transition to disconnected on close', async () => {
@@ -261,6 +261,61 @@ describe('useWebSocket', () => {
     });
 
     expect(result.current.connectionState).toBe('disconnected');
+  });
+
+  it('should reconnect manually after an established connection', async () => {
+    const { result } = renderHook(() =>
+      useWebSocket<GEXUpdate>('/test-endpoint')
+    );
+
+    await act(async () => {
+      vi.runAllTimers();
+    });
+
+    const initialSocket = MockWebSocket.instances[0];
+    act(() => {
+      initialSocket.simulateOpen();
+    });
+
+    act(() => {
+      result.current.reconnect();
+    });
+
+    await act(async () => {
+      vi.runAllTimers();
+    });
+
+    expect(MockWebSocket.instances).toHaveLength(2);
+    expect(result.current.connectionState).toBe('connecting');
+  });
+
+  it('should treat unknown message types with data as updates', async () => {
+    const { result } = renderHook(() =>
+      useWebSocket<GEXUpdate>('/test-endpoint')
+    );
+
+    await act(async () => {
+      vi.runAllTimers();
+    });
+
+    const ws = MockWebSocket.instances[MockWebSocket.instances.length - 1];
+    act(() => {
+      ws.simulateOpen();
+    });
+
+    const fallbackData: GEXUpdate = {
+      net_gex: 150000000,
+      net_gex_billions: 0.15,
+      zero_gamma_level: 5960,
+      spot_price: 5955,
+      regime: 'neutral',
+    };
+
+    act(() => {
+      ws.simulateMessage({ type: 'custom_event', data: fallbackData });
+    });
+
+    expect(result.current.data).toEqual(fallbackData);
   });
 });
 
@@ -375,5 +430,38 @@ describe('Exponential Backoff', () => {
     });
 
     expect(result.current.connectionState).toBe('disconnected');
+  });
+
+  it('should enter error state after exhausting reconnect retries', async () => {
+    const { result } = renderHook(() =>
+      useWebSocket<GEXUpdate>('/test-endpoint', { maxRetries: 1 })
+    );
+
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
+
+    await act(async () => {
+      vi.runAllTimers();
+    });
+
+    const firstSocket = MockWebSocket.instances[0];
+    act(() => {
+      firstSocket.simulateOpen();
+    });
+
+    act(() => {
+      firstSocket.simulateClose(1006);
+    });
+
+    await act(async () => {
+      vi.runOnlyPendingTimers();
+    });
+
+    const retrySocket = MockWebSocket.instances[1];
+    act(() => {
+      retrySocket.simulateClose(1006);
+    });
+
+    expect(result.current.connectionState).toBe('error');
+    expect(result.current.error).toBe('Max reconnection attempts (1) exceeded');
   });
 });

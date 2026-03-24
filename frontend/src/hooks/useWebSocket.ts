@@ -78,7 +78,7 @@ export function useWebSocket<T>(
   } = options;
 
   const [data, setData] = useState<T | null>(null);
-  const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
+  const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const [lastUpdateTime, setLastUpdateTime] = useState<number | null>(null);
@@ -89,8 +89,9 @@ export function useWebSocket<T>(
   const shouldReconnectRef = useRef(true);
   const retryCountRef = useRef(retryCount);
 
-  // Keep retryCountRef in sync
-  retryCountRef.current = retryCount;
+  useEffect(() => {
+    retryCountRef.current = retryCount;
+  }, [retryCount]);
 
   // Derived state for convenience
   const isConnected = connectionState === 'connected';
@@ -134,17 +135,24 @@ export function useWebSocket<T>(
     }
   }, []);
 
-  // Main connection effect - handles all WebSocket lifecycle
-  useEffect(() => {
+  const openConnection = useCallback((mode: 'initial' | 'retry' = 'initial') => {
     const url = `${WS_URL}${endpoint}`;
-    shouldReconnectRef.current = true;
+
+    if (
+      wsRef.current?.readyState === WebSocket.CONNECTING ||
+      wsRef.current?.readyState === WebSocket.OPEN
+    ) {
+      return;
+    }
 
     const scheduleReconnect = (attempt: number) => {
-      if (!autoReconnect || attempt >= maxRetries || !shouldReconnectRef.current) {
-        if (attempt >= maxRetries) {
-          setError(`Max reconnection attempts (${maxRetries}) exceeded`);
-          setConnectionState('error');
-        }
+      if (!autoReconnect || !shouldReconnectRef.current) {
+        return;
+      }
+
+      if (attempt >= maxRetries) {
+        setError(`Max reconnection attempts (${maxRetries}) exceeded`);
+        setConnectionState('error');
         return;
       }
 
@@ -154,97 +162,101 @@ export function useWebSocket<T>(
       );
 
       reconnectTimeoutRef.current = setTimeout(() => {
+        setConnectionState('connecting');
+        setError(null);
         setRetryCount((prev) => prev + 1);
       }, delay);
     };
 
-    const createConnection = () => {
-      // Don't connect if already connecting or connected
-      if (
-        wsRef.current?.readyState === WebSocket.CONNECTING ||
-        wsRef.current?.readyState === WebSocket.OPEN
-      ) {
-        return;
-      }
+    try {
+      const ws = new WebSocket(url);
+      wsRef.current = ws;
 
-      setConnectionState('connecting');
-      setError(null);
+      ws.onopen = () => {
+        console.log(
+          `[WebSocket] ${mode === 'retry' ? 'Reconnected' : 'Connected'} to ${endpoint}`
+        );
+        setConnectionState('connected');
+        setError(null);
+        setRetryCount(0);
+        startHeartbeat();
+        onConnected?.();
+      };
 
-      try {
-        const ws = new WebSocket(url);
-        wsRef.current = ws;
+      ws.onmessage = (event: MessageEvent) => {
+        try {
+          const message = JSON.parse(event.data as string) as WebSocketMessage<T>;
+          setLastUpdateTime(Date.now());
 
-        ws.onopen = () => {
-          console.log(`[WebSocket] Connected to ${endpoint}`);
-          setConnectionState('connected');
-          setError(null);
-          setRetryCount(0);
-          startHeartbeat();
-          onConnected?.();
-        };
+          switch (message.type) {
+            case 'connected':
+              console.log('[WebSocket] Received connection confirmation');
+              break;
 
-        ws.onmessage = (event: MessageEvent) => {
-          try {
-            const message = JSON.parse(event.data as string) as WebSocketMessage<T>;
-            setLastUpdateTime(Date.now());
+            case 'gex_update':
+              setData(message.data);
+              break;
 
-            switch (message.type) {
-              case 'connected':
-                console.log('[WebSocket] Received connection confirmation');
-                break;
+            case 'error':
+              console.error('[WebSocket] Server error:', message.data);
+              setError(String(message.data));
+              onError?.(String(message.data));
+              break;
 
-              case 'gex_update':
+            case 'pong':
+              break;
+
+            default:
+              if (message.data) {
                 setData(message.data);
-                break;
-
-              case 'error':
-                console.error('[WebSocket] Server error:', message.data);
-                setError(String(message.data));
-                onError?.(String(message.data));
-                break;
-
-              case 'pong':
-                // Heartbeat response - connection is healthy
-                break;
-
-              default:
-                // Unknown message type - still treat as data update
-                if (message.data) {
-                  setData(message.data);
-                }
-            }
-          } catch (e) {
-            console.error('[WebSocket] Failed to parse message:', e);
+              }
           }
-        };
+        } catch (e) {
+          console.error('[WebSocket] Failed to parse message:', e);
+        }
+      };
 
-        ws.onerror = () => {
-          const errorMessage = 'WebSocket connection error';
-          setError(errorMessage);
-          onError?.(errorMessage);
-        };
+      ws.onerror = () => {
+        const errorMessage = 'WebSocket connection error';
+        setError(errorMessage);
+        onError?.(errorMessage);
+      };
 
-        ws.onclose = (event) => {
-          console.log(`[WebSocket] Disconnected from ${endpoint} (code: ${event.code})`);
-          clearTimeouts();
+      ws.onclose = (event) => {
+        console.log(`[WebSocket] Disconnected from ${endpoint} (code: ${event.code})`);
+        clearTimeouts();
+        if (wsRef.current === ws) {
+          wsRef.current = null;
+        }
+        onDisconnected?.();
+
+        if (event.code === 1000 || !shouldReconnectRef.current) {
           setConnectionState('disconnected');
-          onDisconnected?.();
+          return;
+        }
 
-          // Schedule reconnect if enabled and not intentionally closed
-          if (shouldReconnectRef.current && event.code !== 1000) {
-            scheduleReconnect(retryCountRef.current);
-          }
-        };
-      } catch (e) {
-        console.error('[WebSocket] Failed to create connection:', e);
-        setConnectionState('error');
-        setError('Failed to create WebSocket connection');
+        setConnectionState('disconnected');
         scheduleReconnect(retryCountRef.current);
-      }
-    };
+      };
+    } catch (e) {
+      console.error('[WebSocket] Failed to create connection:', e);
+      scheduleReconnect(retryCountRef.current);
+    }
+  }, [
+    endpoint,
+    autoReconnect,
+    maxRetries,
+    startHeartbeat,
+    onConnected,
+    onDisconnected,
+    onError,
+    clearTimeouts,
+  ]);
 
-    // Initial connection
-    createConnection();
+  // Main connection effect - handles all WebSocket lifecycle
+  useEffect(() => {
+    shouldReconnectRef.current = true;
+    openConnection('initial');
 
     // Cleanup function
     return () => {
@@ -255,77 +267,14 @@ export function useWebSocket<T>(
         wsRef.current = null;
       }
     };
-  }, [endpoint, autoReconnect, maxRetries, startHeartbeat, clearTimeouts, onConnected, onDisconnected, onError]);
+  }, [openConnection, clearTimeouts]);
 
   // Handle retry count changes to trigger reconnection
   useEffect(() => {
-    if (retryCount > 0 && connectionState === 'disconnected' && shouldReconnectRef.current) {
-      const url = `${WS_URL}${endpoint}`;
-
-      // Close existing connection if any
-      if (wsRef.current) {
-        wsRef.current.close();
-        wsRef.current = null;
-      }
-
-      setConnectionState('connecting');
-
-      try {
-        const ws = new WebSocket(url);
-        wsRef.current = ws;
-
-        ws.onopen = () => {
-          console.log(`[WebSocket] Reconnected to ${endpoint}`);
-          setConnectionState('connected');
-          setError(null);
-          setRetryCount(0);
-          startHeartbeat();
-          onConnected?.();
-        };
-
-        ws.onmessage = (event: MessageEvent) => {
-          try {
-            const message = JSON.parse(event.data as string) as WebSocketMessage<T>;
-            setLastUpdateTime(Date.now());
-
-            if (message.type === 'gex_update' || message.data) {
-              setData(message.data);
-            }
-          } catch (e) {
-            console.error('[WebSocket] Failed to parse message:', e);
-          }
-        };
-
-        ws.onerror = () => {
-          setError('WebSocket connection error');
-          onError?.('WebSocket connection error');
-        };
-
-        ws.onclose = (event) => {
-          console.log(`[WebSocket] Disconnected (code: ${event.code})`);
-          clearTimeouts();
-          setConnectionState('disconnected');
-          onDisconnected?.();
-
-          // Schedule next retry
-          if (shouldReconnectRef.current && event.code !== 1000 && retryCount < maxRetries) {
-            const delay = calculateBackoffDelay(retryCount);
-            console.log(`[WebSocket] Reconnecting in ${delay}ms (attempt ${retryCount + 1}/${maxRetries})`);
-            reconnectTimeoutRef.current = setTimeout(() => {
-              setRetryCount((prev) => prev + 1);
-            }, delay);
-          } else if (retryCount >= maxRetries) {
-            setError(`Max reconnection attempts (${maxRetries}) exceeded`);
-            setConnectionState('error');
-          }
-        };
-      } catch (e) {
-        console.error('[WebSocket] Failed to reconnect:', e);
-        setConnectionState('error');
-        setError('Failed to reconnect WebSocket');
-      }
+    if (retryCount > 0 && shouldReconnectRef.current && wsRef.current === null) {
+      openConnection('retry');
     }
-  }, [retryCount, connectionState, endpoint, maxRetries, startHeartbeat, clearTimeouts, onConnected, onDisconnected, onError]);
+  }, [retryCount, openConnection]);
 
   /**
    * Disconnect from WebSocket and prevent auto-reconnect.
@@ -350,47 +299,12 @@ export function useWebSocket<T>(
       wsRef.current.close(1000, 'Reconnecting');
       wsRef.current = null;
     }
-    // Reset and trigger reconnection
     shouldReconnectRef.current = true;
     setRetryCount(0);
-    setConnectionState('idle');
-  }, [clearTimeouts]);
-
-  // Trigger initial connection when reconnect resets state
-  useEffect(() => {
-    if (connectionState === 'idle' && shouldReconnectRef.current) {
-      const url = `${WS_URL}${endpoint}`;
-      setConnectionState('connecting');
-
-      const ws = new WebSocket(url);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        setConnectionState('connected');
-        setError(null);
-        startHeartbeat();
-        onConnected?.();
-      };
-
-      ws.onmessage = (event: MessageEvent) => {
-        try {
-          const message = JSON.parse(event.data as string) as WebSocketMessage<T>;
-          setLastUpdateTime(Date.now());
-          if (message.data) setData(message.data);
-        } catch (e) {
-          console.error('[WebSocket] Parse error:', e);
-        }
-      };
-
-      ws.onerror = () => setError('WebSocket error');
-      ws.onclose = () => {
-        clearTimeouts();
-        setConnectionState('disconnected');
-        onDisconnected?.();
-      };
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectionState]);
+    setConnectionState('connecting');
+    setError(null);
+    openConnection('retry');
+  }, [clearTimeouts, openConnection]);
 
   return {
     data,

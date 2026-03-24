@@ -160,21 +160,34 @@ class HistoricalDataService:
                         session.add_all(iv_points)
 
                 market_session.snapshot_count += 1
-                if market_session.first_captured_at is None or captured_at < market_session.first_captured_at:
+                first_captured_at = (
+                    self._normalize_timestamp(market_session.first_captured_at)
+                    if market_session.first_captured_at is not None
+                    else None
+                )
+                last_captured_at = (
+                    self._normalize_timestamp(market_session.last_captured_at)
+                    if market_session.last_captured_at is not None
+                    else None
+                )
+
+                if first_captured_at is None or captured_at < first_captured_at:
                     market_session.first_captured_at = captured_at
-                if market_session.last_captured_at is None or captured_at > market_session.last_captured_at:
+                    first_captured_at = captured_at
+                if last_captured_at is None or captured_at > last_captured_at:
                     market_session.last_captured_at = captured_at
+                    last_captured_at = captured_at
                 if raw_persisted:
                     market_session.raw_snapshot_count += 1
 
                 market_session.completeness_ratio = self._calculate_completeness_ratio(
                     trading_date=trading_date,
-                    first_captured_at=market_session.first_captured_at,
-                    last_captured_at=market_session.last_captured_at,
+                    first_captured_at=first_captured_at,
+                    last_captured_at=last_captured_at,
                 )
                 market_session.status = self._determine_session_status(
                     trading_date=trading_date,
-                    last_captured_at=market_session.last_captured_at,
+                    last_captured_at=last_captured_at,
                 )
 
                 await self._apply_retention(session, reference_date=trading_date)
@@ -687,7 +700,8 @@ class HistoricalDataService:
         latest = result.scalar_one_or_none()
         if latest is None:
             return True
-        elapsed = (captured_at - latest.captured_at).total_seconds()
+        latest_captured_at = self._normalize_timestamp(latest.captured_at)
+        elapsed = (captured_at - latest_captured_at).total_seconds()
         return elapsed >= RAW_SNAPSHOT_INTERVAL_SECONDS
 
     async def _load_snapshot_records(
@@ -866,8 +880,10 @@ class HistoricalDataService:
 
         session_open = datetime.combine(trading_date, SESSION_OPEN, tzinfo=ET)
         session_close = datetime.combine(trading_date, SESSION_CLOSE, tzinfo=ET)
-        active_start = max(first_captured_at.astimezone(ET), session_open)
-        active_end = min(last_captured_at.astimezone(ET), session_close)
+        normalized_first = HistoricalDataService._normalize_timestamp(first_captured_at)
+        normalized_last = HistoricalDataService._normalize_timestamp(last_captured_at)
+        active_start = max(normalized_first, session_open)
+        active_end = min(normalized_last, session_close)
         if active_end <= active_start:
             return 0.0
 
@@ -884,7 +900,7 @@ class HistoricalDataService:
         if last_captured_at is None:
             return "in_progress"
 
-        last_time = last_captured_at.astimezone(ET)
+        last_time = HistoricalDataService._normalize_timestamp(last_captured_at)
         if last_time.date() > trading_date or last_time.time() >= REPLAY_COMPLETE_AFTER:
             return "complete"
         return "in_progress"

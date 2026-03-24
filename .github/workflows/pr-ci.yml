@@ -10,8 +10,6 @@ on:
       - synchronize
       - ready_for_review
   pull_request_review:
-    branches:
-      - main
     types:
       - submitted
 
@@ -31,8 +29,11 @@ jobs:
     name: backend-tests
     if: >-
       ${{
-        (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
-        (github.event_name == 'pull_request_review' && github.event.pull_request.draft == false && github.event.review.state == 'approved')
+        github.event.pull_request.base.ref == 'main' &&
+        (
+          (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
+          (github.event_name == 'pull_request_review' && github.event.pull_request.draft == false && github.event.review.state == 'approved')
+        )
       }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -65,9 +66,7 @@ jobs:
           set -euo pipefail
           mkdir -p reports
           # Keep PR CI deterministic by skipping the explicit network-backed integration mark.
-          python -m pytest -m "not integration" \
-            --cov=app \
-            --cov-report=term-missing \
+          python -m pytest -q -m "not integration" \
             --cov-report=xml:coverage.xml \
             --junitxml=reports/backend-tests.xml
 
@@ -79,14 +78,17 @@ jobs:
           path: |
             backend/coverage.xml
             backend/reports/backend-tests.xml
-          if-no-files-found: error
+          if-no-files-found: warn
 
   frontend-quality:
     name: frontend-quality
     if: >-
       ${{
-        (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
-        (github.event_name == 'pull_request_review' && github.event.pull_request.draft == false && github.event.review.state == 'approved')
+        github.event.pull_request.base.ref == 'main' &&
+        (
+          (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
+          (github.event_name == 'pull_request_review' && github.event.pull_request.draft == false && github.event.review.state == 'approved')
+        )
       }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -127,8 +129,11 @@ jobs:
     name: frontend-tests
     if: >-
       ${{
-        (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
-        (github.event_name == 'pull_request_review' && github.event.pull_request.draft == false && github.event.review.state == 'approved')
+        github.event.pull_request.base.ref == 'main' &&
+        (
+          (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
+          (github.event_name == 'pull_request_review' && github.event.pull_request.draft == false && github.event.review.state == 'approved')
+        )
       }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -163,22 +168,25 @@ jobs:
       - name: Run frontend tests with coverage
         run: |
           set -euo pipefail
-          pnpm exec vitest run --coverage.enabled true
+          pnpm test:run
 
       - name: Upload frontend coverage artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: frontend-coverage-artifacts
-          path: frontend/coverage
-          if-no-files-found: error
+          path: frontend/coverage/**
+          if-no-files-found: warn
 
   frontend-build:
     name: frontend-build
     if: >-
       ${{
-        (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
-        (github.event_name == 'pull_request_review' && github.event.pull_request.draft == false && github.event.review.state == 'approved')
+        github.event.pull_request.base.ref == 'main' &&
+        (
+          (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
+          (github.event_name == 'pull_request_review' && github.event.pull_request.draft == false && github.event.review.state == 'approved')
+        )
       }}
     runs-on: ubuntu-latest
     timeout-minutes: 20

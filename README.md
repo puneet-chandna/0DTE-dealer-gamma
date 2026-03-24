@@ -287,7 +287,7 @@ Then the project applies the sign convention by option type:
 
 ```bash
 # Backend
-cd backend && pytest -v
+cd backend && pytest -q
 
 # Frontend
 cd frontend && pnpm test:run
@@ -296,6 +296,8 @@ cd frontend && pnpm test:run
 cd backend && mypy app
 cd frontend && pnpm tsc --noEmit
 ```
+
+Both default test commands now print a coverage summary at the end of the run.
 
 ---
 

@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.models.schemas import GEXSnapshot
 
 client = TestClient(app)
 
@@ -209,6 +210,30 @@ class TestGEXEndpoints:
         mock_cache.get_if_fresh.assert_any_call("gex:current:QQQ")
         mock_live_snapshot.assert_not_awaited()
 
+    def test_current_gex_returns_503_when_live_cache_and_persisted_fallbacks_all_fail(self):
+        """Current GEX should fail cleanly when no live, stale, or persisted data exists."""
+        mock_cache = MagicMock()
+        mock_cache.get_if_fresh.return_value = None
+        mock_cache.get.return_value = None
+
+        with patch("app.api.routes.gex.get_cache", return_value=mock_cache):
+            with patch("app.api.routes.gex.get_settings") as mock_get_settings:
+                mock_get_settings.return_value.data_provider = "yfinance"
+                with patch(
+                    "app.api.routes.gex._get_live_gex_snapshot",
+                    new_callable=AsyncMock,
+                    side_effect=RuntimeError("provider unavailable"),
+                ):
+                    with patch(
+                        "app.api.routes.gex._get_latest_persisted_snapshot",
+                        new_callable=AsyncMock,
+                        return_value=None,
+                    ):
+                        response = client.get("/api/gex/current")
+
+        assert response.status_code == 503
+        assert "Unable to fetch GEX data" in response.json()["detail"]
+
     def test_regime_prefers_stale_cache_before_persisted_fallback(self):
         """Regime should derive from stale cache before jumping to persisted DB history."""
         stale_snapshot = {
@@ -247,6 +272,64 @@ class TestGEXEndpoints:
         body = response.json()
         assert body["regime"] == "short_gamma"
         assert body["net_gex"] == -1.2e9
+
+    def test_strikes_falls_back_to_persisted_snapshot_when_live_fetch_fails(self):
+        """Strike breakdown should use persisted history when live fetch fails and cache is empty."""
+        persisted_snapshot = {
+            "timestamp": "2099-01-15T10:30:00-05:00",
+            "spot_price": 6012.0,
+            "total_call_gex": -2.0,
+            "total_put_gex": 1.0,
+            "net_gex": -1.0e9,
+            "zero_gamma_level": 6005.0,
+            "gex_by_strike": {6000.0: -3.0, 6010.0: 5.5},
+            "dominant_strike": 6010.0,
+            "metrics": {},
+        }
+        mock_cache = MagicMock()
+        mock_cache.get_if_fresh.return_value = None
+        mock_cache.get.return_value = None
+
+        with patch("app.api.routes.gex.get_cache", return_value=mock_cache):
+            with patch("app.api.routes.gex.get_settings") as mock_get_settings:
+                mock_get_settings.return_value.data_provider = "yfinance"
+                with patch(
+                    "app.api.routes.gex._get_live_gex_snapshot",
+                    new_callable=AsyncMock,
+                    side_effect=RuntimeError("provider unavailable"),
+                ):
+                    with patch(
+                        "app.api.routes.gex._get_latest_persisted_snapshot",
+                        new_callable=AsyncMock,
+                        return_value=GEXSnapshot(**persisted_snapshot),
+                    ):
+                        response = client.get("/api/gex/strikes")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["strikes"] == [6000.0, 6010.0]
+        assert body["gex_values"] == [-3.0, 5.5]
+        assert body["spot_price"] == 6012.0
+
+    def test_historical_gex_rejects_inverted_date_range(self):
+        """Historical endpoint should reject start dates that come after end dates."""
+        response = client.get(
+            "/api/gex/historical",
+            params={"start_date": "2026-03-10", "end_date": "2026-03-01"},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "start_date must be before or equal to end_date"
+
+    def test_historical_gex_rejects_ranges_longer_than_one_year(self):
+        """Historical endpoint should reject ranges longer than 365 days."""
+        response = client.get(
+            "/api/gex/historical",
+            params={"start_date": "2024-01-01", "end_date": "2025-01-02"},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Date range cannot exceed 365 days"
 
 
 class TestDataEndpoints:

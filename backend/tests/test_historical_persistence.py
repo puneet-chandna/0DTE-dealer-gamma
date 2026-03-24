@@ -255,3 +255,74 @@ async def test_demo_historical_prefers_latest_replay_session_before_synthetic(hi
     assert body["count"] == 1
     assert body["data"][0]["spot_price"] == 5911.0
     assert body["data"][0]["metrics"]["capture_quality"] == 0.99
+
+
+@pytest.mark.asyncio
+async def test_demo_historical_falls_back_to_synthetic_when_no_persisted_snapshots_exist(
+    history_service,
+):
+    service, _ = history_service
+    demo_snapshot = _build_snapshot(
+        datetime(2026, 3, 21, 10, 0, 0, tzinfo=ET),
+        spot_price=5922.0,
+        net_gex=-5.5e8,
+    )
+
+    class _DemoService:
+        def get_historical_snapshots(self, *args, **kwargs):
+            return [demo_snapshot]
+
+    with patch("app.api.routes.gex.get_historical_data_service", return_value=service):
+        with patch("app.api.routes.gex.get_demo_data_service", return_value=_DemoService()):
+            response = client.get(
+                "/api/gex/historical",
+                params={
+                    "provider": "yfinance",
+                    "symbol": "SPX",
+                    "start_date": "2026-03-21",
+                    "end_date": "2026-03-21",
+                    "interval": "1m",
+                    "demo": "true",
+                },
+            )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["count"] == 1
+    assert body["data"][0]["spot_price"] == 5922.0
+    assert body["data"][0]["net_gex"] == -5.5e8
+
+
+@pytest.mark.asyncio
+async def test_get_technical_indicators_returns_null_indicators_for_short_history(history_service):
+    service, _ = history_service
+    base_time = datetime(2026, 3, 20, 10, 0, 0, tzinfo=ET)
+
+    for offset_minutes, spot_price in enumerate((5901.0, 5903.0, 5902.5)):
+        await service.persist_capture(
+            provider="yfinance",
+            symbol="SPX",
+            snapshot=_build_snapshot(
+                base_time.replace(minute=base_time.minute + offset_minutes),
+                spot_price=spot_price,
+                net_gex=-1.1e9 + (offset_minutes * 1.0e7),
+            ),
+            options_df=_build_options_df(),
+            force_raw_capture=False,
+        )
+
+    indicators = await service.get_technical_indicators(
+        provider="yfinance",
+        symbol="SPX",
+        period="5d",
+        interval="1m",
+        indicators=[" atr ", "rsi"],
+    )
+
+    assert indicators is not None
+    assert indicators["symbol"] == "SPX"
+    assert indicators["indicators"] == ["ATR", "RSI"]
+    assert indicators["count"] == 3
+    assert all(point["atr"] is None for point in indicators["data"])
+    assert all(point["rsi"] is None for point in indicators["data"])
+    assert all(point["bb_upper"] is None for point in indicators["data"])
