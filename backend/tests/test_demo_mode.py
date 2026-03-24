@@ -23,16 +23,6 @@ def _raise_sync_live_call(*args, **kwargs):
     raise AssertionError("live provider should not be called in demo mode")
 
 
-class _FailingTicker:
-    def history(self, *args, **kwargs):
-        raise AssertionError("yfinance should not be called in demo mode")
-
-
-class _FailingYFinance:
-    def Ticker(self, *args, **kwargs):
-        return _FailingTicker()
-
-
 def _build_snapshot(
     *,
     spot_price: float,
@@ -112,29 +102,15 @@ def test_current_gex_demo_mode_shapes_synthetic_fallback_from_latest_snapshot(mo
     assert data["net_gex"] == -7.9e8
 
 
-def test_demo_analytics_endpoints_skip_live_market_calls(monkeypatch):
-    """Demo analytics endpoints should avoid provider and yfinance access."""
-    import sys
+def test_demo_iv_surface_endpoint_skips_live_market_calls(monkeypatch):
+    """Demo IV surface should still avoid live provider and yfinance access."""
     import app.api.routes.analytics as analytics_routes
 
     monkeypatch.setattr(analytics_routes, "get_data_client", _raise_sync_live_call)
-    monkeypatch.setitem(sys.modules, "yfinance", _FailingYFinance())
-
     iv_response = client.get("/api/analytics/iv-surface", params={"demo": "true", "symbol": "SPY"})
-    technical_response = client.get(
-        "/api/analytics/technical-indicators",
-        params={
-            "demo": "true",
-            "symbol": "SPY",
-            "period": "1mo",
-            "interval": "1d",
-        },
-    )
 
     assert iv_response.status_code == 200
-    assert technical_response.status_code == 200
     assert iv_response.json()["count"] > 0
-    assert technical_response.json()["count"] > 0
 
 
 def test_demo_websocket_identifies_demo_stream(monkeypatch):
@@ -249,3 +225,22 @@ def test_demo_session_treats_naive_datetimes_as_utc():
     assert normalized.tzinfo == ET
     assert normalized.hour == 10
     assert normalized.minute == 30
+
+
+def test_anchored_demo_session_applies_zero_total_put_gex_anchor():
+    """A zero put-GEX anchor should still be applied when shaping the synthetic session."""
+    from app.core.demo_data import DemoDataService
+
+    anchored_session = DemoDataService._get_anchored_session(
+        "SPY",
+        date(2026, 3, 25),
+        590.0,
+        -5.5e8,
+        588.5,
+        -7.5e8,
+        0.0,
+    )
+
+    assert abs(float(anchored_session.gex_data["total_put_gex"].mean())) < 1e-6
+    recomputed_call = anchored_session.gex_data["net_gex"] - anchored_session.gex_data["total_put_gex"]
+    assert (anchored_session.gex_data["total_call_gex"] == recomputed_call).all()

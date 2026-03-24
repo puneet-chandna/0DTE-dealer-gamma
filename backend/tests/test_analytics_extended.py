@@ -5,6 +5,7 @@ including parameter validation, error handling, and response schemas.
 """
 
 import json
+import sys
 from datetime import date, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -225,8 +226,8 @@ class TestTechnicalIndicatorsEndpoint:
         )
         assert resp.status_code in (200, 503)
 
-    def test_demo_mode_rebuilds_indicator_series_when_persisted_demo_data_has_only_null_indicators(self):
-        """Demo mode should synthesize usable indicators when replay history exists but is insufficient."""
+    def test_demo_mode_falls_back_to_synthetic_when_real_history_is_unavailable(self):
+        """Demo mode should synthesize usable indicators when persisted and real history are both unusable."""
         persisted_payload = {
             "symbol": "SPY",
             "period": "1mo",
@@ -300,16 +301,20 @@ class TestTechnicalIndicatorsEndpoint:
 
         with patch("app.api.routes.analytics.get_historical_data_service", return_value=history_service):
             with patch("app.api.routes.analytics.get_demo_data_service", return_value=_AnchoredDemoService()):
-                resp = client.get(
-                    "/api/analytics/technical-indicators",
-                    params={
-                        "demo": "true",
-                        "symbol": "SPY",
-                        "period": "1mo",
-                        "interval": "1d",
-                        "indicators": "ATR,RSI,BBANDS",
-                    },
-                )
+                with patch(
+                    "app.api.routes.analytics._load_yfinance_history",
+                    return_value=pd.DataFrame(),
+                ):
+                    resp = client.get(
+                        "/api/analytics/technical-indicators",
+                        params={
+                            "demo": "true",
+                            "symbol": "SPY",
+                            "period": "1mo",
+                            "interval": "1d",
+                            "indicators": "ATR,RSI,BBANDS",
+                        },
+                    )
 
         assert resp.status_code == 200
         body = resp.json()
@@ -317,6 +322,70 @@ class TestTechnicalIndicatorsEndpoint:
         assert body["data"][0]["atr"] == 4.2
         assert body["data"][0]["rsi"] == 51.0
         assert body["data"][0]["bb_upper"] == 594.0
+
+    def test_demo_mode_prefers_real_historical_price_data_for_indicator_chart(self):
+        """Demo mode should use real historical price data when available."""
+        history_service = MagicMock()
+        history_service.get_technical_indicators = AsyncMock(return_value=None)
+        history_service.get_latest_snapshot = AsyncMock(
+            return_value=_build_snapshot(
+                spot_price=590.0,
+                net_gex=-5.5e8,
+                zero_gamma_level=588.5,
+            )
+        )
+
+        class _FailingDemoService:
+            def get_technical_indicators(self, *args, **kwargs):
+                raise AssertionError("synthetic fallback should not be used when real history is available")
+
+        market_history = pd.DataFrame(
+            {
+                "Open": [585.0, 586.0, 587.0, 588.0, 589.0, 590.0, 591.0, 592.0, 593.0, 594.0,
+                         595.0, 596.0, 597.0, 598.0, 599.0, 600.0, 601.0, 602.0, 603.0, 604.0,
+                         605.0, 606.0, 607.0, 608.0, 609.0],
+                "High": [586.0, 587.0, 588.0, 589.0, 590.0, 591.0, 592.0, 593.0, 594.0, 595.0,
+                         596.0, 597.0, 598.0, 599.0, 600.0, 601.0, 602.0, 603.0, 604.0, 605.0,
+                         606.0, 607.0, 608.0, 609.0, 610.0],
+                "Low": [584.0, 585.0, 586.0, 587.0, 588.0, 589.0, 590.0, 591.0, 592.0, 593.0,
+                        594.0, 595.0, 596.0, 597.0, 598.0, 599.0, 600.0, 601.0, 602.0, 603.0,
+                        604.0, 605.0, 606.0, 607.0, 608.0],
+                "Close": [585.5, 586.5, 587.5, 588.5, 589.5, 590.5, 591.5, 592.5, 593.5, 594.5,
+                          595.5, 596.5, 597.5, 598.5, 599.5, 600.5, 601.5, 602.5, 603.5, 604.5,
+                          605.5, 606.5, 607.5, 608.5, 609.5],
+                "Volume": [1_000_000] * 25,
+            }
+        )
+
+        class _FakeTicker:
+            def history(self, *args, **kwargs):
+                return market_history
+
+        class _FakeYFinance:
+            def Ticker(self, symbol):
+                assert symbol == "SPY"
+                return _FakeTicker()
+
+        with patch("app.api.routes.analytics.get_historical_data_service", return_value=history_service):
+            with patch("app.api.routes.analytics.get_demo_data_service", return_value=_FailingDemoService()):
+                with patch.dict(sys.modules, {"yfinance": _FakeYFinance()}):
+                    resp = client.get(
+                        "/api/analytics/technical-indicators",
+                        params={
+                            "demo": "true",
+                            "symbol": "SPY",
+                            "period": "1mo",
+                            "interval": "1d",
+                            "indicators": "ATR,RSI,BBANDS",
+                        },
+                    )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["count"] == 25
+        assert any(point["atr"] is not None for point in body["data"])
+        assert any(point["rsi"] is not None for point in body["data"])
+        assert any(point["bb_upper"] is not None for point in body["data"])
 
 
 # ---------------------------------------------------------------------------

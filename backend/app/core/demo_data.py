@@ -387,7 +387,7 @@ class DemoDataService:
         offset_shift = target_offset - float(zero_gamma_offset.mean())
         gex_data["zero_gamma_level"] = gex_data["spot_price"] + zero_gamma_offset + offset_shift
 
-        if anchor_total_put_gex:
+        if anchor_total_put_gex is not None:
             put_adjustment = anchor_total_put_gex - float(gex_data["total_put_gex"].mean())
             gex_data["total_put_gex"] = gex_data["total_put_gex"] + put_adjustment
             gex_data["total_call_gex"] = gex_data["net_gex"] - gex_data["total_put_gex"]

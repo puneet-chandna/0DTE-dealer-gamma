@@ -52,6 +52,54 @@ def _technical_indicator_payload_has_values(payload: Optional[dict]) -> bool:
     return False
 
 
+def _build_technical_indicator_response(
+    *,
+    symbol: str,
+    period: str,
+    indicator_list: list[str],
+    result_df: pd.DataFrame,
+) -> dict:
+    """Serialize computed technical indicators into the API response shape."""
+    data = []
+    for idx, row in result_df.iterrows():
+        point = {
+            "timestamp": str(idx),
+            "close": float(row["close"]),
+        }
+        if "atr" in result_df.columns:
+            val = row["atr"]
+            point["atr"] = None if pd.isna(val) else float(val)
+        if "rsi" in result_df.columns:
+            val = row["rsi"]
+            point["rsi"] = None if pd.isna(val) else float(val)
+        if "bb_upper" in result_df.columns:
+            point["bb_upper"] = None if pd.isna(row["bb_upper"]) else float(row["bb_upper"])
+            point["bb_mid"] = None if pd.isna(row["bb_mid"]) else float(row["bb_mid"])
+            point["bb_lower"] = None if pd.isna(row["bb_lower"]) else float(row["bb_lower"])
+        data.append(point)
+
+    return {
+        "symbol": symbol,
+        "period": period,
+        "indicators": indicator_list,
+        "data": data,
+        "count": len(data),
+    }
+
+
+def _load_yfinance_history(
+    *,
+    symbol: str,
+    period: str,
+    interval: str,
+) -> pd.DataFrame:
+    """Fetch historical price data from Yahoo Finance for indicator computation."""
+    import yfinance as yf
+
+    ticker = yf.Ticker(symbol)
+    return ticker.history(period=period, interval=interval)
+
+
 @router.get("/gex-volatility", response_model=AnalyticsResult)
 async def analyze_gex_volatility(
     start_date: date = Query(..., description="Start date for analysis"),
@@ -512,6 +560,34 @@ async def get_technical_indicators(
             return persisted_indicators
 
         if demo:
+            try:
+                hist = _load_yfinance_history(
+                    symbol=symbol,
+                    period=period,
+                    interval=interval,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Demo technical indicators fell back from yfinance history for %s: %s",
+                    symbol,
+                    exc,
+                )
+                hist = pd.DataFrame()
+
+            if not hist.empty:
+                result_df = TechnicalIndicatorEngine.compute_indicators(
+                    hist,
+                    indicators=indicator_list,
+                )
+                response = _build_technical_indicator_response(
+                    symbol=symbol,
+                    period=period,
+                    indicator_list=indicator_list,
+                    result_df=result_df,
+                )
+                if _technical_indicator_payload_has_values(response):
+                    return response
+
             anchor_snapshot = await get_historical_data_service().get_latest_snapshot(
                 provider=active_provider,
                 symbol=symbol,
@@ -524,10 +600,11 @@ async def get_technical_indicators(
                 anchor_snapshot=anchor_snapshot,
             )
 
-        import yfinance as yf
-
-        ticker = yf.Ticker(symbol)
-        hist = ticker.history(period=period, interval=interval)
+        hist = _load_yfinance_history(
+            symbol=symbol,
+            period=period,
+            interval=interval,
+        )
 
         if hist.empty:
             raise HTTPException(
@@ -539,33 +616,12 @@ async def get_technical_indicators(
         result_df = TechnicalIndicatorEngine.compute_indicators(
             hist, indicators=indicator_list
         )
-
-        # Build response data
-        data = []
-        for idx, row in result_df.iterrows():
-            point = {
-                "timestamp": str(idx),
-                "close": float(row["close"]),
-            }
-            if "atr" in result_df.columns:
-                val = row["atr"]
-                point["atr"] = None if pd.isna(val) else float(val)
-            if "rsi" in result_df.columns:
-                val = row["rsi"]
-                point["rsi"] = None if pd.isna(val) else float(val)
-            if "bb_upper" in result_df.columns:
-                point["bb_upper"] = None if pd.isna(row["bb_upper"]) else float(row["bb_upper"])
-                point["bb_mid"] = None if pd.isna(row["bb_mid"]) else float(row["bb_mid"])
-                point["bb_lower"] = None if pd.isna(row["bb_lower"]) else float(row["bb_lower"])
-            data.append(point)
-
-        return {
-            "symbol": symbol,
-            "period": period,
-            "indicators": indicator_list,
-            "data": data,
-            "count": len(data),
-        }
+        return _build_technical_indicator_response(
+            symbol=symbol,
+            period=period,
+            indicator_list=indicator_list,
+            result_df=result_df,
+        )
 
     except HTTPException:
         raise
