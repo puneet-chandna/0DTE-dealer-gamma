@@ -126,6 +126,52 @@ Frontend (`frontend/.env.local`):
 docker compose up -d
 ```
 
+If Docker is unavailable on your machine, you can use the project-owned local
+Postgres fallback instead:
+
+```bash
+./scripts/setup_local_postgres.sh
+```
+
+### One-Command Local Startup
+
+You can launch the whole app with one command and get separate terminals for:
+- database logs
+- backend logs
+- frontend logs
+
+Linux / Git Bash / WSL:
+
+```bash
+./scripts/start_app.sh
+```
+
+Linux / Git Bash / WSL stop command:
+
+```bash
+./scripts/stop_app.sh
+```
+
+Native Windows PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start_app.ps1
+```
+
+Behavior:
+- The DB gets its own visible terminal so you can watch logs and stop it with `Ctrl+C`.
+- The backend gets its own terminal and runs `uvicorn --reload`.
+- The frontend gets its own terminal and runs `pnpm dev`.
+- No `tmux` is required.
+- `stop_app.sh` stops frontend first, backend second, and local PostgreSQL last.
+- The local DB is stopped through `pg_ctl`, not by force-killing database processes.
+
+Notes:
+- `start_app.sh` supports the local project-owned Postgres fallback on port `55432`.
+- `start_app.ps1` is guidance-first on native Windows. It recommends WSL or Git Bash for the repo-standard local PostgreSQL flow.
+- If PostgreSQL is not installed or not reachable on native Windows, `start_app.ps1` stops and shows colored setup guidance instead of trying to install it automatically.
+- If you stop the backend or frontend terminals, the DB can keep running until you stop the DB terminal separately.
+
 ### 3. Run Database Migrations
 
 ```bash
@@ -170,6 +216,23 @@ That means the normal local flow is:
 
 ```bash
 docker compose up -d
+cd backend
+source .venv/bin/activate
+alembic upgrade head
+uvicorn app.main:app --reload
+```
+
+If you use the local fallback database instead of Docker, set
+`backend/.env` to:
+
+```txt
+DATABASE_URL=postgresql+asyncpg://odte_user:odte_password@127.0.0.1:55432/odte_gex
+```
+
+Then run:
+
+```bash
+./scripts/setup_local_postgres.sh
 cd backend
 source .venv/bin/activate
 alembic upgrade head
