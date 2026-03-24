@@ -118,6 +118,30 @@ class TestGEXCacheSpotPriceInvalidation:
         result = self.cache.invalidate_on_spot_move(5900.0, 5901.0)
         assert result is False
 
+    def test_symbol_scoped_spot_prices_do_not_overwrite_each_other(self):
+        """Per-symbol spot keys should remain independent during watchlist capture."""
+        self.cache.update_spot_price(5900.0, symbol="SPX")
+        self.cache.update_spot_price(503.5, symbol="QQQ")
+
+        assert self.cache.get("spot:price") == pytest.approx(5900.0)
+        assert self.cache.get("spot:price:SPX") == pytest.approx(5900.0)
+        assert self.cache.get("spot:price:QQQ") == pytest.approx(503.5)
+
+    def test_large_move_invalidates_only_the_matching_symbol_cache(self):
+        """A move in one symbol should not wipe cached snapshots for another symbol."""
+        self.cache.set("gex:current:SPX", {"symbol": "SPX"})
+        self.cache.set("gex:current:SPX:yfinance", {"symbol": "SPX"})
+        self.cache.set("options:chain:SPX:today:yfinance", {"symbol": "SPX"})
+        self.cache.set("gex:current:QQQ", {"symbol": "QQQ"})
+
+        self.cache.update_spot_price(5900.0, symbol="SPX")
+        self.cache.update_spot_price(6100.0, symbol="SPX")
+
+        assert self.cache.get("gex:current:SPX") is None
+        assert self.cache.get("gex:current:SPX:yfinance") is None
+        assert self.cache.get("options:chain:SPX:today:yfinance") is None
+        assert self.cache.get("gex:current:QQQ") == {"symbol": "QQQ"}
+
 
 class TestGEXCacheClear:
     """Test cache clear and stats."""

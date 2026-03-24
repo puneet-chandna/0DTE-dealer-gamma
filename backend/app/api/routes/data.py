@@ -115,7 +115,7 @@ async def get_options_chain(
         spot_price = await client.get_spot_price(symbol=symbol)
 
         # Update spot price in cache
-        cache.update_spot_price(spot_price)
+        cache.update_spot_price(spot_price, symbol=symbol)
 
         # Convert DataFrame to list of dicts
         options_list = []
@@ -206,7 +206,7 @@ async def get_spot_price(
         spot_price = await client.get_spot_price(symbol=symbol)
 
         # Update cache (and check for invalidation)
-        cache.update_spot_price(spot_price)
+        cache.update_spot_price(spot_price, symbol=symbol)
 
         result = {
             "symbol": symbol,

@@ -136,7 +136,10 @@ class TestCacheWarmup:
 
                             await cache_warmup()
 
-                            mock_cache.update_spot_price.assert_called_once_with(5900.0)
+                            mock_cache.update_spot_price.assert_called_once_with(
+                                5900.0,
+                                symbol="SPX",
+                            )
                             assert mock_cache.set.call_count == 2
                             mock_cache.set.assert_any_call(
                                 "gex:current:SPX:yfinance",
@@ -306,7 +309,7 @@ class TestPeriodicSpotRefresh:
                     with patch("asyncio.sleep", side_effect=mock_sleep):
                         await asyncio.wait_for(periodic_spot_refresh(), timeout=2.0)
 
-        mock_cache.update_spot_price.assert_called_with(5910.0)
+        mock_cache.update_spot_price.assert_called_with(5910.0, symbol="SPX")
 
     @pytest.mark.asyncio
     async def test_handles_spot_fetch_error(self):

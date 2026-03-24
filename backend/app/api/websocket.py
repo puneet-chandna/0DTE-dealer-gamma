@@ -301,7 +301,7 @@ async def _get_gex_update(
             data_client.get_options_chain_for_gex(underlying=symbol),
             timeout=WS_LIVE_FETCH_TIMEOUT_SECONDS,
         )
-        cache.update_spot_price(spot_price)
+        cache.update_spot_price(spot_price, symbol=symbol)
 
         if options_df.empty:
             logger.warning(f"WebSocket update: empty chain returned by {provider_name}")

@@ -75,7 +75,7 @@ async def periodic_gex_refresh() -> None:
                 options_df, spot_price = await data_client.get_options_chain_for_gex()
 
                 # Update spot price in cache (may trigger invalidation)
-                cache.update_spot_price(spot_price)
+                cache.update_spot_price(spot_price, symbol="SPX")
 
                 # Calculate GEX
                 timestamp = datetime.now(ET)
@@ -145,7 +145,7 @@ async def periodic_spot_refresh() -> None:
 
             try:
                 spot_price = await data_client.get_spot_price()
-                cache.update_spot_price(spot_price)
+                cache.update_spot_price(spot_price, symbol="SPX")
                 logger.debug(f"Spot price refreshed: {spot_price:.2f}")
 
             except Exception as e:
@@ -198,7 +198,7 @@ async def _capture_symbol_for_provider(
         )
         return False
 
-    cache.update_spot_price(spot_price)
+    cache.update_spot_price(spot_price, symbol=symbol)
 
     if options_df.empty:
         logger.warning(
@@ -383,7 +383,7 @@ async def cache_warmup() -> None:
     try:
         # Fetch initial data
         options_df, spot_price = await data_client.get_options_chain_for_gex()
-        cache.update_spot_price(spot_price)
+        cache.update_spot_price(spot_price, symbol="SPX")
 
         # Calculate and cache GEX
         if options_df.empty:

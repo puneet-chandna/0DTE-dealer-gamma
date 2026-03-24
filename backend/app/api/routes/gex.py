@@ -587,6 +587,34 @@ async def get_market_regime(
         )
     except Exception as e:
         logger.error(f"Failed to get regime for {symbol}: {e}")
+        stale_data = cache.get(cache_key)
+        if stale_data is None and legacy_key is not None:
+            stale_data = cache.get(legacy_key)
+
+        if stale_data is not None:
+            logger.warning(
+                "Returning stale cached regime snapshot for %s (%s)",
+                symbol,
+                active_provider,
+            )
+            snapshot_dict = (
+                stale_data.model_dump()
+                if hasattr(stale_data, "model_dump")
+                else stale_data
+            )
+            stale_snapshot = GEXSnapshot(**snapshot_dict)
+            regime, description, color = get_gex_calculator().determine_regime(
+                stale_snapshot.net_gex
+            )
+            return RegimeData(
+                regime=regime,
+                description=description,
+                color=color,
+                net_gex=stale_snapshot.net_gex,
+                net_gex_billions=stale_snapshot.net_gex / 1e9,
+                timestamp=stale_snapshot.timestamp,
+            )
+
         persisted_snapshot = await _get_latest_persisted_snapshot(
             symbol=symbol,
             provider=active_provider,

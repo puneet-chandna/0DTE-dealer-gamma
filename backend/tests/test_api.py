@@ -171,6 +171,45 @@ class TestGEXEndpoints:
         mock_cache.get_if_fresh.assert_any_call("gex:current:QQQ")
         mock_live_snapshot.assert_not_awaited()
 
+    def test_regime_prefers_stale_cache_before_persisted_fallback(self):
+        """Regime should derive from stale cache before jumping to persisted DB history."""
+        stale_snapshot = {
+            "timestamp": "2099-01-15T10:30:00-05:00",
+            "spot_price": 5900.0,
+            "total_call_gex": -2.0,
+            "total_put_gex": 1.0,
+            "net_gex": -1.2e9,
+            "zero_gamma_level": 5890.0,
+            "gex_by_strike": {"5900.0": -5.0},
+            "dominant_strike": 5900.0,
+            "metrics": {},
+        }
+        mock_cache = MagicMock()
+        mock_cache.get_if_fresh.return_value = None
+        mock_cache.get.side_effect = (
+            lambda key: stale_snapshot if key == "gex:current:SPX:yfinance" else None
+        )
+
+        with patch("app.api.routes.gex.get_cache", return_value=mock_cache):
+            with patch("app.api.routes.gex.get_settings") as mock_get_settings:
+                mock_get_settings.return_value.data_provider = "yfinance"
+                with patch(
+                    "app.api.routes.gex._get_live_gex_snapshot",
+                    new_callable=AsyncMock,
+                    side_effect=RuntimeError("live fetch failed"),
+                ):
+                    with patch(
+                        "app.api.routes.gex._get_latest_persisted_snapshot",
+                        new_callable=AsyncMock,
+                        side_effect=AssertionError("persisted fallback should not be used"),
+                    ):
+                        response = client.get("/api/gex/regime")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["regime"] == "short_gamma"
+        assert body["net_gex"] == -1.2e9
+
 
 class TestDataEndpoints:
     """Test Data API endpoints."""
