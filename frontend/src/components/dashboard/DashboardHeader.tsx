@@ -109,12 +109,16 @@ function DashboardHeaderComponent({
               ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
               : 'bg-zinc-800 text-zinc-400 border border-zinc-700 hover:bg-zinc-700'
           )}
-          title={autoRefreshEnabled ? 'Auto-refresh enabled' : 'Auto-refresh disabled'}
+          title={
+            autoRefreshEnabled
+              ? 'Auto REST polling is enabled. Backend capture keeps running either way.'
+              : 'Manual REST polling only. Use the refresh button to fetch a new snapshot.'
+          }
         >
           <RefreshCw
             className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')}
           />
-          {autoRefreshEnabled ? 'Auto' : 'Manual'}
+          {autoRefreshEnabled ? 'Auto Poll' : 'Manual Poll'}
         </button>
 
         {/* Manual refresh */}
@@ -123,7 +127,7 @@ function DashboardHeaderComponent({
             onClick={onRefresh}
             disabled={isLoading}
             className="rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-300 disabled:opacity-50"
-            title="Refresh data"
+            title="Fetch the latest REST snapshot now"
           >
             <RefreshCw
               className={cn('h-4 w-4', isLoading && 'animate-spin')}

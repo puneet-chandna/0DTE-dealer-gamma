@@ -3,6 +3,7 @@
 Provides real-time GEX data, strike breakdowns, and market regime detection.
 """
 
+import asyncio
 import logging
 from datetime import date, datetime
 from typing import Optional
@@ -37,6 +38,7 @@ router = APIRouter()
 
 # Eastern Time timezone
 ET = ZoneInfo("America/New_York")
+LIVE_FETCH_TIMEOUT_SECONDS = 4
 
 # Module-level instances (lazy initialization)
 _gex_calculator: Optional[GEXCalculator] = None
@@ -109,6 +111,36 @@ async def _get_replay_snapshot(
     if not snapshots:
         return None
     return snapshots[-1]
+
+
+async def _get_latest_persisted_snapshot(
+    *,
+    symbol: str,
+    provider: str,
+    prefer_replay: bool = False,
+) -> Optional[GEXSnapshot]:
+    """Return the latest persisted snapshot when the live path is unavailable."""
+    return await get_historical_data_service().get_latest_snapshot(
+        provider=provider,
+        symbol=symbol,
+        prefer_replay=prefer_replay,
+    )
+
+
+def _serialize_persisted_snapshot(snapshot: GEXSnapshot, *, provider: str) -> dict:
+    """Mark persisted fallback payloads so the frontend can distinguish them."""
+    payload = snapshot.model_dump()
+    payload["provider"] = provider
+    payload.setdefault("metrics", {})
+    payload["metrics"]["is_persisted_fallback"] = 1.0
+    return payload
+
+
+def _snapshot_is_mock(snapshot_payload: dict) -> bool:
+    """Detect generated fallback snapshots masquerading as live data."""
+    metrics = snapshot_payload.get("metrics") or {}
+    provider = str(snapshot_payload.get("provider", "")).lower()
+    return bool(metrics.get("is_mock_data") == 1.0 or provider.startswith("mock"))
 
 
 def _generate_mock_gex_snapshot(spot_price: float = 5950.0) -> GEXSnapshot:
@@ -213,7 +245,20 @@ async def get_current_gex(
     # Not in cache, compute live
     logger.info(f"Cache miss for {cache_key}, computing live GEX")
     try:
-        snapshot_dict = await _get_live_gex_snapshot(symbol, provider)
+        snapshot_dict = await asyncio.wait_for(
+            _get_live_gex_snapshot(symbol, provider),
+            timeout=LIVE_FETCH_TIMEOUT_SECONDS,
+        )
+        if _snapshot_is_mock(snapshot_dict):
+            persisted_snapshot = await _get_latest_persisted_snapshot(
+                symbol=symbol,
+                provider=active_provider,
+            )
+            if persisted_snapshot is not None:
+                snapshot_dict = _serialize_persisted_snapshot(
+                    persisted_snapshot,
+                    provider=active_provider,
+                )
         
         # Save to specific cache
         cache.set(cache_key, snapshot_dict)
@@ -236,6 +281,21 @@ async def get_current_gex(
             if isinstance(stale, dict):
                 stale["provider"] = stale.get("provider", active_provider)
             return stale
+
+        persisted_snapshot = await _get_latest_persisted_snapshot(
+            symbol=symbol,
+            provider=active_provider,
+        )
+        if persisted_snapshot is not None:
+            logger.warning(
+                "Returning latest persisted GEX snapshot for %s (%s) after live fetch failure",
+                symbol,
+                active_provider,
+            )
+            return _serialize_persisted_snapshot(
+                persisted_snapshot,
+                provider=active_provider,
+            )
         raise HTTPException(status_code=503, detail=f"Unable to fetch GEX data: {str(e)}")
 
 
@@ -296,33 +356,11 @@ async def get_historical_gex(
                 count=len(snapshots[:100]),
             )
 
-        synthetic_gex = generate_synthetic_gex_data(
-            start_date=start_dt,
-            end_date=end_dt,
-            freq=interval,
-        )
-
-        snapshots = []
-        for _, row in synthetic_gex.iterrows():
-            snapshot = _generate_mock_gex_snapshot(spot_price=5950.0)
-            snapshot = GEXSnapshot(
-                timestamp=row.name if hasattr(row, 'name') else datetime.now(ET),
-                spot_price=snapshot.spot_price,
-                total_call_gex=snapshot.total_call_gex,
-                total_put_gex=snapshot.total_put_gex,
-                net_gex=float(row.get("net_gex", snapshot.net_gex)),
-                zero_gamma_level=snapshot.zero_gamma_level,
-                gex_by_strike=snapshot.gex_by_strike,
-                dominant_strike=snapshot.dominant_strike,
-                metrics={"is_synthetic": 1.0},
-            )
-            snapshots.append(snapshot)
-
         return GEXHistorical(
-            data=snapshots[:100],
+            data=[],
             start_date=start_dt,
             end_date=end_dt,
-            count=len(snapshots[:100]),
+            count=0,
         )
 
     except Exception as e:
@@ -380,7 +418,20 @@ async def get_gex_by_strikes(
     try:
         if cached_data is None:
             # Need to compute
-            snapshot_dict = await _get_live_gex_snapshot(symbol, provider)
+            snapshot_dict = await asyncio.wait_for(
+                _get_live_gex_snapshot(symbol, provider),
+                timeout=LIVE_FETCH_TIMEOUT_SECONDS,
+            )
+            if _snapshot_is_mock(snapshot_dict):
+                persisted_snapshot = await _get_latest_persisted_snapshot(
+                    symbol=symbol,
+                    provider=active_provider,
+                )
+                if persisted_snapshot is not None:
+                    snapshot_dict = _serialize_persisted_snapshot(
+                        persisted_snapshot,
+                        provider=active_provider,
+                    )
         else:
             snapshot_dict = (
                 cached_data.model_dump()
@@ -426,6 +477,25 @@ async def get_gex_by_strikes(
                 gex_values=sorted_values,
                 spot_price=snapshot.spot_price,
                 zero_gamma_level=snapshot.zero_gamma_level,
+            )
+
+        persisted_snapshot = await _get_latest_persisted_snapshot(
+            symbol=symbol,
+            provider=active_provider,
+        )
+        if persisted_snapshot is not None:
+            logger.warning(
+                "Returning latest persisted strike breakdown for %s (%s)",
+                symbol,
+                active_provider,
+            )
+            sorted_strikes = sorted(persisted_snapshot.gex_by_strike.keys())
+            sorted_values = [persisted_snapshot.gex_by_strike[s] for s in sorted_strikes]
+            return GEXByStrike(
+                strikes=sorted_strikes,
+                gex_values=sorted_values,
+                spot_price=persisted_snapshot.spot_price,
+                zero_gamma_level=persisted_snapshot.zero_gamma_level,
             )
 
         raise HTTPException(status_code=503, detail=f"Failed to get GEX by strikes: {e}")
@@ -480,7 +550,20 @@ async def get_market_regime(
 
     try:
         if cached_data is None:
-            snapshot_dict = await _get_live_gex_snapshot(symbol, provider)
+            snapshot_dict = await asyncio.wait_for(
+                _get_live_gex_snapshot(symbol, provider),
+                timeout=LIVE_FETCH_TIMEOUT_SECONDS,
+            )
+            if _snapshot_is_mock(snapshot_dict):
+                persisted_snapshot = await _get_latest_persisted_snapshot(
+                    symbol=symbol,
+                    provider=active_provider,
+                )
+                if persisted_snapshot is not None:
+                    snapshot_dict = _serialize_persisted_snapshot(
+                        persisted_snapshot,
+                        provider=active_provider,
+                    )
         else:
             snapshot_dict = (
                 cached_data.model_dump()
@@ -504,4 +587,20 @@ async def get_market_regime(
         )
     except Exception as e:
         logger.error(f"Failed to get regime for {symbol}: {e}")
+        persisted_snapshot = await _get_latest_persisted_snapshot(
+            symbol=symbol,
+            provider=active_provider,
+        )
+        if persisted_snapshot is not None:
+            regime, description, color = get_gex_calculator().determine_regime(
+                persisted_snapshot.net_gex
+            )
+            return RegimeData(
+                regime=regime,
+                description=description,
+                color=color,
+                net_gex=persisted_snapshot.net_gex,
+                net_gex_billions=persisted_snapshot.net_gex / 1e9,
+                timestamp=persisted_snapshot.timestamp,
+            )
         raise HTTPException(status_code=503, detail=f"Failed to determine regime: {e}")

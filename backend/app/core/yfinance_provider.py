@@ -45,7 +45,7 @@ class YFinanceClient(DataProvider):
     display_name = "Yahoo Finance"
     provides_greeks = False
     supports_spx_directly = False
-    rate_limit = 10
+    rate_limit = 60
     requires_api_key = False
     
     # SPY is used as proxy since SPX options aren't on Yahoo Finance
@@ -54,14 +54,14 @@ class YFinanceClient(DataProvider):
     
     def __init__(
         self,
-        calls_per_minute: int = 5,
+        calls_per_minute: int = 60,
         use_spy_as_proxy: bool = True,
     ):
         """
         Initialize YFinance client.
         
         Args:
-            calls_per_minute: Rate limit for API calls (conservative default).
+            calls_per_minute: Rate limit for API calls.
             use_spy_as_proxy: If True, use SPY options as proxy for SPX.
         """
         self._rate_limiter = RateLimiter(calls_per_minute=calls_per_minute)

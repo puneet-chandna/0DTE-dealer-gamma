@@ -428,4 +428,52 @@ describe('useIntradayTimeSeries', () => {
       expect(result.current.dataPointCount).toBe(1);
     });
   });
+
+  it('preserves accumulated intraday points across hook remounts for the same provider session', async () => {
+    const queryClient = createQueryClient();
+
+    const { result, rerender, unmount } = renderHook(
+      () => useIntradayTimeSeries(liveCurrentGex, websocketState.stream.lastUpdateTime),
+      {
+        wrapper: createWrapper(queryClient),
+      }
+    );
+
+    await waitFor(() => {
+      expect(result.current.dataPointCount).toBe(1);
+    });
+
+    websocketState.stream = {
+      ...websocketState.stream,
+      lastUpdateTime: websocketState.stream.lastUpdateTime! + 1500,
+    };
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current.dataPointCount).toBe(2);
+    });
+
+    websocketState.stream = {
+      ...websocketState.stream,
+      lastUpdateTime: websocketState.stream.lastUpdateTime! + 1500,
+    };
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current.dataPointCount).toBe(3);
+    });
+
+    unmount();
+
+    const remounted = renderHook(
+      () => useIntradayTimeSeries(liveCurrentGex, websocketState.stream.lastUpdateTime),
+      {
+        wrapper: createWrapper(queryClient),
+      }
+    );
+
+    await waitFor(() => {
+      expect(remounted.result.current.dataPointCount).toBe(3);
+    });
+  });
 });

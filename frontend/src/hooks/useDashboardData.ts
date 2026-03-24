@@ -232,11 +232,23 @@ export function useIntradayTimeSeries(
   gexData: GEXSnapshot | null,
   lastUpdateTime: number | null
 ) {
+  const queryClient = useQueryClient();
   const { demoModeEnabled, selectedProvider } = useUIStore();
+  const mode = getAppDataMode(demoModeEnabled);
   const { data: marketStatus } = useMarketStatus();
   const tradingDateEt = useMemo(
     () => marketStatus?.current_time_et?.slice(0, 10) ?? '',
     [marketStatus?.current_time_et]
+  );
+  const timeSeriesKey = useMemo(
+    () =>
+      queryKeys.gex.intradaySeries(
+        mode,
+        selectedProvider,
+        'SPX',
+        tradingDateEt || 'pending-trading-day'
+      ),
+    [mode, selectedProvider, tradingDateEt]
   );
   const persistedHistory = useHistoricalGEX(tradingDateEt, tradingDateEt, '1m', 'SPX');
 
@@ -254,8 +266,9 @@ export function useIntradayTimeSeries(
       }
 
       if (action.type === 'seed') {
+        const mergedPoints = [...state, ...action.points];
         const seen = new Set<number>();
-        const deduped = action.points
+        const deduped = mergedPoints
           .slice()
           .sort((left, right) => left.timestamp - right.timestamp)
           .filter((point) => {
@@ -288,8 +301,18 @@ export function useIntradayTimeSeries(
 
       return state;
     },
-    []
+    queryClient.getQueryData<TimeSeriesPoint[]>(timeSeriesKey) ?? []
   );
+
+  useEffect(() => {
+    const cachedSeries = queryClient.getQueryData<TimeSeriesPoint[]>(timeSeriesKey) ?? [];
+    if (cachedSeries.length > 0) {
+      dispatch({ type: 'seed', points: cachedSeries });
+      return;
+    }
+
+    dispatch({ type: 'clear' });
+  }, [queryClient, timeSeriesKey]);
 
   useEffect(() => {
     if (!persistedHistory.data?.data?.length) {
@@ -321,8 +344,8 @@ export function useIntradayTimeSeries(
   }, [gexData, lastUpdateTime]);
 
   useEffect(() => {
-    dispatch({ type: 'clear' });
-  }, [demoModeEnabled, selectedProvider]);
+    queryClient.setQueryData(timeSeriesKey, timeSeries);
+  }, [queryClient, timeSeries, timeSeriesKey]);
 
   // Clear time series (e.g., on market close)
   const clearTimeSeries = useCallback(() => {

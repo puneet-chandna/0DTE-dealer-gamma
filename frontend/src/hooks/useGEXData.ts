@@ -29,6 +29,12 @@ export const queryKeys = {
       endDate: string,
       interval?: string
     ) => ['gex', mode, provider, symbol, 'historical', startDate, endDate, interval] as const,
+    intradaySeries: (
+      mode: 'live' | 'demo',
+      provider: string,
+      symbol: string,
+      tradingDate: string
+    ) => ['gex', mode, provider, symbol, 'intraday-series', tradingDate] as const,
   },
   analytics: {
     summary: (

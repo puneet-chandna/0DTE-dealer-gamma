@@ -26,6 +26,7 @@ ET = ZoneInfo("America/New_York")
 GEX_REFRESH_INTERVAL = 5
 SPOT_REFRESH_INTERVAL = 2
 HISTORICAL_CAPTURE_INTERVAL = 5
+HISTORICAL_CAPTURE_TIMEOUT_SECONDS = 4
 
 # Task management
 _background_tasks: list[asyncio.Task] = []
@@ -162,6 +163,170 @@ async def periodic_spot_refresh() -> None:
     logger.info("Spot refresh task stopped")
 
 
+async def _capture_symbol_for_provider(
+    *,
+    provider_name: str,
+    symbol: str,
+    default_provider: str,
+    cache,
+    gex_calculator: GEXCalculator,
+    historical_data_service,
+    capture_timeout_seconds: float,
+) -> bool:
+    """Capture and persist a single provider/symbol snapshot."""
+    data_client = get_data_client(provider_name)
+
+    try:
+        options_df, spot_price = await asyncio.wait_for(
+            data_client.get_options_chain_for_gex(underlying=symbol),
+            timeout=capture_timeout_seconds,
+        )
+    except asyncio.TimeoutError:
+        logger.warning(
+            "Historical capture timed out for %s via %s after %.1fs",
+            symbol,
+            provider_name,
+            capture_timeout_seconds,
+        )
+        return False
+    except Exception as exc:
+        logger.warning(
+            "Historical capture failed for %s via %s: %s",
+            symbol,
+            provider_name,
+            exc,
+        )
+        return False
+
+    cache.update_spot_price(spot_price)
+
+    if options_df.empty:
+        logger.warning(
+            "Skipping historical capture for %s via %s because the provider returned no contracts",
+            symbol,
+            provider_name,
+        )
+        return False
+
+    snapshot = gex_calculator.calculate_gex_from_chain(
+        options_df=options_df,
+        spot_price=spot_price,
+        timestamp=datetime.now(ET),
+    )
+
+    cache.set(f"gex:current:{symbol}:{provider_name}", snapshot)
+    if provider_name == default_provider:
+        cache.set(f"gex:current:{symbol}", snapshot)
+
+    persisted = await historical_data_service.persist_capture(
+        provider=provider_name,
+        symbol=symbol,
+        snapshot=snapshot,
+        options_df=options_df,
+    )
+
+    if persisted:
+        logger.info(
+            "Persisted historical capture for %s via %s at %s",
+            symbol,
+            provider_name,
+            snapshot.timestamp.isoformat(),
+        )
+    else:
+        logger.warning(
+            "Persistence returned false for %s via %s",
+            symbol,
+            provider_name,
+        )
+
+    return persisted
+
+
+async def _capture_provider_watchlist(
+    *,
+    provider_name: str,
+    default_provider: str,
+    cache,
+    gex_calculator: GEXCalculator,
+    historical_data_service,
+    capture_timeout_seconds: float,
+) -> int:
+    """Capture the full watchlist for one provider."""
+    successes = 0
+
+    for symbol in WATCHLIST_SYMBOLS:
+        persisted = await _capture_symbol_for_provider(
+            provider_name=provider_name,
+            symbol=symbol,
+            default_provider=default_provider,
+            cache=cache,
+            gex_calculator=gex_calculator,
+            historical_data_service=historical_data_service,
+            capture_timeout_seconds=capture_timeout_seconds,
+        )
+        if persisted:
+            successes += 1
+
+    logger.info(
+        "Historical capture cycle finished for %s: %s/%s symbols persisted",
+        provider_name,
+        successes,
+        len(WATCHLIST_SYMBOLS),
+    )
+    return successes
+
+
+async def capture_historical_watchlist_once(
+    *,
+    cache=None,
+    gex_calculator: Optional[GEXCalculator] = None,
+    historical_data_service=None,
+    capture_timeout_seconds: float = HISTORICAL_CAPTURE_TIMEOUT_SECONDS,
+) -> None:
+    """Capture every available provider independently for the full watchlist."""
+    cache = cache or get_cache()
+    gex_calculator = gex_calculator or get_gex_calculator()
+    historical_data_service = historical_data_service or get_historical_data_service()
+
+    settings = get_settings()
+    default_provider = ProviderRegistry.resolve_provider_name(
+        default_provider=settings.data_provider,
+    )
+    available_providers = [
+        provider_info["name"]
+        for provider_info in ProviderRegistry.list_providers()
+        if provider_info["is_available"]
+    ]
+
+    if not available_providers:
+        logger.warning("Historical capture skipped because no providers are available")
+        return
+
+    provider_tasks = [
+        asyncio.create_task(
+            _capture_provider_watchlist(
+                provider_name=provider_name,
+                default_provider=default_provider,
+                cache=cache,
+                gex_calculator=gex_calculator,
+                historical_data_service=historical_data_service,
+                capture_timeout_seconds=capture_timeout_seconds,
+            ),
+            name=f"historical-capture:{provider_name}",
+        )
+        for provider_name in available_providers
+    ]
+
+    results = await asyncio.gather(*provider_tasks, return_exceptions=True)
+    for provider_name, result in zip(available_providers, results, strict=False):
+        if isinstance(result, Exception):
+            logger.warning(
+                "Historical capture provider cycle crashed for %s: %s",
+                provider_name,
+                result,
+            )
+
+
 async def periodic_historical_capture() -> None:
     """Persist historical snapshots for the configured watchlist and providers."""
     global _shutdown_event
@@ -182,56 +347,11 @@ async def periodic_historical_capture() -> None:
                 await asyncio.sleep(60)
                 continue
 
-            settings = get_settings()
-            default_provider = ProviderRegistry.resolve_provider_name(
-                default_provider=settings.data_provider,
+            await capture_historical_watchlist_once(
+                cache=cache,
+                gex_calculator=gex_calculator,
+                historical_data_service=historical_data_service,
             )
-            available_providers = [
-                provider_info["name"]
-                for provider_info in ProviderRegistry.list_providers()
-                if provider_info["is_available"]
-            ]
-
-            for provider_name in available_providers:
-                data_client = get_data_client(provider_name)
-                for symbol in WATCHLIST_SYMBOLS:
-                    try:
-                        options_df, spot_price = await data_client.get_options_chain_for_gex(
-                            underlying=symbol
-                        )
-                        cache.update_spot_price(spot_price)
-
-                        if options_df.empty:
-                            logger.warning(
-                                "Skipping historical capture for %s via %s because the provider returned no contracts",
-                                symbol,
-                                provider_name,
-                            )
-                            continue
-
-                        snapshot = gex_calculator.calculate_gex_from_chain(
-                            options_df=options_df,
-                            spot_price=spot_price,
-                            timestamp=datetime.now(ET),
-                        )
-
-                        cache.set(f"gex:current:{symbol}:{provider_name}", snapshot)
-                        if provider_name == default_provider:
-                            cache.set(f"gex:current:{symbol}", snapshot)
-
-                        await historical_data_service.persist_capture(
-                            provider=provider_name,
-                            symbol=symbol,
-                            snapshot=snapshot,
-                            options_df=options_df,
-                        )
-                    except Exception as exc:
-                        logger.warning(
-                            "Historical capture failed for %s via %s: %s",
-                            symbol,
-                            provider_name,
-                            exc,
-                        )
 
             await asyncio.sleep(HISTORICAL_CAPTURE_INTERVAL)
 

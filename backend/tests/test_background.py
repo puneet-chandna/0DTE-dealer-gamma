@@ -330,6 +330,71 @@ class TestPeriodicSpotRefresh:
 
 
 # ---------------------------------------------------------------------------
+# historical capture helpers
+# ---------------------------------------------------------------------------
+
+
+class TestHistoricalCaptureHelpers:
+    """Test provider-separated historical capture behavior."""
+
+    @pytest.mark.asyncio
+    async def test_capture_watchlist_once_persists_fast_provider_when_another_times_out(self):
+        """One slow provider should not block a different provider's persisted rows."""
+        mock_snapshot = MagicMock()
+        mock_snapshot.net_gex = -1.2e9
+        mock_snapshot.spot_price = 5900.0
+
+        mock_calculator = MagicMock()
+        mock_calculator.calculate_gex_from_chain.return_value = mock_snapshot
+
+        mock_cache = MagicMock()
+        mock_history_service = MagicMock()
+        mock_history_service.persist_capture = AsyncMock(return_value=True)
+
+        slow_client = AsyncMock()
+        slow_client.provider_name = "yfinance"
+
+        async def _slow_chain(*args, **kwargs):
+            await asyncio.sleep(0.05)
+            return _make_options_df(), 5900.0
+
+        slow_client.get_options_chain_for_gex.side_effect = _slow_chain
+
+        fast_client = AsyncMock()
+        fast_client.provider_name = "tradier"
+        fast_client.get_options_chain_for_gex = AsyncMock(
+            return_value=(_make_options_df(), 5905.0)
+        )
+
+        def _get_client(name):
+            return slow_client if name == "yfinance" else fast_client
+
+        with patch(
+            "app.services.background.ProviderRegistry.list_providers",
+            return_value=[
+                {"name": "yfinance", "is_available": True},
+                {"name": "tradier", "is_available": True},
+            ],
+        ):
+            with patch("app.services.background.get_data_client", side_effect=_get_client):
+                with patch("app.services.background.WATCHLIST_SYMBOLS", ("SPX",)):
+                    with patch("app.services.background.get_settings") as mock_get_settings:
+                        mock_get_settings.return_value.data_provider = "yfinance"
+                        await background.capture_historical_watchlist_once(
+                            cache=mock_cache,
+                            gex_calculator=mock_calculator,
+                            historical_data_service=mock_history_service,
+                            capture_timeout_seconds=0.01,
+                        )
+
+        mock_history_service.persist_capture.assert_awaited_once()
+        persist_call = mock_history_service.persist_capture.await_args
+        assert persist_call.kwargs["provider"] == "tradier"
+        assert persist_call.kwargs["symbol"] == "SPX"
+        mock_cache.set.assert_any_call("gex:current:SPX:tradier", mock_snapshot)
+
+
+# ---------------------------------------------------------------------------
 # start_background_tasks
 # ---------------------------------------------------------------------------
 

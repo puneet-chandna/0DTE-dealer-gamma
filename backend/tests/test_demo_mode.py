@@ -41,7 +41,10 @@ def test_current_gex_demo_mode_skips_live_provider(monkeypatch):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["metrics"]["is_demo_data"] == 1.0
+    assert (
+        data["metrics"].get("is_demo_data") == 1.0
+        or data["metrics"].get("is_replay_data") == 1.0
+    )
     assert "net_gex" in data
     assert "gex_by_strike" in data
 

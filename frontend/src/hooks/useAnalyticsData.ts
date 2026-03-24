@@ -61,7 +61,11 @@ export function useIVSurface(symbol: string = 'SPY', enabled: boolean = true) {
         provider: selectedProvider,
       }),
     enabled,
-    staleTime: 60 * 1000, // 1 minute
+    staleTime: 5 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     retry: 1,
   });
 }
@@ -94,7 +98,11 @@ export function useTechnicalIndicators(
         provider: selectedProvider,
       }),
     enabled,
-    staleTime: 60 * 1000,
+    staleTime: 5 * 60 * 1000,
+    gcTime: 15 * 60 * 1000,
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     retry: 1,
   });
 }

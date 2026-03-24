@@ -125,11 +125,13 @@ class TestIVSurfaceEndpoint:
         mock_client.close = AsyncMock()
 
         with patch("app.api.routes.analytics.get_data_client", return_value=mock_client) as mock_get_client:
-            with patch("app.core.vollib_bridge.VolLibBridge.calculate_iv_surface", return_value=mock_df[["strike", "type", "implied_vol", "mid"]].rename(columns={"implied_vol": "iv", "mid": "mid_price"}).assign(moneyness=1.0)):
-                with patch("app.core.vollib_bridge.VolLibBridge.calculate_iv_skew", return_value=pd.DataFrame()):
-                    with patch("app.core.rate_provider.get_rate_provider") as mock_rate_provider:
-                        mock_rate_provider.return_value.get_rate.return_value = 0.05
-                        resp = client.get("/api/analytics/iv-surface?provider=tradier")
+            with patch("app.api.routes.analytics.get_historical_data_service") as mock_history_service:
+                mock_history_service.return_value.get_iv_surface = AsyncMock(return_value=None)
+                with patch("app.core.vollib_bridge.VolLibBridge.calculate_iv_surface", return_value=mock_df[["strike", "type", "implied_vol", "mid"]].rename(columns={"implied_vol": "iv", "mid": "mid_price"}).assign(moneyness=1.0)):
+                    with patch("app.core.vollib_bridge.VolLibBridge.calculate_iv_skew", return_value=pd.DataFrame()):
+                        with patch("app.core.rate_provider.get_rate_provider") as mock_rate_provider:
+                            mock_rate_provider.return_value.get_rate.return_value = 0.05
+                            resp = client.get("/api/analytics/iv-surface?provider=tradier")
 
         assert resp.status_code == 200
         mock_get_client.assert_called_once_with("tradier")
@@ -149,12 +151,16 @@ class TestIVSurfaceEndpoint:
     def test_unavailable_provider_returns_503(self):
         """Unavailable providers should surface as service failures."""
         with patch(
-            "app.api.routes.analytics.get_data_client",
-            side_effect=ProviderUnavailableError(
-                "TRADIER_API_KEY environment variable is missing"
-            ),
-        ):
-            resp = client.get("/api/analytics/iv-surface?provider=tradier")
+            "app.api.routes.analytics.get_historical_data_service"
+        ) as mock_history_service:
+            mock_history_service.return_value.get_iv_surface = AsyncMock(return_value=None)
+            with patch(
+                "app.api.routes.analytics.get_data_client",
+                side_effect=ProviderUnavailableError(
+                    "TRADIER_API_KEY environment variable is missing"
+                ),
+            ):
+                resp = client.get("/api/analytics/iv-surface?provider=tradier")
 
         assert resp.status_code == 503
         assert "TRADIER_API_KEY" in resp.json()["detail"]

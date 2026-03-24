@@ -7,6 +7,7 @@ import { render, screen } from '@testing-library/react';
 import { ChartErrorBoundary } from './ChartErrorBoundary';
 import { RegimeIndicator } from './RegimeIndicator';
 import { ZeroGammaLine, zeroGammaReferenceLineConfig } from './ZeroGammaLine';
+import { TechnicalOverlayChart } from './TechnicalOverlayChart';
 
 // Mock framer-motion to avoid animation issues in tests
 vi.mock('framer-motion', () => ({
@@ -16,6 +17,18 @@ vi.mock('framer-motion', () => ({
     ),
   },
   AnimatePresence: ({ children }: React.PropsWithChildren) => <>{children}</>,
+}));
+
+vi.mock('recharts', () => ({
+  ResponsiveContainer: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  ComposedChart: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  Line: () => <div />,
+  Area: () => <div />,
+  XAxis: () => <div />,
+  YAxis: () => <div />,
+  CartesianGrid: () => <div />,
+  Tooltip: () => <div />,
+  ReferenceLine: () => <div />,
 }));
 
 describe('ChartErrorBoundary', () => {
@@ -139,5 +152,63 @@ describe('zeroGammaReferenceLineConfig', () => {
     expect(config.label.value).toBe('0Γ: $5,925');
     expect(config.label.position).toBe('top');
     expect(config.label.fill).toBe('#a78bfa');
+  });
+});
+
+describe('TechnicalOverlayChart', () => {
+  it('shows an explicit insufficient-history message when indicators cannot be computed yet', () => {
+    render(
+      <TechnicalOverlayChart
+        data={[
+          {
+            timestamp: '2026-03-23T10:30:00.000Z',
+            close: 5900,
+            atr: null,
+            rsi: null,
+            bb_upper: null,
+            bb_mid: null,
+            bb_lower: null,
+          },
+        ]}
+        indicators={['ATR', 'RSI', 'BBANDS']}
+      />
+    );
+
+    expect(
+      screen.getByText(/need more persisted history before atr, rsi, and bollinger bands can be plotted/i)
+    ).toBeInTheDocument();
+  });
+
+  it('renders visible legend labels for the plotted indicator series', () => {
+    render(
+      <TechnicalOverlayChart
+        data={[
+          {
+            timestamp: '2026-03-23T10:30:00.000Z',
+            close: 5900,
+            atr: 15,
+            rsi: 52,
+            bb_upper: 5920,
+            bb_mid: 5900,
+            bb_lower: 5880,
+          },
+          {
+            timestamp: '2026-03-23T11:30:00.000Z',
+            close: 5910,
+            atr: 16,
+            rsi: 55,
+            bb_upper: 5935,
+            bb_mid: 5910,
+            bb_lower: 5885,
+          },
+        ]}
+        indicators={['ATR', 'RSI', 'BBANDS']}
+      />
+    );
+
+    expect(screen.getByText('Close')).toBeInTheDocument();
+    expect(screen.getByText('Bollinger Bands')).toBeInTheDocument();
+    expect(screen.getByText('ATR')).toBeInTheDocument();
+    expect(screen.getByText('RSI')).toBeInTheDocument();
   });
 });

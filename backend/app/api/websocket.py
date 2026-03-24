@@ -29,6 +29,7 @@ ET = ZoneInfo("America/New_York")
 
 # WebSocket update interval (seconds)
 WS_UPDATE_INTERVAL = 5
+WS_LIVE_FETCH_TIMEOUT_SECONDS = 4
 SUPPORTED_SYMBOLS = {"SPX", "SPY", "QQQ", "IWM"}
 
 
@@ -203,6 +204,26 @@ def _build_live_ws_payload_from_snapshot(snapshot, provider: str, *, is_stale: b
     return payload if _is_reasonable_gex_payload(payload) else _generate_mock_gex_data()
 
 
+async def _get_latest_persisted_ws_payload(
+    *,
+    symbol: str,
+    provider: str,
+    is_stale: bool,
+) -> Optional[dict]:
+    """Build a websocket payload from the latest persisted snapshot."""
+    snapshot = await get_historical_data_service().get_latest_snapshot(
+        provider=provider,
+        symbol=symbol,
+    )
+    if snapshot is None:
+        return None
+    return _build_live_ws_payload_from_snapshot(
+        snapshot,
+        provider,
+        is_stale=is_stale,
+    )
+
+
 async def _get_gex_update(
     settings: Settings,
     demo: bool = False,
@@ -276,13 +297,21 @@ async def _get_gex_update(
         data_client = get_data_client(active_provider)
         provider_name = data_client.provider_name
 
-        options_df, spot_price = await data_client.get_options_chain_for_gex(
-            underlying=symbol
+        options_df, spot_price = await asyncio.wait_for(
+            data_client.get_options_chain_for_gex(underlying=symbol),
+            timeout=WS_LIVE_FETCH_TIMEOUT_SECONDS,
         )
         cache.update_spot_price(spot_price)
 
         if options_df.empty:
             logger.warning(f"WebSocket update: empty chain returned by {provider_name}")
+            persisted_payload = await _get_latest_persisted_ws_payload(
+                symbol=symbol,
+                provider=active_provider,
+                is_stale=True,
+            )
+            if persisted_payload is not None:
+                return persisted_payload
             return _generate_mock_gex_data()
 
         gex_calculator = get_gex_calculator()
@@ -326,6 +355,13 @@ async def _get_gex_update(
                 active_provider,
                 is_stale=cache.is_stale(stale_key),
             )
+        persisted_payload = await _get_latest_persisted_ws_payload(
+            symbol=symbol,
+            provider=active_provider,
+            is_stale=True,
+        )
+        if persisted_payload is not None:
+            return persisted_payload
         return _generate_mock_gex_data()
 
 

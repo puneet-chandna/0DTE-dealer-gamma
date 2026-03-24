@@ -553,6 +553,51 @@ class HistoricalDataService:
             logger.warning("Latest timestamp lookup failed for %s/%s: %s", provider_name, underlying, exc)
             return None
 
+    async def get_latest_snapshot(
+        self,
+        *,
+        provider: str,
+        symbol: str,
+        prefer_replay: bool = False,
+    ) -> Optional[GEXSnapshot]:
+        """Return the newest stored snapshot for a provider/symbol."""
+        provider_name = provider.strip().lower()
+        underlying = symbol.strip().upper()
+
+        try:
+            if prefer_replay:
+                replay_records = await self._load_latest_replay_snapshot_records(
+                    provider=provider_name,
+                    symbol=underlying,
+                )
+                if not replay_records:
+                    return None
+                return self._record_to_snapshot(replay_records[-1])
+
+            async with self._get_session_factory()() as session:
+                result = await session.execute(
+                    select(GEXSnapshotRecord)
+                    .options(selectinload(GEXSnapshotRecord.strike_points))
+                    .where(
+                        GEXSnapshotRecord.provider == provider_name,
+                        GEXSnapshotRecord.symbol == underlying,
+                    )
+                    .order_by(GEXSnapshotRecord.captured_at.desc())
+                    .limit(1)
+                )
+                latest_record = result.scalar_one_or_none()
+                if latest_record is None:
+                    return None
+                return self._record_to_snapshot(latest_record)
+        except Exception as exc:
+            logger.warning(
+                "Latest snapshot lookup failed for %s/%s: %s",
+                provider_name,
+                underlying,
+                exc,
+            )
+            return None
+
     async def _get_or_create_market_session(
         self,
         *,

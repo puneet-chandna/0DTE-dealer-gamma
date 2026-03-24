@@ -63,6 +63,26 @@ function TechnicalOverlayChartComponent({
   const hasBBands = indicators.includes('BBANDS');
   const hasATR = indicators.includes('ATR');
   const hasRSI = indicators.includes('RSI');
+  const hasAnyIndicatorValues = useMemo(() => {
+    return data.some((point) => {
+      if (hasATR && point.atr !== null) return true;
+      if (hasRSI && point.rsi !== null) return true;
+      if (hasBBands && (point.bb_upper !== null || point.bb_mid !== null || point.bb_lower !== null)) {
+        return true;
+      }
+      return false;
+    });
+  }, [data, hasATR, hasBBands, hasRSI]);
+  const needsMoreHistory =
+    data.length > 0 &&
+    (hasATR || hasRSI || hasBBands) &&
+    !hasAnyIndicatorValues;
+  const legendItems = [
+    { label: 'Close', color: '#e4e4e7' },
+    ...(hasBBands ? [{ label: 'Bollinger Bands', color: '#3b82f6' }] : []),
+    ...(hasATR ? [{ label: 'ATR', color: '#f59e0b' }] : []),
+    ...(hasRSI ? [{ label: 'RSI', color: '#8b5cf6' }] : []),
+  ];
 
   if (isLoading) {
     return (
@@ -86,8 +106,40 @@ function TechnicalOverlayChartComponent({
     );
   }
 
+  if (needsMoreHistory) {
+    return (
+      <div
+        className="flex flex-col items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/50 px-6 text-center"
+        style={{ height }}
+      >
+        <p className="text-sm text-zinc-300">
+          Need more persisted history before ATR, RSI, and Bollinger Bands can be plotted.
+        </p>
+        <p className="mt-2 max-w-xl text-xs text-zinc-500">
+          The backend has price history, but this interval does not have enough captured bars yet.
+          Try a longer period or wait for more market data to be recorded.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-2">
+      <div className="flex flex-wrap gap-2 text-xs text-zinc-400">
+        {legendItems.map((item) => (
+          <div
+            key={item.label}
+            className="inline-flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900/60 px-2.5 py-1"
+          >
+            <span
+              className="h-2.5 w-2.5 rounded-full"
+              style={{ backgroundColor: item.color }}
+            />
+            <span>{item.label}</span>
+          </div>
+        ))}
+      </div>
+
       {/* Main price chart with Bollinger Bands */}
       <ResponsiveContainer width="100%" height={height}>
         <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 5, left: 10 }}>

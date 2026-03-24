@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -167,6 +167,43 @@ async def test_historical_route_uses_database_when_history_exists(history_servic
     assert body["data"][0]["spot_price"] == 5905.0
     assert body["data"][0]["net_gex"] == -1.35e9
     assert body["data"][0]["metrics"]["capture_quality"] == 0.99
+
+
+@pytest.mark.asyncio
+async def test_current_route_falls_back_to_latest_persisted_snapshot_when_live_fetch_fails(history_service):
+    service, _ = history_service
+    captured_at = datetime(2026, 3, 20, 13, 45, 0, tzinfo=ET)
+
+    await service.persist_capture(
+        provider="tradier",
+        symbol="SPX",
+        snapshot=_build_snapshot(captured_at, spot_price=6032.5, net_gex=7.8e8),
+        options_df=_build_options_df(),
+        force_raw_capture=True,
+    )
+
+    with patch("app.api.routes.gex.get_historical_data_service", return_value=service):
+        with patch("app.api.routes.gex.get_cache") as mock_get_cache:
+            mock_cache = mock_get_cache.return_value
+            mock_cache.get_if_fresh.return_value = None
+            mock_cache.get.return_value = None
+            with patch(
+                "app.api.routes.gex._get_live_gex_snapshot",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("live provider timeout"),
+            ):
+                response = client.get(
+                    "/api/gex/current",
+                    params={"provider": "tradier", "symbol": "SPX"},
+                )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["spot_price"] == 6032.5
+    assert body["net_gex"] == 7.8e8
+    assert body["zero_gamma_level"] == 5912.5
+    assert body["metrics"]["capture_quality"] == 0.99
+    assert body["metrics"]["is_persisted_fallback"] == 1.0
 
 
 @pytest.mark.asyncio
