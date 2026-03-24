@@ -246,7 +246,7 @@ async def get_current_gex(
     logger.info(f"Cache miss for {cache_key}, computing live GEX")
     try:
         snapshot_dict = await asyncio.wait_for(
-            _get_live_gex_snapshot(symbol, provider),
+            _get_live_gex_snapshot(symbol, active_provider),
             timeout=LIVE_FETCH_TIMEOUT_SECONDS,
         )
         if _snapshot_is_mock(snapshot_dict):
@@ -419,7 +419,7 @@ async def get_gex_by_strikes(
         if cached_data is None:
             # Need to compute
             snapshot_dict = await asyncio.wait_for(
-                _get_live_gex_snapshot(symbol, provider),
+                _get_live_gex_snapshot(symbol, active_provider),
                 timeout=LIVE_FETCH_TIMEOUT_SECONDS,
             )
             if _snapshot_is_mock(snapshot_dict):
@@ -551,7 +551,7 @@ async def get_market_regime(
     try:
         if cached_data is None:
             snapshot_dict = await asyncio.wait_for(
-                _get_live_gex_snapshot(symbol, provider),
+                _get_live_gex_snapshot(symbol, active_provider),
                 timeout=LIVE_FETCH_TIMEOUT_SECONDS,
             )
             if _snapshot_is_mock(snapshot_dict):

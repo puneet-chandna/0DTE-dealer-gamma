@@ -35,6 +35,44 @@ class TestHealthEndpoints:
 class TestGEXEndpoints:
     """Test GEX API endpoints."""
 
+    @pytest.mark.parametrize(
+        ("path", "assertion"),
+        [
+            ("/api/gex/current", lambda body: body["spot_price"] == 5000.0),
+            ("/api/gex/strikes", lambda body: body["spot_price"] == 5000.0),
+            ("/api/gex/regime", lambda body: body["regime"] == "short_gamma"),
+        ],
+    )
+    def test_live_gex_routes_use_resolved_provider_for_snapshot_fetch(self, path, assertion):
+        """Live GEX routes should pass the resolved provider into the live snapshot helper."""
+        snapshot = {
+            "timestamp": "2099-01-15T10:30:00-05:00",
+            "spot_price": 5000.0,
+            "total_call_gex": -2.0,
+            "total_put_gex": 1.0,
+            "net_gex": -1.1e9,
+            "zero_gamma_level": 4995.0,
+            "gex_by_strike": {"5000.0": -3.0},
+            "dominant_strike": 5000.0,
+            "metrics": {},
+        }
+        mock_cache = MagicMock()
+        mock_cache.get_if_fresh.return_value = None
+
+        with patch("app.api.routes.gex.get_cache", return_value=mock_cache):
+            with patch("app.api.routes.gex.get_settings") as mock_get_settings:
+                mock_get_settings.return_value.data_provider = "tradier"
+                with patch(
+                    "app.api.routes.gex._get_live_gex_snapshot",
+                    new_callable=AsyncMock,
+                ) as mock_live_snapshot:
+                    mock_live_snapshot.return_value = snapshot
+                    response = client.get(path)
+
+        assert response.status_code == 200
+        assert assertion(response.json())
+        mock_live_snapshot.assert_awaited_once_with("SPX", "tradier")
+
     def test_current_gex_returns_valid_response(self):
         """Current GEX should return 200 with mock data (no API key)."""
         response = client.get("/api/gex/current")

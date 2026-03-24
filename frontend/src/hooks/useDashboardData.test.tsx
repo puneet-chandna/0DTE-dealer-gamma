@@ -476,4 +476,114 @@ describe('useIntradayTimeSeries', () => {
       expect(remounted.result.current.dataPointCount).toBe(3);
     });
   });
+
+  it('does not write the previous provider intraday series into the new provider cache key', async () => {
+    const queryClient = createQueryClient();
+
+    const { result, rerender } = renderHook(
+      () => useIntradayTimeSeries(liveCurrentGex, websocketState.stream.lastUpdateTime),
+      {
+        wrapper: createWrapper(queryClient),
+      }
+    );
+
+    await waitFor(() => {
+      expect(result.current.dataPointCount).toBe(1);
+    });
+
+    websocketState.stream = {
+      ...websocketState.stream,
+      lastUpdateTime: websocketState.stream.lastUpdateTime! + 1500,
+    };
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current.dataPointCount).toBe(2);
+    });
+
+    websocketState.stream = {
+      ...websocketState.stream,
+      lastUpdateTime: websocketState.stream.lastUpdateTime! + 1500,
+    };
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current.dataPointCount).toBe(3);
+    });
+
+    storeState.state = {
+      ...storeState.state,
+      selectedProvider: 'tradier',
+    };
+    rerender();
+
+    const tradierKey = queryKeys.gex.intradaySeries('live', 'tradier', 'SPX', '2026-03-23');
+
+    await waitFor(() => {
+      expect(result.current.dataPointCount).toBe(1);
+    });
+
+    await waitFor(() => {
+      expect(queryClient.getQueryData<Array<{ timestamp: number }>>(tradierKey)).toHaveLength(1);
+    });
+  });
+
+  it('skips writing stale accumulated points during a provider key transition', async () => {
+    const queryClient = createQueryClient();
+    const setQueryDataSpy = vi.spyOn(queryClient, 'setQueryData');
+
+    const { result, rerender } = renderHook(
+      () => useIntradayTimeSeries(liveCurrentGex, websocketState.stream.lastUpdateTime),
+      {
+        wrapper: createWrapper(queryClient),
+      }
+    );
+
+    await waitFor(() => {
+      expect(result.current.dataPointCount).toBe(1);
+    });
+
+    websocketState.stream = {
+      ...websocketState.stream,
+      lastUpdateTime: websocketState.stream.lastUpdateTime! + 1500,
+    };
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current.dataPointCount).toBe(2);
+    });
+
+    websocketState.stream = {
+      ...websocketState.stream,
+      lastUpdateTime: websocketState.stream.lastUpdateTime! + 1500,
+    };
+    rerender();
+
+    await waitFor(() => {
+      expect(result.current.dataPointCount).toBe(3);
+    });
+
+    setQueryDataSpy.mockClear();
+
+    storeState.state = {
+      ...storeState.state,
+      selectedProvider: 'tradier',
+    };
+    rerender();
+
+    const tradierKey = queryKeys.gex.intradaySeries('live', 'tradier', 'SPX', '2026-03-23');
+
+    await waitFor(() => {
+      expect(result.current.dataPointCount).toBe(1);
+    });
+
+    const staleTradierWrites = setQueryDataSpy.mock.calls.filter(
+      ([key, value]) =>
+        JSON.stringify(key) === JSON.stringify(tradierKey) &&
+        Array.isArray(value) &&
+        value.length > 1
+    );
+
+    expect(staleTradierWrites).toHaveLength(0);
+  });
 });

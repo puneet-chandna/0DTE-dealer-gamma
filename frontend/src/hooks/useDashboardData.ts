@@ -8,7 +8,7 @@
  * - Exposes real-time status for UI indicators
  */
 
-import { useEffect, useMemo, useState, useCallback, useReducer } from 'react';
+import { useEffect, useMemo, useState, useCallback, useReducer, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useGEXStream } from './useWebSocket';
 import { useCurrentGEX, useCurrentRegime, useGEXByStrikes, useHistoricalGEX, queryKeys } from './useGEXData';
@@ -251,6 +251,7 @@ export function useIntradayTimeSeries(
     [mode, selectedProvider, tradingDateEt]
   );
   const persistedHistory = useHistoricalGEX(tradingDateEt, tradingDateEt, '1m', 'SPX');
+  const previousTimeSeriesKeyRef = useRef(timeSeriesKey);
 
   // Use reducer for accumulating time series to avoid setState in effect
   const [timeSeries, dispatch] = useReducer(
@@ -344,7 +345,13 @@ export function useIntradayTimeSeries(
   }, [gexData, lastUpdateTime]);
 
   useEffect(() => {
+    if (previousTimeSeriesKeyRef.current !== timeSeriesKey) {
+      previousTimeSeriesKeyRef.current = timeSeriesKey;
+      return;
+    }
+
     queryClient.setQueryData(timeSeriesKey, timeSeries);
+    previousTimeSeriesKeyRef.current = timeSeriesKey;
   }, [queryClient, timeSeries, timeSeriesKey]);
 
   // Clear time series (e.g., on market close)
