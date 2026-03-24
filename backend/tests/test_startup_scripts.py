@@ -72,3 +72,128 @@ def test_runtime_cleanup_script_removes_stale_pid_files(tmp_path: Path) -> None:
 
     assert completed.returncode == 0, completed.stderr
     assert not stale_pid_file.exists()
+
+
+def test_start_local_postgres_requires_initialized_cluster(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    data_dir = tmp_path / "data"
+    socket_dir = tmp_path / "run"
+    log_file = tmp_path / "logs" / "postgres.log"
+    bin_dir.mkdir()
+    data_dir.mkdir()
+    pg_ctl = bin_dir / "pg_ctl"
+    pg_ctl.write_text("#!/usr/bin/env bash\nexit 0\n", encoding="utf-8")
+    pg_ctl.chmod(0o755)
+
+    completed = subprocess.run(
+        ["bash", str(SCRIPTS_DIR / "start_local_postgres.sh")],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "PG_BIN_DIR": str(bin_dir),
+            "PGDATA_DIR": str(data_dir),
+            "PGSOCKET_DIR": str(socket_dir),
+            "PGLOG_FILE": str(log_file),
+            "PGPORT": "55432",
+        },
+    )
+
+    assert completed.returncode != 0
+    assert "not initialized" in completed.stderr
+
+
+def test_start_local_postgres_does_not_restart_running_server(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    data_dir = tmp_path / "data"
+    socket_dir = tmp_path / "run"
+    log_file = tmp_path / "logs" / "postgres.log"
+    marker_file = tmp_path / "start_called"
+
+    bin_dir.mkdir()
+    data_dir.mkdir()
+    (data_dir / "PG_VERSION").write_text("17\n", encoding="utf-8")
+    pg_ctl = bin_dir / "pg_ctl"
+    pg_ctl.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "if [[ \"$3\" == \"status\" ]]; then\n"
+        "  exit 0\n"
+        "fi\n"
+        f"printf 'started' > {marker_file}\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    pg_ctl.chmod(0o755)
+
+    completed = subprocess.run(
+        ["bash", str(SCRIPTS_DIR / "start_local_postgres.sh")],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "PG_BIN_DIR": str(bin_dir),
+            "PGDATA_DIR": str(data_dir),
+            "PGSOCKET_DIR": str(socket_dir),
+            "PGLOG_FILE": str(log_file),
+            "PGPORT": "55432",
+        },
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert "already running" in completed.stdout
+    assert not marker_file.exists()
+
+
+def test_start_local_postgres_creates_log_directory_before_start(tmp_path: Path) -> None:
+    bin_dir = tmp_path / "bin"
+    data_dir = tmp_path / "data"
+    socket_dir = tmp_path / "run"
+    log_file = tmp_path / "logs" / "nested" / "postgres.log"
+    marker_file = tmp_path / "start_called"
+
+    bin_dir.mkdir()
+    data_dir.mkdir()
+    (data_dir / "PG_VERSION").write_text("17\n", encoding="utf-8")
+    pg_ctl = bin_dir / "pg_ctl"
+    pg_ctl.write_text(
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        "if [[ \"$3\" == \"status\" ]]; then\n"
+        "  exit 3\n"
+        "fi\n"
+        "log_file=''\n"
+        "while (($#)); do\n"
+        "  if [[ \"$1\" == \"-l\" ]]; then\n"
+        "    log_file=\"$2\"\n"
+        "    shift 2\n"
+        "    continue\n"
+        "  fi\n"
+        "  shift\n"
+        "done\n"
+        "[[ -d \"$(dirname \"$log_file\")\" ]]\n"
+        f"printf 'started' > {marker_file}\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    pg_ctl.chmod(0o755)
+
+    completed = subprocess.run(
+        ["bash", str(SCRIPTS_DIR / "start_local_postgres.sh")],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={
+            "PATH": "/usr/bin:/bin",
+            "PG_BIN_DIR": str(bin_dir),
+            "PGDATA_DIR": str(data_dir),
+            "PGSOCKET_DIR": str(socket_dir),
+            "PGLOG_FILE": str(log_file),
+            "PGPORT": "55432",
+        },
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert marker_file.exists()
