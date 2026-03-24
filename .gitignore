@@ -81,6 +81,8 @@ data/cache/*
 
 # Docker
 docker-compose.override.yml
+.local-postgres/
+.local-run/
 
 # Misc
 *.bak
@@ -89,4 +91,3 @@ Thumbs.db
 gex_react_architecture.md
 0DTE Dealer Gamma Exposure Project Specification.pdf
 .cursorrules
-
