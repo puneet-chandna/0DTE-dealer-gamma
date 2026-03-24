@@ -13,9 +13,29 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.models.schemas import GEXSnapshot
 from app.core.provider_registry import ProviderUnavailableError
 
 client = TestClient(app)
+
+
+def _build_snapshot(
+    *,
+    spot_price: float,
+    net_gex: float,
+    zero_gamma_level: float,
+) -> GEXSnapshot:
+    return GEXSnapshot(
+        timestamp="2026-03-25T10:30:00-04:00",
+        spot_price=spot_price,
+        total_call_gex=-abs(net_gex) - 2.0e8,
+        total_put_gex=2.0e8,
+        net_gex=net_gex,
+        zero_gamma_level=zero_gamma_level,
+        gex_by_strike={float(round(spot_price)): net_gex / 4},
+        dominant_strike=float(round(spot_price)),
+        metrics={"capture_quality": 0.99},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +224,99 @@ class TestTechnicalIndicatorsEndpoint:
             "/api/analytics/technical-indicators?symbol=SPY&indicators=ATR,RSI,BBANDS"
         )
         assert resp.status_code in (200, 503)
+
+    def test_demo_mode_rebuilds_indicator_series_when_persisted_demo_data_has_only_null_indicators(self):
+        """Demo mode should synthesize usable indicators when replay history exists but is insufficient."""
+        persisted_payload = {
+            "symbol": "SPY",
+            "period": "1mo",
+            "indicators": ["ATR", "RSI", "BBANDS"],
+            "count": 1,
+            "data": [
+                {
+                    "timestamp": "2026-03-25T10:30:00-04:00",
+                    "close": 590.0,
+                    "atr": None,
+                    "rsi": None,
+                    "bb_upper": None,
+                    "bb_mid": None,
+                    "bb_lower": None,
+                }
+            ],
+        }
+        synthetic_payload = {
+            "symbol": "SPY",
+            "period": "1mo",
+            "indicators": ["ATR", "RSI", "BBANDS"],
+            "count": 2,
+            "data": [
+                {
+                    "timestamp": "2026-03-25T10:30:00-04:00",
+                    "close": 590.0,
+                    "atr": 4.2,
+                    "rsi": 51.0,
+                    "bb_upper": 594.0,
+                    "bb_mid": 590.0,
+                    "bb_lower": 586.0,
+                },
+                {
+                    "timestamp": "2026-03-25T10:31:00-04:00",
+                    "close": 590.5,
+                    "atr": 4.1,
+                    "rsi": 52.0,
+                    "bb_upper": 594.2,
+                    "bb_mid": 590.2,
+                    "bb_lower": 586.2,
+                },
+            ],
+        }
+        history_service = MagicMock()
+        history_service.get_technical_indicators = AsyncMock(return_value=persisted_payload)
+        history_service.get_latest_snapshot = AsyncMock(
+            return_value=_build_snapshot(
+                spot_price=590.0,
+                net_gex=-5.5e8,
+                zero_gamma_level=588.5,
+            )
+        )
+
+        class _AnchoredDemoService:
+            def get_technical_indicators(
+                self,
+                *,
+                symbol,
+                period,
+                interval,
+                indicators,
+                now=None,
+                anchor_snapshot,
+            ):
+                assert symbol == "SPY"
+                assert period == "1mo"
+                assert interval == "1d"
+                assert indicators == ["ATR", "RSI", "BBANDS"]
+                assert anchor_snapshot.spot_price == 590.0
+                return synthetic_payload
+
+        with patch("app.api.routes.analytics.get_historical_data_service", return_value=history_service):
+            with patch("app.api.routes.analytics.get_demo_data_service", return_value=_AnchoredDemoService()):
+                resp = client.get(
+                    "/api/analytics/technical-indicators",
+                    params={
+                        "demo": "true",
+                        "symbol": "SPY",
+                        "period": "1mo",
+                        "interval": "1d",
+                        "indicators": "ATR,RSI,BBANDS",
+                    },
+                )
+
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["count"] == 2
+        assert body["data"][0]["atr"] == 4.2
+        assert body["data"][0]["rsi"] == 51.0
+        assert body["data"][0]["bb_upper"] == 594.0
 
 
 # ---------------------------------------------------------------------------

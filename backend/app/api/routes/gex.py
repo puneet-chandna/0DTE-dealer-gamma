@@ -127,6 +127,19 @@ async def _get_latest_persisted_snapshot(
     )
 
 
+async def _get_demo_anchor_snapshot(
+    *,
+    symbol: str,
+    provider: str,
+) -> Optional[GEXSnapshot]:
+    """Return the latest persisted snapshot to shape synthetic demo data."""
+    return await _get_latest_persisted_snapshot(
+        symbol=symbol,
+        provider=provider,
+        prefer_replay=False,
+    )
+
+
 def _serialize_persisted_snapshot(snapshot: GEXSnapshot, *, provider: str) -> dict:
     """Mark persisted fallback payloads so the frontend can distinguish them."""
     payload = snapshot.model_dump()
@@ -209,7 +222,14 @@ async def get_current_gex(
             replay_payload.setdefault("metrics", {})
             replay_payload["metrics"]["is_replay_data"] = 1.0
             return replay_payload
-        demo_snapshot = get_demo_data_service().get_current_snapshot(symbol=symbol)
+        anchor_snapshot = await _get_demo_anchor_snapshot(
+            symbol=symbol,
+            provider=active_provider,
+        )
+        demo_snapshot = get_demo_data_service().get_current_snapshot(
+            symbol=symbol,
+            anchor_snapshot=anchor_snapshot,
+        )
         replay_payload = demo_snapshot.model_dump()
         replay_payload["provider"] = active_provider
         return replay_payload
@@ -343,11 +363,16 @@ async def get_historical_gex(
             )
 
         if demo:
+            anchor_snapshot = await _get_demo_anchor_snapshot(
+                symbol=symbol,
+                provider=active_provider,
+            )
             snapshots = get_demo_data_service().get_historical_snapshots(
                 symbol=symbol,
                 start_date=start_date,
                 end_date=end_date,
                 interval=interval,
+                anchor_snapshot=anchor_snapshot,
             )
             return GEXHistorical(
                 data=snapshots[:100],
@@ -383,7 +408,14 @@ async def get_gex_by_strikes(
         )
         snapshot = await _get_replay_snapshot(symbol=symbol, provider=active_provider)
         if snapshot is None:
-            snapshot = get_demo_data_service().get_current_snapshot(symbol=symbol)
+            anchor_snapshot = await _get_demo_anchor_snapshot(
+                symbol=symbol,
+                provider=active_provider,
+            )
+            snapshot = get_demo_data_service().get_current_snapshot(
+                symbol=symbol,
+                anchor_snapshot=anchor_snapshot,
+            )
         sorted_strikes = sorted(snapshot.gex_by_strike.keys())
         sorted_values = [snapshot.gex_by_strike[strike] for strike in sorted_strikes]
         return GEXByStrike(
@@ -516,7 +548,14 @@ async def get_market_regime(
         )
         snapshot = await _get_replay_snapshot(symbol=symbol, provider=active_provider)
         if snapshot is None:
-            snapshot = get_demo_data_service().get_current_snapshot(symbol=symbol)
+            anchor_snapshot = await _get_demo_anchor_snapshot(
+                symbol=symbol,
+                provider=active_provider,
+            )
+            snapshot = get_demo_data_service().get_current_snapshot(
+                symbol=symbol,
+                anchor_snapshot=anchor_snapshot,
+            )
         regime, description, color = get_gex_calculator().determine_regime(snapshot.net_gex)
         return RegimeData(
             regime=regime,

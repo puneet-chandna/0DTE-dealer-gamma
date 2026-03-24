@@ -63,7 +63,13 @@ export function useDashboardData(): DashboardData {
   // WebSocket stream for real-time updates
   const wsStream = useGEXStream(demoModeEnabled, selectedProvider);
   const hasUsableRealtimeData = Boolean(
-    wsStream.isConnected && wsStream.data && !wsStream.data.is_mock && !wsStream.data.is_stale
+    wsStream.isConnected &&
+      wsStream.data &&
+      !wsStream.data.is_stale &&
+      (
+        !wsStream.data.is_mock ||
+        (demoModeEnabled && wsStream.data.is_demo)
+      )
   );
 
   // REST polling hooks (used as fallback and for initial data)

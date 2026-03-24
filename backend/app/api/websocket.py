@@ -247,7 +247,8 @@ async def _get_gex_update(
     )
 
     if demo:
-        replay_snapshots = await get_historical_data_service().get_historical_snapshots(
+        history_service = get_historical_data_service()
+        replay_snapshots = await history_service.get_historical_snapshots(
             provider=active_provider,
             symbol=symbol,
             start_date=datetime.now(ET).date(),
@@ -265,7 +266,14 @@ async def _get_gex_update(
                 is_replay=True,
             )
 
-        payload = get_demo_data_service().get_ws_update(symbol=symbol)
+        anchor_snapshot = await history_service.get_latest_snapshot(
+            provider=active_provider,
+            symbol=symbol,
+        )
+        payload = get_demo_data_service().get_ws_update(
+            symbol=symbol,
+            anchor_snapshot=anchor_snapshot,
+        )
         payload["provider"] = active_provider
         payload["is_replay"] = False
         return payload

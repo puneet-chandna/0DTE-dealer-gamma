@@ -78,10 +78,15 @@ class DemoDataService:
         self,
         symbol: str = "SPX",
         now: Optional[datetime] = None,
+        anchor_snapshot: Optional[GEXSnapshot] = None,
     ) -> GEXSnapshot:
         """Return the current synthetic snapshot for the active 5-second bucket."""
         normalized_now = self._normalize_now(now)
-        session = self._get_session(symbol, get_current_trading_date(normalized_now))
+        session = self._resolve_session(
+            symbol,
+            get_current_trading_date(normalized_now),
+            anchor_snapshot=anchor_snapshot,
+        )
         bucket_index = int(normalized_now.timestamp()) // WEBSOCKET_BUCKET_SECONDS
         row_index = bucket_index % len(session.gex_data)
         return self._snapshot_from_session_row(
@@ -97,14 +102,15 @@ class DemoDataService:
         start_date: date,
         end_date: date,
         interval: str = "1min",
+        anchor_snapshot: Optional[GEXSnapshot] = None,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Return aligned price and GEX data across the requested date range."""
         sessions = [
-            self._get_session(symbol, trading_date)
+            self._resolve_session(symbol, trading_date, anchor_snapshot=anchor_snapshot)
             for trading_date in self._iter_trading_dates(start_date, end_date)
         ]
         if not sessions:
-            sessions = [self._get_session(symbol, start_date)]
+            sessions = [self._resolve_session(symbol, start_date, anchor_snapshot=anchor_snapshot)]
 
         price_frames = [session.price_data for session in sessions]
         gex_frames = [session.gex_data for session in sessions]
@@ -127,13 +133,24 @@ class DemoDataService:
         start_date: date,
         end_date: date,
         interval: str,
+        anchor_snapshot: Optional[GEXSnapshot] = None,
     ) -> list[GEXSnapshot]:
         """Build historical snapshots for charts and replay views."""
-        _, gex_data = self.get_time_series(symbol, start_date, end_date, interval)
+        _, gex_data = self.get_time_series(
+            symbol,
+            start_date,
+            end_date,
+            interval,
+            anchor_snapshot=anchor_snapshot,
+        )
 
         snapshots: list[GEXSnapshot] = []
         for row_index, (timestamp, row) in enumerate(gex_data.iterrows()):
-            session = self._get_session(symbol, timestamp.astimezone(ET).date())
+            session = self._resolve_session(
+                symbol,
+                timestamp.astimezone(ET).date(),
+                anchor_snapshot=anchor_snapshot,
+            )
             intraday_index = self._session_row_index(timestamp)
             snapshots.append(
                 self._snapshot_from_session_row(
@@ -151,18 +168,29 @@ class DemoDataService:
         symbol: str,
         start_date: date,
         end_date: date,
+        anchor_snapshot: Optional[GEXSnapshot] = None,
     ):
         """Compute summary statistics from the coherent demo GEX history."""
-        _, gex_data = self.get_time_series(symbol, start_date, end_date)
+        _, gex_data = self.get_time_series(
+            symbol,
+            start_date,
+            end_date,
+            anchor_snapshot=anchor_snapshot,
+        )
         return VolatilityAnalyzer.compute_summary_statistics(gex_data)
 
     def get_iv_surface(
         self,
         symbol: str,
         now: Optional[datetime] = None,
+        anchor_snapshot: Optional[GEXSnapshot] = None,
     ) -> dict:
         """Generate a deterministic IV surface and skew from the active demo session."""
-        snapshot = self.get_current_snapshot(symbol=symbol, now=now)
+        snapshot = self.get_current_snapshot(
+            symbol=symbol,
+            now=now,
+            anchor_snapshot=anchor_snapshot,
+        )
         spot = snapshot.spot_price
         strikes = sorted(snapshot.gex_by_strike.keys())
         regime_shift = 0.03 if snapshot.net_gex < SHORT_GAMMA_THRESHOLD else 0.0
@@ -224,12 +252,19 @@ class DemoDataService:
         interval: str,
         indicators: list[str],
         now: Optional[datetime] = None,
+        anchor_snapshot: Optional[GEXSnapshot] = None,
     ) -> dict:
         """Generate deterministic indicator overlays from the same demo price series."""
         normalized_now = self._normalize_now(now)
         end_date = normalized_now.date()
         start_date = end_date - timedelta(days=PERIOD_TO_DAYS.get(period, 30) - 1)
-        price_data, _ = self.get_time_series(symbol, start_date, end_date, interval)
+        price_data, _ = self.get_time_series(
+            symbol,
+            start_date,
+            end_date,
+            interval,
+            anchor_snapshot=anchor_snapshot,
+        )
         indicator_list = [indicator.strip().upper() for indicator in indicators if indicator.strip()]
         if not indicator_list:
             indicator_list = ["ATR", "RSI", "BBANDS"]
@@ -270,9 +305,14 @@ class DemoDataService:
         self,
         symbol: str = "SPX",
         now: Optional[datetime] = None,
+        anchor_snapshot: Optional[GEXSnapshot] = None,
     ) -> dict:
         """Build the lightweight WebSocket update payload for demo mode."""
-        snapshot = self.get_current_snapshot(symbol=symbol, now=now)
+        snapshot = self.get_current_snapshot(
+            symbol=symbol,
+            now=now,
+            anchor_snapshot=anchor_snapshot,
+        )
         regime, _, _ = self._gex_calculator.determine_regime(snapshot.net_gex)
         return {
             "net_gex": snapshot.net_gex,
@@ -285,6 +325,80 @@ class DemoDataService:
             "is_demo": True,
             "is_stale": False,
         }
+
+    def _resolve_session(
+        self,
+        symbol: str,
+        trading_date: date,
+        anchor_snapshot: Optional[GEXSnapshot] = None,
+    ) -> DemoSession:
+        if anchor_snapshot is None:
+            return self._get_session(symbol, trading_date)
+
+        return self._get_anchored_session(
+            symbol,
+            trading_date,
+            round(float(anchor_snapshot.spot_price), 4),
+            round(float(anchor_snapshot.net_gex), 4),
+            round(float(anchor_snapshot.zero_gamma_level), 4),
+            round(float(anchor_snapshot.total_call_gex), 4),
+            round(float(anchor_snapshot.total_put_gex), 4),
+        )
+
+    @staticmethod
+    @lru_cache(maxsize=256)
+    def _get_anchored_session(
+        symbol: str,
+        trading_date: date,
+        anchor_spot_price: float,
+        anchor_net_gex: float,
+        anchor_zero_gamma_level: float,
+        anchor_total_call_gex: float,
+        anchor_total_put_gex: float,
+    ) -> DemoSession:
+        base_session = DemoDataService._get_session(symbol, trading_date)
+
+        price_data = base_session.price_data.copy()
+        price_shift = anchor_spot_price - float(price_data["close"].mean())
+        for column in ("open", "high", "low", "close"):
+            price_data[column] = price_data[column] + price_shift
+
+        gex_data = base_session.gex_data.copy()
+        gex_data["spot_price"] = gex_data["spot_price"] + (
+            anchor_spot_price - float(gex_data["spot_price"].mean())
+        )
+
+        gex_data["net_gex"] = np.clip(
+            gex_data["net_gex"] + (anchor_net_gex - float(gex_data["net_gex"].mean())),
+            -3.2e9,
+            2.4e9,
+        )
+
+        base_call_abs = np.abs(base_session.gex_data["total_call_gex"].to_numpy())
+        target_call_abs = max(abs(anchor_total_call_gex), abs(anchor_net_gex) * 0.55, 8.5e8)
+        call_scale = target_call_abs / max(float(base_call_abs.mean()), 1.0)
+        gex_data["total_call_gex"] = -np.maximum(base_call_abs * call_scale, 1.0)
+        gex_data["total_put_gex"] = gex_data["net_gex"] - gex_data["total_call_gex"]
+
+        zero_gamma_offset = (
+            base_session.gex_data["zero_gamma_level"] - base_session.gex_data["spot_price"]
+        )
+        target_offset = anchor_zero_gamma_level - anchor_spot_price
+        offset_shift = target_offset - float(zero_gamma_offset.mean())
+        gex_data["zero_gamma_level"] = gex_data["spot_price"] + zero_gamma_offset + offset_shift
+
+        if anchor_total_put_gex:
+            put_adjustment = anchor_total_put_gex - float(gex_data["total_put_gex"].mean())
+            gex_data["total_put_gex"] = gex_data["total_put_gex"] + put_adjustment
+            gex_data["total_call_gex"] = gex_data["net_gex"] - gex_data["total_put_gex"]
+
+        return DemoSession(
+            symbol=base_session.symbol,
+            trading_date=base_session.trading_date,
+            price_data=price_data,
+            gex_data=gex_data,
+            strike_step=base_session.strike_step,
+        )
 
     def _snapshot_from_session_row(
         self,

@@ -31,6 +31,7 @@ const websocketState = vi.hoisted(() => {
           timestamp: string;
           is_stale?: boolean;
           is_mock?: boolean;
+          is_demo?: boolean;
         }
       | null;
     isConnected: boolean;
@@ -294,6 +295,44 @@ describe('useDashboardData', () => {
     expect(result.current.isRealtime).toBe(false);
     expect(result.current.gexData).toEqual(liveCurrentGex);
     expect(result.current.regimeData).toEqual(liveRegime);
+  });
+
+  it('treats explicit demo websocket payloads as realtime even when they are marked mock', async () => {
+    storeState.state = {
+      ...storeState.state,
+      demoModeEnabled: true,
+    };
+    websocketState.stream = {
+      ...websocketState.createStream(),
+      data: {
+        ...websocketState.createStream().data!,
+        is_mock: true,
+        is_demo: true,
+      },
+    };
+
+    vi.mocked(gexAPI.getCurrentGEX).mockResolvedValue(liveCurrentGex);
+    vi.mocked(gexAPI.getCurrentRegime).mockResolvedValue(liveRegime);
+    vi.mocked(gexAPI.getGEXByStrikes).mockResolvedValue(liveStrikes);
+
+    const { result } = renderHook(() => useDashboardData(), {
+      wrapper: createWrapper(createQueryClient()),
+    });
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false);
+    });
+
+    expect(result.current.isRealtime).toBe(true);
+    expect(result.current.gexData).toMatchObject({
+      net_gex: websocketState.stream.data?.net_gex,
+      spot_price: websocketState.stream.data?.spot_price,
+      zero_gamma_level: websocketState.stream.data?.zero_gamma_level,
+    });
+    expect(result.current.regimeData).toMatchObject({
+      regime: websocketState.stream.data?.regime,
+      net_gex: websocketState.stream.data?.net_gex,
+    });
   });
 
   it('marks realtime data stale after the freshness threshold elapses', async () => {

@@ -30,7 +30,14 @@ function DashboardHeaderComponent({
   lastUpdate,
   onRefresh,
 }: DashboardHeaderProps) {
-  const { isDarkMode, toggleDarkMode, autoRefreshEnabled, setAutoRefresh } =
+  const {
+    isDarkMode,
+    toggleDarkMode,
+    autoRefreshEnabled,
+    setAutoRefresh,
+    demoModeEnabled,
+    toggleDemoMode,
+  } =
     useUIStore();
 
   return (
@@ -99,6 +106,20 @@ function DashboardHeaderComponent({
       {/* Right: Controls */}
       <div className="flex items-center gap-2">
         <ProviderSelector />
+
+        <button
+          type="button"
+          onClick={toggleDemoMode}
+          className={cn(
+            'rounded-md px-2.5 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] transition-colors',
+            demoModeEnabled
+              ? 'border border-amber-500/30 bg-amber-500/15 text-amber-300'
+              : 'border border-zinc-700 bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-zinc-200'
+          )}
+          title="Toggle coherent demo mode across the app"
+        >
+          Demo
+        </button>
 
         {/* Auto-refresh toggle */}
         <button

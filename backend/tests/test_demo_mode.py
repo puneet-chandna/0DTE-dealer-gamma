@@ -2,12 +2,14 @@
 
 from datetime import date, datetime
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from zoneinfo import ZoneInfo
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
+from app.models.schemas import GEXSnapshot
 
 client = TestClient(app)
 ET = ZoneInfo("America/New_York")
@@ -31,6 +33,26 @@ class _FailingYFinance:
         return _FailingTicker()
 
 
+def _build_snapshot(
+    *,
+    spot_price: float,
+    net_gex: float,
+    zero_gamma_level: float,
+    timestamp: datetime | None = None,
+) -> GEXSnapshot:
+    return GEXSnapshot(
+        timestamp=timestamp or datetime(2026, 3, 25, 10, 30, tzinfo=ET),
+        spot_price=spot_price,
+        total_call_gex=-abs(net_gex) - 2.5e8,
+        total_put_gex=2.5e8,
+        net_gex=net_gex,
+        zero_gamma_level=zero_gamma_level,
+        gex_by_strike={float(round(spot_price)): net_gex / 4},
+        dominant_strike=float(round(spot_price)),
+        metrics={"capture_quality": 0.99},
+    )
+
+
 def test_current_gex_demo_mode_skips_live_provider(monkeypatch):
     """Demo current GEX should not hit the live provider path."""
     import app.api.routes.gex as gex_routes
@@ -47,6 +69,47 @@ def test_current_gex_demo_mode_skips_live_provider(monkeypatch):
     )
     assert "net_gex" in data
     assert "gex_by_strike" in data
+
+
+def test_current_gex_demo_mode_shapes_synthetic_fallback_from_latest_snapshot(monkeypatch):
+    """Demo current GEX should anchor synthetic fallback to the latest persisted snapshot."""
+    import app.api.routes.gex as gex_routes
+
+    anchor_snapshot = _build_snapshot(
+        spot_price=6030.0,
+        net_gex=-8.2e8,
+        zero_gamma_level=6021.5,
+    )
+    anchored_demo_snapshot = _build_snapshot(
+        spot_price=6028.0,
+        net_gex=-7.9e8,
+        zero_gamma_level=6020.0,
+    )
+
+    class _AnchoredDemoService:
+        def get_current_snapshot(self, symbol, now=None, *, anchor_snapshot):
+            assert symbol == "SPX"
+            assert anchor_snapshot.spot_price == 6030.0
+            return anchored_demo_snapshot
+
+    monkeypatch.setattr(gex_routes, "_get_replay_snapshot", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        gex_routes,
+        "_get_latest_persisted_snapshot",
+        AsyncMock(return_value=anchor_snapshot),
+    )
+    monkeypatch.setattr(gex_routes, "get_demo_data_service", lambda: _AnchoredDemoService())
+
+    response = client.get(
+        "/api/gex/current",
+        params={"demo": "true", "provider": "yfinance", "symbol": "SPX"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["spot_price"] == 6028.0
+    assert data["zero_gamma_level"] == 6020.0
+    assert data["net_gex"] == -7.9e8
 
 
 def test_demo_analytics_endpoints_skip_live_market_calls(monkeypatch):
@@ -88,6 +151,62 @@ def test_demo_websocket_identifies_demo_stream(monkeypatch):
     assert connection_data["data"]["mode"] == "demo"
     assert update["type"] == "gex_update"
     assert update["data"]["is_demo"] is True
+
+
+@pytest.mark.asyncio
+async def test_demo_websocket_shapes_synthetic_fallback_from_latest_snapshot(monkeypatch):
+    """Demo WebSocket fallback should anchor synthetic updates to the latest persisted snapshot."""
+    import app.api.websocket as websocket_routes
+    from app.config import Settings
+
+    anchor_snapshot = _build_snapshot(
+        spot_price=6012.0,
+        net_gex=-6.7e8,
+        zero_gamma_level=6005.0,
+    )
+
+    class _AnchoredDemoService:
+        def get_ws_update(self, symbol="SPX", now=None, *, anchor_snapshot):
+            assert symbol == "SPX"
+            assert anchor_snapshot.spot_price == 6012.0
+            return {
+                "net_gex": -6.5e8,
+                "net_gex_billions": -0.65,
+                "zero_gamma_level": 6004.0,
+                "spot_price": 6010.0,
+                "regime": "neutral",
+                "timestamp": "2026-03-25T10:30:00-04:00",
+                "is_mock": True,
+                "is_demo": True,
+                "is_stale": False,
+            }
+
+    history_service = SimpleNamespace(
+        get_historical_snapshots=AsyncMock(return_value=[]),
+        get_latest_snapshot=AsyncMock(return_value=anchor_snapshot),
+    )
+
+    monkeypatch.setattr(
+        websocket_routes,
+        "get_historical_data_service",
+        lambda: history_service,
+    )
+    monkeypatch.setattr(
+        websocket_routes,
+        "get_demo_data_service",
+        lambda: _AnchoredDemoService(),
+    )
+
+    payload = await websocket_routes._get_gex_update(
+        Settings(data_provider="yfinance"),
+        demo=True,
+        symbol="SPX",
+        provider="yfinance",
+    )
+
+    assert payload["spot_price"] == 6010.0
+    assert payload["zero_gamma_level"] == 6004.0
+    assert payload["is_demo"] is True
 
 
 def test_websocket_rejects_unsupported_symbol():

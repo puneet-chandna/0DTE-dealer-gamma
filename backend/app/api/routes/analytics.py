@@ -37,6 +37,21 @@ router = APIRouter()
 ET = ZoneInfo("America/New_York")
 
 
+def _technical_indicator_payload_has_values(payload: Optional[dict]) -> bool:
+    """Return True when at least one requested indicator has a usable numeric value."""
+    if payload is None:
+        return False
+
+    for point in payload.get("data", []):
+        if any(
+            point.get(field) is not None
+            for field in ("atr", "rsi", "bb_upper", "bb_mid", "bb_lower")
+        ):
+            return True
+
+    return False
+
+
 @router.get("/gex-volatility", response_model=AnalyticsResult)
 async def analyze_gex_volatility(
     start_date: date = Query(..., description="Start date for analysis"),
@@ -373,7 +388,14 @@ async def get_iv_surface(
             return persisted_surface
 
         if demo:
-            return get_demo_data_service().get_iv_surface(symbol=symbol)
+            anchor_snapshot = await get_historical_data_service().get_latest_snapshot(
+                provider=active_provider,
+                symbol=symbol,
+            )
+            return get_demo_data_service().get_iv_surface(
+                symbol=symbol,
+                anchor_snapshot=anchor_snapshot,
+            )
 
         data_client = get_data_client(active_provider)
 
@@ -484,15 +506,22 @@ async def get_technical_indicators(
             indicators=indicator_list,
             prefer_replay=demo,
         )
-        if persisted_indicators is not None:
+        if persisted_indicators is not None and (
+            not demo or _technical_indicator_payload_has_values(persisted_indicators)
+        ):
             return persisted_indicators
 
         if demo:
+            anchor_snapshot = await get_historical_data_service().get_latest_snapshot(
+                provider=active_provider,
+                symbol=symbol,
+            )
             return get_demo_data_service().get_technical_indicators(
                 symbol=symbol,
                 period=period,
                 interval=interval,
                 indicators=indicator_list,
+                anchor_snapshot=anchor_snapshot,
             )
 
         import yfinance as yf
