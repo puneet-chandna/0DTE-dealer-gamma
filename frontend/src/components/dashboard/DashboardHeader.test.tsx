@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DashboardHeader } from './DashboardHeader';
@@ -19,7 +20,7 @@ vi.mock('@/stores/uiStore', () => ({
 }));
 
 vi.mock('@/components/ui', () => ({
-  Badge: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  Badge: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   ConnectionStatus: () => <div>Connection Status</div>,
   ProviderSelector: () => <div>Provider Selector</div>,
 }));

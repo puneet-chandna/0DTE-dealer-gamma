@@ -326,6 +326,13 @@ class DemoDataService:
             "is_stale": False,
         }
 
+    @staticmethod
+    def _optional_rounded_anchor(value: Optional[float], *, digits: int = 4) -> Optional[float]:
+        """Convert snapshot metrics for anchoring; None stays None (no float(None))."""
+        if value is None:
+            return None
+        return round(float(value), digits)
+
     def _resolve_session(
         self,
         symbol: str,
@@ -338,11 +345,11 @@ class DemoDataService:
         return self._get_anchored_session(
             symbol,
             trading_date,
-            round(float(anchor_snapshot.spot_price), 4),
-            round(float(anchor_snapshot.net_gex), 4),
-            round(float(anchor_snapshot.zero_gamma_level), 4),
-            round(float(anchor_snapshot.total_call_gex), 4),
-            round(float(anchor_snapshot.total_put_gex), 4),
+            DemoDataService._optional_rounded_anchor(anchor_snapshot.spot_price),
+            DemoDataService._optional_rounded_anchor(anchor_snapshot.net_gex),
+            DemoDataService._optional_rounded_anchor(anchor_snapshot.zero_gamma_level),
+            DemoDataService._optional_rounded_anchor(anchor_snapshot.total_call_gex),
+            DemoDataService._optional_rounded_anchor(anchor_snapshot.total_put_gex),
         )
 
     @staticmethod
@@ -350,32 +357,37 @@ class DemoDataService:
     def _get_anchored_session(
         symbol: str,
         trading_date: date,
-        anchor_spot_price: float,
-        anchor_net_gex: float,
-        anchor_zero_gamma_level: float,
-        anchor_total_call_gex: float,
-        anchor_total_put_gex: float,
+        anchor_spot_price: Optional[float],
+        anchor_net_gex: Optional[float],
+        anchor_zero_gamma_level: Optional[float],
+        anchor_total_call_gex: Optional[float],
+        anchor_total_put_gex: Optional[float],
     ) -> DemoSession:
         base_session = DemoDataService._get_session(symbol, trading_date)
 
         price_data = base_session.price_data.copy()
-        price_shift = anchor_spot_price - float(price_data["close"].mean())
+        price_close_mean = float(price_data["close"].mean())
+        eff_spot = anchor_spot_price if anchor_spot_price is not None else price_close_mean
+        price_shift = eff_spot - price_close_mean
         for column in ("open", "high", "low", "close"):
             price_data[column] = price_data[column] + price_shift
 
         gex_data = base_session.gex_data.copy()
-        gex_data["spot_price"] = gex_data["spot_price"] + (
-            anchor_spot_price - float(gex_data["spot_price"].mean())
-        )
+        gex_spot_mean = float(gex_data["spot_price"].mean())
+        gex_data["spot_price"] = gex_data["spot_price"] + (eff_spot - gex_spot_mean)
 
+        net_mean = float(gex_data["net_gex"].mean())
+        eff_net = anchor_net_gex if anchor_net_gex is not None else net_mean
         gex_data["net_gex"] = np.clip(
-            gex_data["net_gex"] + (anchor_net_gex - float(gex_data["net_gex"].mean())),
+            gex_data["net_gex"] + (eff_net - net_mean),
             -3.2e9,
             2.4e9,
         )
 
         base_call_abs = np.abs(base_session.gex_data["total_call_gex"].to_numpy())
-        target_call_abs = max(abs(anchor_total_call_gex), abs(anchor_net_gex) * 0.55, 8.5e8)
+        call_mean_abs = float(base_call_abs.mean())
+        eff_call = anchor_total_call_gex if anchor_total_call_gex is not None else call_mean_abs
+        target_call_abs = max(abs(eff_call), abs(eff_net) * 0.55, 8.5e8)
         call_scale = target_call_abs / max(float(base_call_abs.mean()), 1.0)
         gex_data["total_call_gex"] = -np.maximum(base_call_abs * call_scale, 1.0)
         gex_data["total_put_gex"] = gex_data["net_gex"] - gex_data["total_call_gex"]
@@ -383,8 +395,11 @@ class DemoDataService:
         zero_gamma_offset = (
             base_session.gex_data["zero_gamma_level"] - base_session.gex_data["spot_price"]
         )
-        target_offset = anchor_zero_gamma_level - anchor_spot_price
-        offset_shift = target_offset - float(zero_gamma_offset.mean())
+        if anchor_zero_gamma_level is not None:
+            target_offset = anchor_zero_gamma_level - eff_spot
+            offset_shift = target_offset - float(zero_gamma_offset.mean())
+        else:
+            offset_shift = 0.0
         gex_data["zero_gamma_level"] = gex_data["spot_price"] + zero_gamma_offset + offset_shift
 
         if anchor_total_put_gex is not None:

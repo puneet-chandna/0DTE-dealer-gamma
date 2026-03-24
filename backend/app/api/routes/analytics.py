@@ -72,10 +72,10 @@ def _build_technical_indicator_response(
         if "rsi" in result_df.columns:
             val = row["rsi"]
             point["rsi"] = None if pd.isna(val) else float(val)
-        if "bb_upper" in result_df.columns:
-            point["bb_upper"] = None if pd.isna(row["bb_upper"]) else float(row["bb_upper"])
-            point["bb_mid"] = None if pd.isna(row["bb_mid"]) else float(row["bb_mid"])
-            point["bb_lower"] = None if pd.isna(row["bb_lower"]) else float(row["bb_lower"])
+        for bb_key in ("bb_upper", "bb_mid", "bb_lower"):
+            if bb_key in result_df.columns:
+                val = row[bb_key]
+                point[bb_key] = None if pd.isna(val) else float(val)
         data.append(point)
 
     return {
