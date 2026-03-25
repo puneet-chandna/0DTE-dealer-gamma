@@ -18,6 +18,7 @@ export interface GEXSnapshot {
   gex_by_strike: Record<number, number>;
   dominant_strike: number;
   metrics: Record<string, number>;
+  advanced_analytics?: AdvancedAnalytics | null;
 }
 
 /**
@@ -111,6 +112,7 @@ export interface GEXUpdate {
   is_demo?: boolean;
   is_stale?: boolean;
   timestamp?: string;
+  advanced_analytics?: AdvancedAnalytics | null;
 }
 
 export type MarketStatusType = 'open' | 'pre_market' | 'after_hours' | 'closed_weekend';
@@ -295,4 +297,38 @@ export interface VectorBTBacktestResult {
   start_date: string;
   end_date: string;
   equity_curve: number[];
+}
+
+// ============================================================================
+// Advanced Analytics Types
+// ============================================================================
+
+/**
+ * Charm & Vanna hidden flow calculation result.
+ */
+export interface CharmVannaSnapshot {
+  charm_flow: number;
+  vanna_flow: number;
+  net_hidden_flow: number;
+  charm_by_strike: Record<number, number>;
+  vanna_by_strike: Record<number, number>;
+}
+
+/**
+ * Hawkes process order flow momentum state.
+ */
+export interface HawkesState {
+  call_intensity: number;
+  put_intensity: number;
+  net_toxicity: number;
+  squeeze_probability: number;
+}
+
+/**
+ * Combined advanced analytics from all three engines.
+ */
+export interface AdvancedAnalytics {
+  charm_vanna: CharmVannaSnapshot | null;
+  hawkes: HawkesState | null;
+  smoothed_net_gex: number | null;
 }

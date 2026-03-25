@@ -101,6 +101,10 @@ export function useDashboardData(): DashboardData {
         zero_gamma_level: wsStream.data.zero_gamma_level,
         spot_price: wsStream.data.spot_price,
         timestamp: wsStream.data.timestamp || new Date().toISOString(),
+        // Pass through advanced analytics from WebSocket
+        ...(wsStream.data.advanced_analytics && {
+          advanced_analytics: wsStream.data.advanced_analytics,
+        }),
         // Preserve other fields from cached data if available
         ...(currentGexCache && {
           total_call_gex: currentGexCache.total_call_gex,
@@ -154,6 +158,8 @@ export function useDashboardData(): DashboardData {
         gex_by_strike: polledGEX.data?.gex_by_strike ?? {},
         dominant_strike: polledGEX.data?.dominant_strike ?? 0,
         metrics: polledGEX.data?.metrics ?? {},
+        // Prefer WebSocket advanced analytics, fall back to polled
+        advanced_analytics: wsStream.data.advanced_analytics ?? polledGEX.data?.advanced_analytics ?? null,
       };
     }
     // Fall back to polled data

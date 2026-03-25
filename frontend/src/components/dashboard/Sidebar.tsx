@@ -6,7 +6,7 @@
 
 import { memo } from 'react';
 import Link from 'next/link';
-import { ChevronLeft, ChevronRight, Settings, Calendar, LineChart, FlaskConical } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Settings, Calendar, LineChart, FlaskConical, Waves } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatGEX, formatCurrency } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
@@ -125,6 +125,13 @@ function SidebarComponent({ gexData, regimeData, isLoading = false }: SidebarPro
             >
               <LineChart className="h-4 w-4" />
               Analytics
+            </Link>
+            <Link
+              href="/dealer-flows"
+              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-zinc-400 transition-colors hover:bg-zinc-800/60 hover:text-zinc-200"
+            >
+              <Waves className="h-4 w-4" />
+              Dealer Flows
             </Link>
             <Link
               href="/backtest"

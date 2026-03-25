@@ -11,3 +11,4 @@ export { IVSurfaceChart } from './IVSurfaceChart';
 export { IVSkewChart } from './IVSkewChart';
 export { TechnicalOverlayChart } from './TechnicalOverlayChart';
 export { EquityCurveChart } from './EquityCurveChart';
+export { MomentumGauge } from './MomentumGauge';

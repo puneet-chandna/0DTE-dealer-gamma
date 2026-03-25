@@ -18,11 +18,13 @@ import {
   LineChart,
   FlaskConical,
   Activity,
+  Waves,
 } from 'lucide-react';
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: BarChart3 },
   { href: '/analytics', label: 'Analytics', icon: LineChart },
+  { href: '/dealer-flows', label: 'Dealer Flows', icon: Waves },
   { href: '/backtest', label: 'Backtest', icon: FlaskConical },
 ] as const;
 

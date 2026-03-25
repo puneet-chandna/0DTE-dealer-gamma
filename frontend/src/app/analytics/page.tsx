@@ -109,133 +109,133 @@ export default function AnalyticsPage() {
         </div>
 
         {/* IV Surface + Skew Row */}
-        <div className="grid gap-6 lg:grid-cols-2 mb-6">
-          {/* IV Smile */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>IV Smile</CardTitle>
-                {ivData && (
-                  <span className="text-xs text-zinc-500">
-                    {ivData.count} strikes • SPX @ {ivData.spot_price?.toLocaleString()}
-                  </span>
-                )}
-              </div>
-            </CardHeader>
-            <CardContent>
-              <ChartErrorBoundary chartName="IV Surface">
-                {ivError ? (
-                  <div className="flex h-[300px] items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/50">
-                    <p className="text-sm text-rose-400">Failed to load IV data</p>
+            <div className="grid gap-6 lg:grid-cols-2 mb-6">
+              {/* IV Smile */}
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle>IV Smile</CardTitle>
+                    {ivData && (
+                      <span className="text-xs text-zinc-500">
+                        {ivData.count} strikes • SPX @ {ivData.spot_price?.toLocaleString()}
+                      </span>
+                    )}
                   </div>
-                ) : (
-                  <IVSurfaceChart
-                    data={ivData?.surface ?? []}
-                    spotPrice={ivData?.spot_price ?? 0}
-                    isLoading={ivLoading}
-                    height={300}
-                  />
-                )}
-              </ChartErrorBoundary>
-            </CardContent>
-          </Card>
+                </CardHeader>
+                <CardContent>
+                  <ChartErrorBoundary chartName="IV Surface">
+                    {ivError ? (
+                      <div className="flex h-[300px] items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/50">
+                        <p className="text-sm text-rose-400">Failed to load IV data</p>
+                      </div>
+                    ) : (
+                      <IVSurfaceChart
+                        data={ivData?.surface ?? []}
+                        spotPrice={ivData?.spot_price ?? 0}
+                        isLoading={ivLoading}
+                        height={300}
+                      />
+                    )}
+                  </ChartErrorBoundary>
+                </CardContent>
+              </Card>
 
-          {/* IV Skew */}
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>IV Skew</CardTitle>
-                <span className="text-xs text-zinc-500">Put IV − Call IV</span>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <ChartErrorBoundary chartName="IV Skew">
-                {ivError ? (
-                  <div className="flex h-[300px] items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/50">
-                    <p className="text-sm text-rose-400">Failed to load skew data</p>
+              {/* IV Skew */}
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle>IV Skew</CardTitle>
+                    <span className="text-xs text-zinc-500">Put IV − Call IV</span>
                   </div>
-                ) : (
-                  <IVSkewChart
-                    data={ivData?.skew ?? []}
-                    isLoading={ivLoading}
-                    height={300}
-                  />
-                )}
-              </ChartErrorBoundary>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Technical Indicators Section */}
-        <Card>
-          <CardHeader>
-            <div className="flex items-center justify-between">
-              <CardTitle>Technical Indicators</CardTitle>
-              <div className="flex items-center gap-3">
-                {/* Period selector */}
-                <div className="flex items-center gap-1">
-                  <span className="text-xs text-zinc-500 mr-1">Period</span>
-                  {PERIODS.map((p) => (
-                    <button
-                      key={p}
-                      onClick={() => setPeriod(p)}
-                      className={cn(
-                        'rounded px-2 py-1 text-xs font-medium transition-all',
-                        period === p
-                          ? 'bg-violet-500/15 text-violet-300 ring-1 ring-violet-500/25'
-                          : 'bg-zinc-800/60 text-zinc-400 hover:bg-zinc-800'
-                      )}
-                    >
-                      {p}
-                    </button>
-                  ))}
-                </div>
-
-                {/* Interval selector */}
-                <div className="flex items-center gap-1">
-                  <span className="text-xs text-zinc-500 mr-1">Int</span>
-                  {INTERVALS.map((i) => (
-                    <button
-                      key={i}
-                      onClick={() => setInterval(i)}
-                      className={cn(
-                        'rounded px-2 py-1 text-xs font-medium transition-all',
-                        interval === i
-                          ? 'bg-violet-500/15 text-violet-300 ring-1 ring-violet-500/25'
-                          : 'bg-zinc-800/60 text-zinc-400 hover:bg-zinc-800'
-                      )}
-                    >
-                      {i}
-                    </button>
-                  ))}
-                </div>
-              </div>
+                </CardHeader>
+                <CardContent>
+                  <ChartErrorBoundary chartName="IV Skew">
+                    {ivError ? (
+                      <div className="flex h-[300px] items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/50">
+                        <p className="text-sm text-rose-400">Failed to load skew data</p>
+                      </div>
+                    ) : (
+                      <IVSkewChart
+                        data={ivData?.skew ?? []}
+                        isLoading={ivLoading}
+                        height={300}
+                      />
+                    )}
+                  </ChartErrorBoundary>
+                </CardContent>
+              </Card>
             </div>
-          </CardHeader>
-          <CardContent>
-            <ChartErrorBoundary chartName="Technical Indicators">
-              {!technicalIndicatorsEnabled ? (
-                <div className="flex h-[400px] items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/50">
-                  <p className="text-sm text-amber-300">
-                    {providerFeatures.technicalIndicatorsUnavailableReason ??
-                      `Technical indicators are currently unavailable for ${providerDisplayName}.`}
-                  </p>
+
+            {/* Technical Indicators Section */}
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle>Technical Indicators</CardTitle>
+                  <div className="flex items-center gap-3">
+                    {/* Period selector */}
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-zinc-500 mr-1">Period</span>
+                      {PERIODS.map((p) => (
+                        <button
+                          key={p}
+                          onClick={() => setPeriod(p)}
+                          className={cn(
+                            'rounded px-2 py-1 text-xs font-medium transition-all',
+                            period === p
+                              ? 'bg-violet-500/15 text-violet-300 ring-1 ring-violet-500/25'
+                              : 'bg-zinc-800/60 text-zinc-400 hover:bg-zinc-800'
+                          )}
+                        >
+                          {p}
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Interval selector */}
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs text-zinc-500 mr-1">Int</span>
+                      {INTERVALS.map((i) => (
+                        <button
+                          key={i}
+                          onClick={() => setInterval(i)}
+                          className={cn(
+                            'rounded px-2 py-1 text-xs font-medium transition-all',
+                            interval === i
+                              ? 'bg-violet-500/15 text-violet-300 ring-1 ring-violet-500/25'
+                              : 'bg-zinc-800/60 text-zinc-400 hover:bg-zinc-800'
+                          )}
+                        >
+                          {i}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-              ) : techError ? (
-                <div className="flex h-[400px] items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/50">
-                  <p className="text-sm text-rose-400">Failed to load indicator data</p>
-                </div>
-              ) : (
-                <TechnicalOverlayChart
-                  data={techData?.data ?? []}
-                  indicators={techData?.indicators ?? ['ATR', 'RSI', 'BBANDS']}
-                  isLoading={techLoading}
-                  height={350}
-                />
-              )}
-            </ChartErrorBoundary>
-          </CardContent>
-        </Card>
+              </CardHeader>
+              <CardContent>
+                <ChartErrorBoundary chartName="Technical Indicators">
+                  {!technicalIndicatorsEnabled ? (
+                    <div className="flex h-[400px] items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/50">
+                      <p className="text-sm text-amber-300">
+                        {providerFeatures.technicalIndicatorsUnavailableReason ??
+                          `Technical indicators are currently unavailable for ${providerDisplayName}.`}
+                      </p>
+                    </div>
+                  ) : techError ? (
+                    <div className="flex h-[400px] items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/50">
+                      <p className="text-sm text-rose-400">Failed to load indicator data</p>
+                    </div>
+                  ) : (
+                    <TechnicalOverlayChart
+                      data={techData?.data ?? []}
+                      indicators={techData?.indicators ?? ['ATR', 'RSI', 'BBANDS']}
+                      isLoading={techLoading}
+                      height={350}
+                    />
+                  )}
+                </ChartErrorBoundary>
+              </CardContent>
+            </Card>
 
         {/* Footer */}
         <div className="mt-8 text-center">
