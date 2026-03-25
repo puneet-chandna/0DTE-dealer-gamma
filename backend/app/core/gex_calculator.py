@@ -25,7 +25,8 @@ from app.core.constants import (
     LONG_GAMMA_THRESHOLD,
 )
 from app.core.greeks import BlackScholesGreeks
-from app.models.schemas import GEXSnapshot
+from app.models.schemas import GEXSnapshot, CharmVannaSnapshot, AdvancedAnalytics
+from app.core.charm_vanna_calculator import CharmVannaCalculator
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +60,10 @@ class GEXCalculator:
         self._rate_provider = rate_provider
         self._static_rate = risk_free_rate
         self.dividend_yield = dividend_yield
+        self._charm_vanna = CharmVannaCalculator(
+            risk_free_rate=risk_free_rate,
+            dividend_yield=dividend_yield,
+        )
 
     @property
     def risk_free_rate(self) -> float:
@@ -160,6 +165,23 @@ class GEXCalculator:
             gex_by_strike=gex_by_strike,
         )
 
+        # Calculate Charm & Vanna hidden flows
+        try:
+            cv_result = self._charm_vanna.calculate_all(
+                options_df=df, spot_price=spot_price, T=T,
+            )
+            charm_vanna = CharmVannaSnapshot(
+                charm_flow=cv_result["charm_flow"],
+                vanna_flow=cv_result["vanna_flow"],
+                net_hidden_flow=cv_result["net_hidden_flow"],
+                charm_by_strike=cv_result["charm_by_strike"],
+                vanna_by_strike=cv_result["vanna_by_strike"],
+            )
+            advanced = AdvancedAnalytics(charm_vanna=charm_vanna)
+        except Exception as e:
+            logger.warning(f"Charm/Vanna calculation failed: {e}")
+            advanced = None
+
         return GEXSnapshot(
             timestamp=timestamp,
             spot_price=spot_price,
@@ -170,6 +192,7 @@ class GEXCalculator:
             gex_by_strike=gex_by_strike,
             dominant_strike=dominant_strike,
             metrics=metrics,
+            advanced_analytics=advanced,
         )
 
     def _normalize_expiration_timestamps(

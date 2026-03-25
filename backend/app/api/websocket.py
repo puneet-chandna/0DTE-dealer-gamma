@@ -146,6 +146,8 @@ def _build_ws_payload_from_snapshot(
         "is_replay": is_replay,
         "is_stale": False,
     }
+    if snapshot.advanced_analytics is not None:
+        payload["advanced_analytics"] = snapshot.advanced_analytics.model_dump()
     return payload
 
 
@@ -201,6 +203,8 @@ def _build_live_ws_payload_from_snapshot(snapshot, provider: str, *, is_stale: b
         if hasattr(snapshot.timestamp, "isoformat")
         else str(snapshot.timestamp),
     }
+    if hasattr(snapshot, "advanced_analytics") and snapshot.advanced_analytics is not None:
+        payload["advanced_analytics"] = snapshot.advanced_analytics.model_dump()
     return payload if _is_reasonable_gex_payload(payload) else _generate_mock_gex_data()
 
 
@@ -347,6 +351,8 @@ async def _get_gex_update(
             "provider": provider_name,
             "timestamp": snapshot.timestamp.isoformat(),
         }
+        if snapshot.advanced_analytics is not None:
+            payload["advanced_analytics"] = snapshot.advanced_analytics.model_dump()
         return payload if _is_reasonable_gex_payload(payload) else _generate_mock_gex_data()
 
     except Exception as e:

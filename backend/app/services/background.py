@@ -13,6 +13,9 @@ from app.config import get_settings
 from app.core.data_acquisition import is_market_open
 from app.core.provider_registry import ProviderRegistry, get_data_client
 from app.core.gex_calculator import GEXCalculator
+from app.core.hawkes_engine import HawkesEngine
+from app.core.kalman_filter import GEXKalmanFilter
+from app.models.schemas import HawkesStateModel, AdvancedAnalytics
 from app.services.cache import get_cache
 from app.db.session import dispose_engine
 from app.services.historical_data import WATCHLIST_SYMBOLS, get_historical_data_service
@@ -34,6 +37,8 @@ _shutdown_event: Optional[asyncio.Event] = None
 
 # Module-level instances
 _gex_calculator: Optional[GEXCalculator] = None
+_hawkes_engine: Optional[HawkesEngine] = None
+_kalman_filter: Optional[GEXKalmanFilter] = None
 
 
 def get_gex_calculator() -> GEXCalculator:
@@ -42,6 +47,22 @@ def get_gex_calculator() -> GEXCalculator:
     if _gex_calculator is None:
         _gex_calculator = GEXCalculator()
     return _gex_calculator
+
+
+def get_hawkes_engine() -> HawkesEngine:
+    """Get or create the Hawkes engine instance."""
+    global _hawkes_engine
+    if _hawkes_engine is None:
+        _hawkes_engine = HawkesEngine()
+    return _hawkes_engine
+
+
+def get_kalman_filter() -> GEXKalmanFilter:
+    """Get or create the Kalman filter instance."""
+    global _kalman_filter
+    if _kalman_filter is None:
+        _kalman_filter = GEXKalmanFilter()
+    return _kalman_filter
 
 
 async def periodic_gex_refresh() -> None:
@@ -88,6 +109,35 @@ async def periodic_gex_refresh() -> None:
                         spot_price=spot_price,
                         timestamp=timestamp,
                     )
+
+                # Enrich snapshot with Hawkes + Kalman
+                hawkes_engine = get_hawkes_engine()
+                kalman = get_kalman_filter()
+
+                try:
+                    hawkes_state = hawkes_engine.update(
+                        options_df, timestamp.timestamp()
+                    )
+                    smoothed_gex = kalman.update(snapshot.net_gex)
+
+                    # Build or extend advanced_analytics
+                    existing_aa = snapshot.advanced_analytics
+                    hawkes_model = HawkesStateModel(
+                        call_intensity=hawkes_state.call_intensity,
+                        put_intensity=hawkes_state.put_intensity,
+                        net_toxicity=hawkes_state.net_toxicity,
+                        squeeze_probability=hawkes_state.squeeze_probability,
+                    )
+                    if existing_aa is not None:
+                        existing_aa.hawkes = hawkes_model
+                        existing_aa.smoothed_net_gex = smoothed_gex
+                    else:
+                        snapshot.advanced_analytics = AdvancedAnalytics(
+                            hawkes=hawkes_model,
+                            smoothed_net_gex=smoothed_gex,
+                        )
+                except Exception as e:
+                    logger.warning(f"Advanced analytics enrichment failed: {e}")
 
                 # Cache the result
                 settings = get_settings()

@@ -28,6 +28,8 @@ class GreeksResult(NamedTuple):
     gamma: NDArray[np.float64]
     theta: NDArray[np.float64]
     vega: NDArray[np.float64]
+    charm: NDArray[np.float64]
+    vanna: NDArray[np.float64]
     d1: NDArray[np.float64]
     d2: NDArray[np.float64]
 
@@ -222,6 +224,91 @@ class BlackScholesGreeks:
         return vega
 
     @staticmethod
+    def charm(
+        S: NDArray[np.float64],
+        K: NDArray[np.float64],
+        T: NDArray[np.float64],
+        r: float,
+        sigma: NDArray[np.float64],
+        option_type: NDArray[np.str_],
+        q: float = SPX_DIVIDEND_YIELD,
+    ) -> NDArray[np.float64]:
+        """
+        Calculate Charm (∂Δ/∂t) - Delta decay over time - vectorized WITH dividend yield.
+
+        Charm measures how much Delta changes as time passes (all else equal).
+        Critical for 0DTE: dealers must rehedge just because the clock ticks.
+
+        Formula (call): Charm = -e^(-qT) × [N'(d1) × (2(r-q)T - d2σ√T) / (2Tσ√T)]
+                                + q × e^(-qT) × N(d1)
+        Formula (put):  Charm = -e^(-qT) × [N'(d1) × (2(r-q)T - d2σ√T) / (2Tσ√T)]
+                                - q × e^(-qT) × N(-d1)
+
+        Returns per-day Charm (divide by 365).
+        """
+        d1_val = BlackScholesGreeks.d1(S, K, T, r, q, sigma)
+        d2_val = BlackScholesGreeks.d2(S, K, T, r, q, sigma)
+        is_call = option_type == "call"
+
+        T_safe = np.maximum(T, 1e-10)
+        sigma_safe = np.maximum(sigma, 1e-10)
+        sqrt_T = np.sqrt(T_safe)
+        discount_q = np.exp(-q * T_safe)
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            pdf_d1 = norm.pdf(d1_val)
+
+            # Common term for both calls and puts
+            common = -discount_q * pdf_d1 * (
+                (2.0 * (r - q) * T_safe - d2_val * sigma_safe * sqrt_T)
+                / (2.0 * T_safe * sigma_safe * sqrt_T)
+            )
+
+            # Dividend adjustment differs by type
+            call_charm = common + q * discount_q * norm.cdf(d1_val)
+            put_charm = common - q * discount_q * norm.cdf(-d1_val)
+
+            charm = np.where(is_call, call_charm, put_charm) / 365  # Per day
+            charm = np.where(T <= 0, 0.0, charm)
+            charm = np.nan_to_num(charm, nan=0.0, posinf=0.0, neginf=0.0)
+
+        return charm
+
+    @staticmethod
+    def vanna(
+        S: NDArray[np.float64],
+        K: NDArray[np.float64],
+        T: NDArray[np.float64],
+        r: float,
+        sigma: NDArray[np.float64],
+        q: float = SPX_DIVIDEND_YIELD,
+    ) -> NDArray[np.float64]:
+        """
+        Calculate Vanna (∂Δ/∂σ = ∂Vega/∂S) - vectorized WITH dividend yield.
+
+        Vanna measures how much Delta changes when IV changes.
+        Critical for understanding hedging flows after IV crush/spike events.
+
+        Formula: Vanna = -e^(-qT) × N'(d1) × d2 / σ
+
+        Note: Vanna is the same for calls and puts (sign-agnostic on type,
+        but dealer positioning sign is applied by the calculator).
+        """
+        d1_val = BlackScholesGreeks.d1(S, K, T, r, q, sigma)
+        d2_val = BlackScholesGreeks.d2(S, K, T, r, q, sigma)
+
+        T_safe = np.maximum(T, 1e-10)
+        sigma_safe = np.maximum(sigma, 1e-10)
+        discount_q = np.exp(-q * T_safe)
+
+        with np.errstate(divide="ignore", invalid="ignore"):
+            vanna = -discount_q * norm.pdf(d1_val) * d2_val / sigma_safe
+            vanna = np.where(T <= 0, 0.0, vanna)
+            vanna = np.nan_to_num(vanna, nan=0.0, posinf=0.0, neginf=0.0)
+
+        return vanna
+
+    @staticmethod
     def theta(
         S: NDArray[np.float64],
         K: NDArray[np.float64],
@@ -331,11 +418,29 @@ class BlackScholesGreeks:
         theta = np.where(T <= 0, 0.0, theta)
         theta = np.nan_to_num(theta, nan=0.0)
 
+        # Charm (∂Δ/∂t)
+        common_charm = -discount_q * pdf_d1 * (
+            (2.0 * (r - q) * T_safe - d2 * sigma_safe * sqrt_T)
+            / (2.0 * T_safe * sigma_safe * sqrt_T)
+        )
+        call_charm = common_charm + q * discount_q * norm.cdf(d1)
+        put_charm = common_charm - q * discount_q * norm.cdf(-d1)
+        charm = np.where(is_call, call_charm, put_charm) / 365
+        charm = np.where(T <= 0, 0.0, charm)
+        charm = np.nan_to_num(charm, nan=0.0, posinf=0.0, neginf=0.0)
+
+        # Vanna (∂Δ/∂σ) — same for calls and puts
+        vanna = -discount_q * pdf_d1 * d2 / sigma_safe
+        vanna = np.where(T <= 0, 0.0, vanna)
+        vanna = np.nan_to_num(vanna, nan=0.0, posinf=0.0, neginf=0.0)
+
         return GreeksResult(
             delta=delta,
             gamma=gamma,
             theta=theta,
             vega=vega,
+            charm=charm,
+            vanna=vanna,
             d1=d1,
             d2=d2,
         )

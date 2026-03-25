@@ -31,6 +31,9 @@ from app.core.rate_provider import RiskFreeRateProvider, get_rate_provider
 from app.core.vollib_bridge import VolLibBridge
 from app.core.technical_indicators import TechnicalIndicatorEngine
 from app.core.vectorbt_backtester import VectorBTBacktester
+from app.core.charm_vanna_calculator import CharmVannaCalculator
+from app.core.hawkes_engine import HawkesEngine
+from app.core.kalman_filter import GEXKalmanFilter
 
 __all__ = [
     # Constants
@@ -68,4 +71,8 @@ __all__ = [
     "VolLibBridge",
     "TechnicalIndicatorEngine",
     "VectorBTBacktester",
+    # Advanced Analytics
+    "CharmVannaCalculator",
+    "HawkesEngine",
+    "GEXKalmanFilter",
 ]

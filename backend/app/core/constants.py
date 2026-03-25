@@ -49,3 +49,20 @@ GEX_CACHE_TTL: int = 5
 SPOT_CACHE_TTL: int = 1
 OPTIONS_CHAIN_CACHE_TTL: int = 30
 ANALYTICS_CACHE_TTL: int = 300  # 5 minutes
+
+# ============================================================================
+# Advanced Analytics Constants
+# ============================================================================
+
+# Hawkes Process parameters
+HAWKES_ALPHA: float = 0.1         # Jump impact per event (intensity increase)
+HAWKES_BETA: float = 0.5          # Exponential decay rate (higher = faster decay)
+HAWKES_VOLUME_THRESHOLD: int = 50 # Min ΔVolume to count as an "event"
+
+# Charm/Vanna defaults
+CHARM_TIME_ADVANCE_MINUTES: int = 30  # Simulate 30 min of time passing
+VANNA_IV_BUMP: float = -0.01         # -1% IV change scenario
+
+# Kalman Filter parameters
+KALMAN_PROCESS_NOISE: float = 1e-3    # Q: how much the true state can change per step
+KALMAN_MEASUREMENT_NOISE: float = 1e-1  # R: how noisy the measurements are

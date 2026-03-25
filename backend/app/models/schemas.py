@@ -90,6 +90,50 @@ class GEXSnapshot(BaseModel):
     gex_by_strike: Dict[float, float]  # Strike-level breakdown
     dominant_strike: float  # Strike with max |GEX|
     metrics: Dict[str, float] = Field(default_factory=dict)
+    advanced_analytics: Optional["AdvancedAnalytics"] = None
+
+
+class CharmVannaSnapshot(BaseModel):
+    """Charm & Vanna hidden flow calculation result."""
+
+    charm_flow: float = Field(
+        ..., description="Expected dealer hedging flow from time decay (dollars)"
+    )
+    vanna_flow: float = Field(
+        ..., description="Expected dealer hedging flow from IV change (dollars)"
+    )
+    net_hidden_flow: float = Field(
+        ..., description="Combined charm + vanna flow (dollars)"
+    )
+    charm_by_strike: Dict[float, float] = Field(default_factory=dict)
+    vanna_by_strike: Dict[float, float] = Field(default_factory=dict)
+
+
+class HawkesStateModel(BaseModel):
+    """Current state of the Hawkes order flow momentum process."""
+
+    call_intensity: float = Field(
+        ..., description="Self-exciting intensity of call order flow"
+    )
+    put_intensity: float = Field(
+        ..., description="Self-exciting intensity of put order flow"
+    )
+    net_toxicity: float = Field(
+        ..., description="call_intensity - put_intensity"
+    )
+    squeeze_probability: float = Field(
+        ..., description="Normalized 0-1 probability of a gamma squeeze"
+    )
+
+
+class AdvancedAnalytics(BaseModel):
+    """Combined advanced analytics from all three engines."""
+
+    charm_vanna: Optional[CharmVannaSnapshot] = None
+    hawkes: Optional[HawkesStateModel] = None
+    smoothed_net_gex: Optional[float] = Field(
+        None, description="Kalman-filtered net GEX value"
+    )
 
 
 class GEXHistorical(BaseModel):
