@@ -6,7 +6,7 @@
 
 'use client';
 
-import { memo, useEffect, useState } from 'react';
+import { memo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useMarketStatus } from '@/hooks/useMarketStatus';
@@ -41,7 +41,11 @@ function NavBarComponent() {
   const pathname = usePathname();
   const { demoModeEnabled, toggleDemoMode } = useUIStore();
   const { data: marketStatus } = useMarketStatus();
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const currentPath = pathname ?? '/';
+  const [mobileMenuState, setMobileMenuState] = useState(() => ({
+    isOpen: false,
+    path: currentPath,
+  }));
 
   const statusLabel = demoModeEnabled
     ? 'Demo'
@@ -55,10 +59,21 @@ function NavBarComponent() {
       ? 'bg-emerald-500'
       : 'bg-amber-400';
   const activeItem = navItems.find((item) => pathname === item.href || pathname?.startsWith(`${item.href}/`));
+  const mobileMenuOpen =
+    mobileMenuState.path === currentPath ? mobileMenuState.isOpen : false;
 
-  useEffect(() => {
-    setMobileMenuOpen(false);
-  }, [pathname]);
+  const closeMobileMenu = () =>
+    setMobileMenuState({
+      isOpen: false,
+      path: currentPath,
+    });
+
+  const toggleMobileMenu = () =>
+    setMobileMenuState((state) => ({
+      isOpen:
+        state.path === currentPath ? !state.isOpen : true,
+      path: currentPath,
+    }));
 
   const statusPill = (
     <div className="flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900/80 px-3 py-1.5">
@@ -142,7 +157,7 @@ function NavBarComponent() {
               aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
               aria-expanded={mobileMenuOpen}
               aria-controls="mobile-navigation"
-              onClick={() => setMobileMenuOpen((open) => !open)}
+              onClick={toggleMobileMenu}
               className="inline-flex items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/80 p-2 text-zinc-300 transition-colors hover:bg-zinc-800"
             >
               {mobileMenuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
@@ -183,7 +198,7 @@ function NavBarComponent() {
                     <Link
                       key={href}
                       href={href}
-                      onClick={() => setMobileMenuOpen(false)}
+                      onClick={closeMobileMenu}
                       className={cn(
                         'flex items-center gap-2 rounded-xl px-3 py-3 text-sm font-medium transition-all duration-200',
                         isActive
