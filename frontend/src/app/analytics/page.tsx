@@ -15,7 +15,7 @@
 
 import { useState } from 'react';
 import { NavBar } from '@/components/ui/NavBar';
-import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui';
+import { Card, CardHeader, CardContent, CardTitle, PageShell } from '@/components/ui';
 import { ChartErrorBoundary, IVSurfaceChart, IVSkewChart, TechnicalOverlayChart } from '@/components/charts';
 import { useIVSurface, useTechnicalIndicators, useRiskFreeRate } from '@/hooks/useAnalyticsData';
 import { cn } from '@/lib/utils';
@@ -60,9 +60,9 @@ export default function AnalyticsPage() {
     <div className="min-h-screen bg-zinc-950 text-zinc-50">
       <NavBar />
 
-      <main className="mx-auto max-w-7xl px-6 py-8">
+      <PageShell variant="standard">
         {/* Page Header */}
-        <div className="mb-8 flex items-center justify-between">
+        <div className="mb-8 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Analytics</h1>
             <p className="mt-1 text-sm text-zinc-400">
@@ -74,9 +74,9 @@ export default function AnalyticsPage() {
           </div>
 
           {/* Symbol Selector */}
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <span className="text-xs text-zinc-500">Symbol</span>
-            <div className="flex gap-1">
+            <div className="flex flex-wrap gap-1">
               {SYMBOLS.map((s) => (
                 <button
                   key={s}
@@ -96,7 +96,7 @@ export default function AnalyticsPage() {
             {/* Risk-free rate badge */}
             {rateData && (
               <div className={cn(
-                'ml-4 flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs',
+                'flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs sm:ml-2',
                 rateData.is_fallback
                   ? 'bg-amber-500/10 text-amber-400 ring-1 ring-amber-500/20'
                   : 'bg-emerald-500/10 text-emerald-400 ring-1 ring-emerald-500/20'
@@ -109,11 +109,11 @@ export default function AnalyticsPage() {
         </div>
 
         {/* IV Surface + Skew Row */}
-            <div className="grid gap-6 lg:grid-cols-2 mb-6">
+            <div className="mb-6 grid gap-6 xl:grid-cols-2">
               {/* IV Smile */}
               <Card>
                 <CardHeader>
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <CardTitle>IV Smile</CardTitle>
                     {ivData && (
                       <span className="text-xs text-zinc-500">
@@ -143,7 +143,7 @@ export default function AnalyticsPage() {
               {/* IV Skew */}
               <Card>
                 <CardHeader>
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <CardTitle>IV Skew</CardTitle>
                     <span className="text-xs text-zinc-500">Put IV − Call IV</span>
                   </div>
@@ -169,12 +169,12 @@ export default function AnalyticsPage() {
             {/* Technical Indicators Section */}
             <Card>
               <CardHeader>
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                   <CardTitle>Technical Indicators</CardTitle>
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
                     {/* Period selector */}
-                    <div className="flex items-center gap-1">
-                      <span className="text-xs text-zinc-500 mr-1">Period</span>
+                    <div className="flex flex-wrap items-center gap-1">
+                      <span className="mr-1 text-xs text-zinc-500">Period</span>
                       {PERIODS.map((p) => (
                         <button
                           key={p}
@@ -192,8 +192,8 @@ export default function AnalyticsPage() {
                     </div>
 
                     {/* Interval selector */}
-                    <div className="flex items-center gap-1">
-                      <span className="text-xs text-zinc-500 mr-1">Int</span>
+                    <div className="flex flex-wrap items-center gap-1">
+                      <span className="mr-1 text-xs text-zinc-500">Int</span>
                       {INTERVALS.map((i) => (
                         <button
                           key={i}
@@ -243,7 +243,7 @@ export default function AnalyticsPage() {
             IV computed via py_vollib • Technical indicators via pandas-ta • Risk-free rate: {rateData?.source ?? 'loading...'}
           </p>
         </div>
-      </main>
+      </PageShell>
     </div>
   );
 }

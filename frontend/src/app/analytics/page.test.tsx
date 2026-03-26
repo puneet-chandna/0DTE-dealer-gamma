@@ -21,6 +21,7 @@ vi.mock('@/components/ui', () => ({
   CardHeader: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   CardContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   CardTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
+  PageShell: ({ children }: { children: ReactNode }) => <main>{children}</main>,
 }));
 
 vi.mock('@/components/charts', () => ({

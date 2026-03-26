@@ -132,43 +132,62 @@ export default function DashboardPage() {
 
       {/* Stale Data Warning Banner */}
       {isStale && (
-        <div className="px-6 pt-4">
-          <StaleDataBanner
-            lastUpdateTime={lastUpdateTime}
-            staleThresholdMs={60000}
-          />
+        <div className="px-4 pt-4 sm:px-6 xl:px-8">
+          <div className="mx-auto w-full max-w-[1600px]">
+            <StaleDataBanner
+              lastUpdateTime={lastUpdateTime}
+              staleThresholdMs={60000}
+            />
+          </div>
         </div>
       )}
 
       {/* Regime Alert Banner */}
       {showRegimeBanner && regimeData && (
-        <div className="px-6 pt-4">
-          <AlertBanner
-            regime={regimeData.regime}
-            description={regimeData.description || regimeDescriptions[regimeData.regime]}
-            netGexBillions={regimeData.net_gex_billions}
-          />
+        <div className="px-4 pt-4 sm:px-6 xl:px-8">
+          <div className="mx-auto w-full max-w-[1600px]">
+            <AlertBanner
+              regime={regimeData.regime}
+              description={regimeData.description || regimeDescriptions[regimeData.regime]}
+              netGexBillions={regimeData.net_gex_billions}
+            />
+          </div>
         </div>
       )}
+
+      {/* Stacked Sidebar for tablet/mobile */}
+      <div className="px-4 pt-4 sm:px-6 xl:hidden">
+        <div className="mx-auto w-full max-w-[1600px]">
+          <Sidebar
+            layout="stack"
+            gexData={gexData}
+            regimeData={regimeData}
+            isLoading={isLoading}
+          />
+        </div>
+      </div>
 
       {/* Main Layout */}
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
-        <Sidebar
-          gexData={gexData}
-          regimeData={regimeData}
-          isLoading={isLoading}
-        />
+        <div className="hidden xl:flex">
+          <Sidebar
+            layout="rail"
+            gexData={gexData}
+            regimeData={regimeData}
+            isLoading={isLoading}
+          />
+        </div>
 
         {/* Main Content */}
-        <main className="flex-1 overflow-y-auto p-6">
-          <div className="mx-auto max-w-7xl space-y-6">
+        <main className="flex-1 overflow-y-auto p-4 sm:p-6">
+          <div className="mx-auto w-full max-w-[1600px] space-y-6">
             {/* GEX Bar Chart - Primary visualization */}
             <Card>
               <CardHeader>
-                <div className="flex items-center justify-between">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                   <CardTitle>GEX by Strike</CardTitle>
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-3">
                     {isRealtime && (
                       <span className="inline-flex items-center gap-1 rounded bg-emerald-900/50 px-2 py-0.5 text-xs text-emerald-300">
                         <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
@@ -197,12 +216,12 @@ export default function DashboardPage() {
             </Card>
 
             {/* Bottom Row: Time Series + Metrics */}
-            <div className="grid gap-6 lg:grid-cols-3">
+            <div className="grid gap-6 xl:grid-cols-3">
               {/* Time Series Chart */}
-              <div className="lg:col-span-2">
+              <div className="xl:col-span-2">
                 <Card>
                   <CardHeader>
-                    <div className="flex items-center justify-between">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                       <CardTitle>Intraday Net GEX</CardTitle>
                       {dataPointCount > 0 && (
                         <span className="text-xs text-zinc-500">

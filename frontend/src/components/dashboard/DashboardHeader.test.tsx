@@ -15,6 +15,26 @@ const storeState = vi.hoisted(() => ({
   },
 }));
 
+vi.mock('next/link', () => ({
+  default: ({
+    children,
+    href,
+    className,
+  }: {
+    children: ReactNode;
+    href: string;
+    className?: string;
+  }) => (
+    <a href={href} className={className}>
+      {children}
+    </a>
+  ),
+}));
+
+vi.mock('next/navigation', () => ({
+  usePathname: () => '/dashboard',
+}));
+
 vi.mock('@/stores/uiStore', () => ({
   useUIStore: () => storeState.state,
 }));
@@ -44,5 +64,14 @@ describe('DashboardHeader', () => {
     fireEvent.click(demoButton);
 
     expect(storeState.state.toggleDemoMode).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows cross-page navigation links in the top header', () => {
+    render(<DashboardHeader />);
+
+    expect(screen.getByRole('link', { name: /dashboard/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /analytics/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /dealer flows/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /backtest/i })).toBeInTheDocument();
   });
 });

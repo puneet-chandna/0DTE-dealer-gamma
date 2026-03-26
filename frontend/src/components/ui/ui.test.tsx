@@ -50,6 +50,16 @@ describe('Card Components', () => {
     const { container } = render(<Card className="custom-class">Content</Card>);
     expect(container.firstChild).toHaveClass('custom-class');
   });
+
+  it('uses responsive padding classes for card sections', () => {
+    const { container: headerContainer } = render(<CardHeader>Header</CardHeader>);
+    const { container: contentContainer } = render(<CardContent>Content</CardContent>);
+    const { container: footerContainer } = render(<CardFooter>Footer</CardFooter>);
+
+    expect(headerContainer.firstChild).toHaveClass('px-4', 'py-3', 'sm:px-5', 'sm:py-4');
+    expect(contentContainer.firstChild).toHaveClass('px-4', 'py-3', 'sm:px-5', 'sm:py-4');
+    expect(footerContainer.firstChild).toHaveClass('px-4', 'py-3', 'sm:px-5');
+  });
 });
 
 describe('Badge', () => {
@@ -258,4 +268,3 @@ describe('regimeDescriptions', () => {
     );
   });
 });
-

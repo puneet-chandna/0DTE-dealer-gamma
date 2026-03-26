@@ -36,7 +36,7 @@ export function CardHeader({ children, className }: CardHeaderProps) {
   return (
     <div
       className={cn(
-        'border-b border-zinc-800 px-5 py-4',
+        'border-b border-zinc-800 px-4 py-3 sm:px-5 sm:py-4',
         className
       )}
     >
@@ -52,7 +52,7 @@ interface CardContentProps {
 
 export function CardContent({ children, className }: CardContentProps) {
   return (
-    <div className={cn('px-5 py-4', className)}>
+    <div className={cn('px-4 py-3 sm:px-5 sm:py-4', className)}>
       {children}
     </div>
   );
@@ -67,7 +67,7 @@ export function CardFooter({ children, className }: CardFooterProps) {
   return (
     <div
       className={cn(
-        'border-t border-zinc-800 px-5 py-3',
+        'border-t border-zinc-800 px-4 py-3 sm:px-5',
         className
       )}
     >

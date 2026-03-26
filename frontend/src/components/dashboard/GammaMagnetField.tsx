@@ -134,7 +134,7 @@ function GammaMagnetFieldComponent({ data, isLoading }: GammaMagnetFieldProps) {
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle>
             Gamma Magnet Field
           </CardTitle>
@@ -399,7 +399,7 @@ function GammaMagnetFieldComponent({ data, isLoading }: GammaMagnetFieldProps) {
             </div>
 
             {/* Legend */}
-            <div className="flex items-center justify-center gap-6 text-[10px] text-zinc-500">
+            <div className="flex flex-wrap items-center justify-center gap-3 text-[10px] text-zinc-500 sm:gap-6">
               <div className="flex items-center gap-1.5">
                 <div className="h-2 w-2 rounded-full bg-cyan-500" />
                 <span>Attractor (Long γ)</span>
@@ -423,7 +423,7 @@ function GammaMagnetFieldComponent({ data, isLoading }: GammaMagnetFieldProps) {
               <p className="mb-2 text-[10px] font-medium uppercase tracking-wider text-zinc-500">
                 Strongest Fields
               </p>
-              <div className="grid grid-cols-5 gap-1 text-center">
+              <div className="grid grid-cols-2 gap-1 text-center sm:grid-cols-3 lg:grid-cols-5">
                 {topFields.map((f, i) => (
                   <div
                     key={i}
