@@ -5,8 +5,7 @@
 'use client';
 
 import { memo } from 'react';
-import Link from 'next/link';
-import { ChevronLeft, ChevronRight, Settings, Calendar, LineChart, FlaskConical, Waves } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Settings, Calendar } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatGEX, formatCurrency } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
@@ -114,36 +113,8 @@ function SidebarComponent({ gexData, regimeData, isLoading = false }: SidebarPro
             />
           </div>
 
-          {/* Navigation Links */}
-          <div className="mt-6 space-y-2">
-            <h3 className="text-xs font-medium uppercase tracking-wider text-zinc-500">
-              Pages
-            </h3>
-            <Link
-              href="/analytics"
-              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-zinc-400 transition-colors hover:bg-zinc-800/60 hover:text-zinc-200"
-            >
-              <LineChart className="h-4 w-4" />
-              Analytics
-            </Link>
-            <Link
-              href="/dealer-flows"
-              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-zinc-400 transition-colors hover:bg-zinc-800/60 hover:text-zinc-200"
-            >
-              <Waves className="h-4 w-4" />
-              Dealer Flows
-            </Link>
-            <Link
-              href="/backtest"
-              className="flex items-center gap-2 rounded-lg px-3 py-2 text-sm text-zinc-400 transition-colors hover:bg-zinc-800/60 hover:text-zinc-200"
-            >
-              <FlaskConical className="h-4 w-4" />
-              Backtest
-            </Link>
-          </div>
-
           {/* Settings */}
-          <div className="mt-8 space-y-3">
+          <div className="mt-6 space-y-3">
             <h3 className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
               <Settings className="h-3.5 w-3.5" />
               Settings
