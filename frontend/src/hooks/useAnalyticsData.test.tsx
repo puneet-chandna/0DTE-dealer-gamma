@@ -13,7 +13,7 @@ const storeState = vi.hoisted(() => ({
 }));
 
 const useQuerySpy = vi.hoisted(() =>
-  vi.fn((_options: unknown) => ({ data: undefined, isLoading: false }))
+  vi.fn(() => ({ data: undefined, isLoading: false }))
 );
 
 vi.mock('@tanstack/react-query', async () => {

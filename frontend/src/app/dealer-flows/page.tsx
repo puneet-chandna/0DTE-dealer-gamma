@@ -12,13 +12,13 @@
 
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo } from 'react';
 import { NavBar } from '@/components/ui/NavBar';
 import { HiddenFlowsPanel, GammaMagnetField, HedgingCascadeSimulator } from '@/components/dashboard';
 import { MomentumGauge, GammaDecayClock } from '@/components/charts';
 import { useDashboardData } from '@/hooks/useDashboardData';
 import { cn } from '@/lib/utils';
-import type { GEXSnapshot, CharmVannaSnapshot, HawkesState, RegimeType } from '@/types';
+import type { GEXSnapshot, CharmVannaSnapshot, HawkesState } from '@/types';
 
 // ============================================================================
 // Constants
@@ -275,12 +275,7 @@ function getBias(data: GEXSnapshot): { text: string; color: string } {
 export default function DealerFlowsPage() {
   const { gexData, isLoading } = useDashboardData();
   const [activeTab, setActiveTab] = useState<TabId>('magnetics');
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
-
-  // Track last data update
-  useEffect(() => {
-    if (gexData) setLastUpdated(new Date());
-  }, [gexData]);
+  const lastUpdated = gexData?.timestamp ? new Date(gexData.timestamp) : null;
 
   // Interpretations
   const magneticsInterp = useMemo(() => getMagneticsInterpretation(gexData), [gexData]);

@@ -231,6 +231,7 @@ function GammaMagnetFieldComponent({ data, isLoading }: GammaMagnetFieldProps) {
                   const cy = 100; // center line
                   const radius = Math.max(8, Math.min(40, Math.abs(f.normalizedGex) * 40));
                   const opacity = Math.max(0.15, Math.min(0.8, Math.abs(f.normalizedGex)));
+                  const pulseDuration = `${2 + (i % 4) * 0.35}s`;
 
                   return (
                     <g key={`field-${i}`}>
@@ -245,7 +246,7 @@ function GammaMagnetFieldComponent({ data, isLoading }: GammaMagnetFieldProps) {
                         <animate
                           attributeName="r"
                           values={`${radius};${radius * 1.15};${radius}`}
-                          dur={`${2 + Math.random()}s`}
+                          dur={pulseDuration}
                           repeatCount="indefinite"
                         />
                       </circle>
