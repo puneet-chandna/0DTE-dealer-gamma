@@ -16,22 +16,6 @@ const storeState = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('next/link', () => ({
-  default: ({
-    children,
-    href,
-    className,
-  }: {
-    children: ReactNode;
-    href: string;
-    className?: string;
-  }) => (
-    <a href={href} className={className}>
-      {children}
-    </a>
-  ),
-}));
-
 vi.mock('@/stores/uiStore', () => ({
   useUIStore: () => storeState.state,
 }));
@@ -94,7 +78,10 @@ describe('Sidebar layout variants', () => {
     expect(screen.getByText(/quick stats/i)).toBeInTheDocument();
     expect(container.firstChild).toHaveClass('w-full');
     expect(container.firstChild).not.toHaveClass('w-72');
+    expect(screen.getByText(/settings/i)).toBeInTheDocument();
     expect(screen.queryByText(/pages/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /analytics/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /dealer flows/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /backtest/i })).not.toBeInTheDocument();
   });
 });
