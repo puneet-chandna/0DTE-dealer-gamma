@@ -18,7 +18,7 @@
 
 import { useEffect, useRef, useState, useCallback, useReducer } from 'react';
 import { NavBar } from '@/components/ui/NavBar';
-import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui';
+import { Card, CardHeader, CardContent, CardTitle, PageShell } from '@/components/ui';
 import { ChartErrorBoundary, EquityCurveChart } from '@/components/charts';
 import { useVectorbtBacktest } from '@/hooks/useAnalyticsData';
 import { cn } from '@/lib/utils';
@@ -100,7 +100,7 @@ export default function BacktestPage() {
     <div className="min-h-screen bg-zinc-950 text-zinc-50">
       <NavBar />
 
-      <main className="mx-auto max-w-7xl px-6 py-8">
+      <PageShell variant="standard">
         {/* Page Header */}
         <div className="mb-8">
           <h1 className="text-2xl font-bold tracking-tight">Strategy Backtester</h1>
@@ -110,7 +110,7 @@ export default function BacktestPage() {
         </div>
 
         {/* Controls + Results Row */}
-        <div className="grid gap-6 lg:grid-cols-3 mb-6">
+        <div className="mb-6 grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
           {/* Controls Panel */}
           <Card>
             <CardHeader>
@@ -118,7 +118,7 @@ export default function BacktestPage() {
             </CardHeader>
             <CardContent className="space-y-5">
               {/* Date Range */}
-              <div className="grid gap-3 grid-cols-2">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
                   <label className="text-xs font-medium text-zinc-400 block mb-1.5">
                     Start Date
@@ -220,14 +220,14 @@ export default function BacktestPage() {
           </Card>
 
           {/* Results Summary */}
-          <div className="lg:col-span-2">
-            <Card>
+          <div>
+            <Card className="h-full">
               <CardHeader>
                 <CardTitle>Results Summary</CardTitle>
               </CardHeader>
               <CardContent>
                 {!result && !isRunning ? (
-                  <div className="flex h-[340px] items-center justify-center">
+                  <div className="flex min-h-[220px] items-center justify-center sm:min-h-[280px] lg:min-h-[340px]">
                     <div className="text-center">
                       <p className="text-sm text-zinc-500">Configure parameters and run a backtest</p>
                       <p className="mt-1 text-xs text-zinc-600">
@@ -236,11 +236,11 @@ export default function BacktestPage() {
                     </div>
                   </div>
                 ) : isRunning ? (
-                  <div className="flex h-[340px] items-center justify-center">
+                  <div className="flex min-h-[220px] items-center justify-center sm:min-h-[280px] lg:min-h-[340px]">
                     <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-600 border-t-violet-400" />
                   </div>
                 ) : result ? (
-                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
                     <MetricTile
                       label="Total Return"
                       value={formatPct(result.total_return)}
@@ -287,9 +287,9 @@ export default function BacktestPage() {
         {result && (
           <Card>
             <CardHeader>
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <CardTitle>Equity Curve</CardTitle>
-                <div className="flex items-center gap-3 text-xs text-zinc-500">
+                <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500">
                   <span>
                     {result.start_date.slice(0, 10)} → {result.end_date.slice(0, 10)}
                   </span>
@@ -320,7 +320,7 @@ export default function BacktestPage() {
             Backtesting engine: vectorbt • {demoModeEnabled ? 'Running coherent demo session data for reviews' : 'Using current project backtest inputs'}
           </p>
         </div>
-      </main>
+      </PageShell>
     </div>
   );
 }

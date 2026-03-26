@@ -63,8 +63,8 @@ function DashboardHeaderComponent({
 
   return (
     <header className="border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm">
-      <div className="flex flex-wrap items-center justify-between gap-4 px-6 py-4">
-      {/* Left: Logo and Title */}
+      <div className="mx-auto flex max-w-[1600px] flex-wrap items-start justify-between gap-4 px-4 py-4 sm:px-6 xl:flex-nowrap xl:items-center xl:px-8">
+        {/* Left: Logo and Title */}
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-3">
             {/* Logo */}
@@ -103,7 +103,7 @@ function DashboardHeaderComponent({
         </div>
 
         {/* Center: Connection Status */}
-        <div className="flex items-center gap-4">
+        <div className="flex flex-wrap items-center gap-3 sm:gap-4 xl:ml-auto">
           {/* Real-time vs Polling indicator */}
           {isRealtime ? (
             <Badge variant="live" pulse>
@@ -132,14 +132,12 @@ function DashboardHeaderComponent({
             </Badge>
           )}
 
-          {/* Detailed connection status */}
           <ConnectionStatus
             connectionState={connectionState}
             isRealtime={isRealtime}
             retryCount={retryCount}
           />
 
-          {/* Last update time */}
           {lastUpdate && (
             <span className="text-xs text-zinc-500">
               Updated: {lastUpdate}
@@ -148,7 +146,7 @@ function DashboardHeaderComponent({
         </div>
 
         {/* Right: Controls */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 xl:justify-end">
           <ProviderSelector />
 
           <button
@@ -165,7 +163,6 @@ function DashboardHeaderComponent({
             Demo
           </button>
 
-          {/* Auto-refresh toggle */}
           <button
             onClick={() => setAutoRefresh(!autoRefreshEnabled)}
             className={cn(
@@ -186,7 +183,6 @@ function DashboardHeaderComponent({
             {autoRefreshEnabled ? 'Auto Poll' : 'Manual Poll'}
           </button>
 
-          {/* Manual refresh */}
           {onRefresh && (
             <button
               onClick={onRefresh}
@@ -200,7 +196,6 @@ function DashboardHeaderComponent({
             </button>
           )}
 
-          {/* Theme toggle */}
           <button
             onClick={toggleDarkMode}
             className="rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-300"

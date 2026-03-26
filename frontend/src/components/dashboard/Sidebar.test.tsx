@@ -42,7 +42,7 @@ vi.mock('@/components/charts', () => ({
   RegimeIndicator: () => <div>Regime Indicator</div>,
 }));
 
-describe('Sidebar', () => {
+describe('Sidebar layout variants', () => {
   beforeEach(() => {
     storeState.state = {
       isSidebarOpen: true,
@@ -55,24 +55,29 @@ describe('Sidebar', () => {
     };
   });
 
-  it('keeps quick stats and settings but does not render page navigation links', () => {
-    render(
+  it('renders stack mode as a full-width section instead of a left rail', () => {
+    const { container } = render(
       <Sidebar
-        gexData={{
-          net_gex: 1500000000,
-          zero_gamma_level: 5600,
-          spot_price: 5550,
-          dominant_strike: 5575,
-        }}
-        regimeData={{
-          regime: 'long_gamma',
-          net_gex_billions: 1.5,
-          description: 'Dealers are long gamma',
-        }}
+        {...({
+          layout: 'stack',
+          gexData: {
+            net_gex: 1500000000,
+            zero_gamma_level: 5600,
+            spot_price: 5550,
+            dominant_strike: 5575,
+          },
+          regimeData: {
+            regime: 'long_gamma',
+            net_gex_billions: 1.5,
+            description: 'Dealers are long gamma',
+          },
+        } as never)}
       />
     );
 
     expect(screen.getByText(/quick stats/i)).toBeInTheDocument();
+    expect(container.firstChild).toHaveClass('w-full');
+    expect(container.firstChild).not.toHaveClass('w-72');
     expect(screen.getByText(/settings/i)).toBeInTheDocument();
     expect(screen.queryByText(/pages/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /analytics/i })).not.toBeInTheDocument();

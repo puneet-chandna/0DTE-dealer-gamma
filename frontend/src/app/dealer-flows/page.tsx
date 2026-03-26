@@ -14,6 +14,7 @@
 
 import { useState, useMemo } from 'react';
 import { NavBar } from '@/components/ui/NavBar';
+import { PageShell } from '@/components/ui/PageShell';
 import { HiddenFlowsPanel, GammaMagnetField, HedgingCascadeSimulator } from '@/components/dashboard';
 import { MomentumGauge, GammaDecayClock } from '@/components/charts';
 import { useDashboardData } from '@/hooks/useDashboardData';
@@ -297,9 +298,9 @@ export default function DealerFlowsPage() {
     <div className="min-h-screen bg-[#0a0a0f] text-zinc-50">
       <NavBar />
 
-      <main className="mx-auto max-w-[1400px] px-8 pb-16 pt-6">
+      <PageShell variant="wide" className="pb-16 pt-6">
         {/* ──────────── Page Header ──────────── */}
-        <div className="mb-6 flex items-end justify-between">
+        <div className="mb-6 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
           <div>
             <h1 className="text-xl font-semibold tracking-tight text-zinc-100">
               Dealer Flows
@@ -309,7 +310,7 @@ export default function DealerFlowsPage() {
             </p>
           </div>
           {/* Trust signals */}
-          <div className="flex items-center gap-4 text-[11px] text-zinc-600">
+          <div className="flex flex-wrap items-center gap-3 text-[11px] text-zinc-600">
             <span>Source: Yahoo Finance</span>
             {lastUpdated && (
               <span>
@@ -324,9 +325,9 @@ export default function DealerFlowsPage() {
         </div>
 
         {/* ──────────── Summary Bar ──────────── */}
-        <div className="mb-8 grid grid-cols-4 gap-px overflow-hidden rounded-lg border border-[#1e293b] bg-[#1e293b]">
+        <div className="mb-8 grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-[#1e293b] bg-[#1e293b] lg:grid-cols-4">
           {/* Price */}
-          <div className="bg-[#0f1117] px-5 py-4">
+          <div className="bg-[#0f1117] px-4 py-3 sm:px-5 sm:py-4">
             <p className="text-[10px] font-medium uppercase tracking-widest text-zinc-600">
               SPX Spot
             </p>
@@ -335,7 +336,7 @@ export default function DealerFlowsPage() {
             </p>
           </div>
           {/* Regime */}
-          <div className="bg-[#0f1117] px-5 py-4">
+          <div className="bg-[#0f1117] px-4 py-3 sm:px-5 sm:py-4">
             <p className="text-[10px] font-medium uppercase tracking-widest text-zinc-600">
               Regime
             </p>
@@ -344,7 +345,7 @@ export default function DealerFlowsPage() {
             </p>
           </div>
           {/* Bias */}
-          <div className="bg-[#0f1117] px-5 py-4">
+          <div className="bg-[#0f1117] px-4 py-3 sm:px-5 sm:py-4">
             <p className="text-[10px] font-medium uppercase tracking-widest text-zinc-600">
               Dealer Bias
             </p>
@@ -353,7 +354,7 @@ export default function DealerFlowsPage() {
             </p>
           </div>
           {/* Flip Point */}
-          <div className="bg-[#0f1117] px-5 py-4">
+          <div className="bg-[#0f1117] px-4 py-3 sm:px-5 sm:py-4">
             <p className="text-[10px] font-medium uppercase tracking-widest text-zinc-600">
               Gamma Flip
             </p>
@@ -364,14 +365,14 @@ export default function DealerFlowsPage() {
         </div>
 
         {/* ──────────── Tab Navigation ──────────── */}
-        <div className="mb-8 border-b border-[#1e293b]">
-          <div className="flex gap-0">
+        <div className="mb-8 overflow-x-auto border-b border-[#1e293b]">
+          <div className="flex min-w-max gap-1">
             {TABS.map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
                 className={cn(
-                  'relative px-5 py-3 text-[13px] font-medium tracking-tight transition-colors duration-150',
+                  'relative flex-none rounded-t-lg px-4 py-3 text-[13px] font-medium tracking-tight transition-colors duration-150 sm:px-5',
                   activeTab === tab.id
                     ? 'text-zinc-100'
                     : 'text-zinc-500 hover:text-zinc-300'
@@ -435,7 +436,7 @@ export default function DealerFlowsPage() {
             takeaway={hiddenInterp?.takeaway}
             isLoading={isLoading}
           >
-            <div className="grid gap-6 lg:grid-cols-2">
+            <div className="grid gap-6 xl:grid-cols-2">
               <HiddenFlowsPanel
                 data={gexData?.advanced_analytics?.charm_vanna}
                 isLoading={isLoading}
@@ -456,7 +457,7 @@ export default function DealerFlowsPage() {
             Past gamma regimes do not guarantee future price behavior.
           </p>
         </div>
-      </main>
+      </PageShell>
     </div>
   );
 }
@@ -492,12 +493,12 @@ function TabLayout({
   children,
 }: TabLayoutProps) {
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 sm:space-y-6">
       {/* ── Hero Insight ── */}
       {hero && (
         <div
           className={cn(
-            'rounded-md border-l-2 px-5 py-3',
+            'rounded-md border-l-2 px-4 py-3 sm:px-5',
             alertLevel === 'critical'
               ? 'border-l-rose-500 bg-rose-950/20'
               : alertLevel === 'danger'
@@ -521,14 +522,14 @@ function TabLayout({
       )}
 
       {/* ── Main Grid: Visualization + Intelligence Panel ── */}
-      <div className="grid gap-6 lg:grid-cols-5">
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1.65fr)_minmax(360px,1fr)]">
         {/* Visualization — 3 cols */}
-        <div className="lg:col-span-3">
+        <div>
           {children}
         </div>
 
         {/* Intelligence Panel — 2 cols */}
-        <div className="lg:col-span-2 space-y-4">
+        <div className="space-y-4">
           {/* Signal Breakdown */}
           {bullets && bullets.length > 0 && (
             <div className="overflow-hidden rounded-md border border-[#1e293b] bg-[#0f1117]">
@@ -569,7 +570,7 @@ function TabLayout({
                 {keyLevels.map((level, i) => (
                   <div
                     key={i}
-                    className="flex items-center justify-between px-4 py-2.5 transition-colors duration-100 hover:bg-white/[0.02]"
+                    className="flex flex-col gap-2 px-4 py-3 transition-colors duration-100 hover:bg-white/[0.02] sm:flex-row sm:items-center sm:justify-between"
                   >
                     <div className="flex items-center gap-2">
                       <div className={cn(
@@ -591,7 +592,7 @@ function TabLayout({
                         {level.label}
                       </span>
                     </div>
-                    <span className="text-[11px] tabular-nums text-zinc-500">{level.value}</span>
+                    <span className="text-[11px] tabular-nums text-zinc-500 sm:text-right">{level.value}</span>
                   </div>
                 ))}
               </div>
@@ -616,7 +617,7 @@ function TabLayout({
       {takeaway && (
         <div
           className={cn(
-            'rounded-md border px-5 py-3',
+            'rounded-md border px-4 py-3 sm:px-5',
             alertLevel === 'critical'
               ? 'border-rose-900/40 bg-rose-950/10'
               : alertLevel === 'danger'

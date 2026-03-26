@@ -18,3 +18,4 @@ export { ConnectionStatus, ConnectionStatusDot } from './ConnectionStatus';
 export { StaleDataBanner, StaleDataIndicator } from './StaleDataBanner';
 export { MarketStatusAlert } from './MarketStatusAlert';
 export { ProviderSelector } from './ProviderSelector';
+export { PageShell } from './PageShell';
