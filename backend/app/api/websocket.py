@@ -13,11 +13,13 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 
 from app.config import Settings, get_settings
+from app.core.advanced_analytics import enrich_snapshot_with_advanced_analytics
 from app.core.data_acquisition import is_market_open
 from app.core.demo_data import get_demo_data_service
 from app.core.snapshot_quality import annotate_snapshot_quality, is_snapshot_replay_eligible
 from app.core.provider_registry import ProviderRegistry, get_data_client
 from app.core.gex_calculator import GEXCalculator
+from app.core.provider_timeouts import get_live_fetch_timeout_seconds
 from app.services.cache import get_cache
 from app.services.historical_data import get_historical_data_service
 
@@ -30,7 +32,6 @@ ET = ZoneInfo("America/New_York")
 
 # WebSocket update interval (seconds)
 WS_UPDATE_INTERVAL = 5
-WS_LIVE_FETCH_TIMEOUT_SECONDS = 4
 SUPPORTED_SYMBOLS = {"SPX", "SPY", "QQQ", "IWM"}
 
 
@@ -362,7 +363,7 @@ async def _get_gex_update(
 
         options_df, spot_price = await asyncio.wait_for(
             data_client.get_options_chain_for_gex(underlying=symbol),
-            timeout=WS_LIVE_FETCH_TIMEOUT_SECONDS,
+            timeout=get_live_fetch_timeout_seconds(active_provider),
         )
         cache.update_spot_price(spot_price, symbol=symbol)
 
@@ -384,6 +385,12 @@ async def _get_gex_update(
             timestamp=datetime.now(ET),
         )
         snapshot = annotate_snapshot_quality(snapshot, options_df=options_df)
+        snapshot = enrich_snapshot_with_advanced_analytics(
+            snapshot,
+            options_df=options_df,
+            symbol=symbol,
+            provider=provider_name,
+        )
         snapshot = _coerce_gex_snapshot(snapshot)
 
         if not is_snapshot_replay_eligible(snapshot):

@@ -151,6 +151,21 @@ class TestGEXCalculator:
         # Zero gamma level should be between the strikes
         assert 5700.0 <= result.zero_gamma_level <= 5750.0
 
+    def test_zero_gamma_marks_below_range_when_no_crossing_exists(self, gex_calculator):
+        """Purely positive cumulative GEX should be marked as below-range."""
+        timestamp = datetime(2024, 1, 15, 12, 0, 0, tzinfo=ET)
+        df = pd.DataFrame([
+            {"strike": 5700.0, "type": "put", "open_interest": 1000, "implied_vol": 0.20, "expiration": "2024-01-15T16:00:00"},
+            {"strike": 5750.0, "type": "put", "open_interest": 1200, "implied_vol": 0.20, "expiration": "2024-01-15T16:00:00"},
+            {"strike": 5800.0, "type": "put", "open_interest": 1400, "implied_vol": 0.20, "expiration": "2024-01-15T16:00:00"},
+        ])
+
+        result = gex_calculator.calculate_gex_from_chain(df, 5750.0, timestamp)
+
+        assert result.zero_gamma_level == 5700.0
+        assert result.metrics["zero_gamma_crossing_found"] is False
+        assert result.metrics["zero_gamma_relation"] == "below_range"
+
     def test_dominant_strike(self, sample_options_df, gex_calculator):
         """Test dominant strike is the one with highest absolute GEX."""
         timestamp = datetime(2024, 1, 15, 12, 0, 0, tzinfo=ET)

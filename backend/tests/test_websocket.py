@@ -12,7 +12,9 @@ from fastapi.testclient import TestClient
 
 from app.api.websocket import ConnectionManager, _get_gex_update
 from app.config import Settings
+from app.core.advanced_analytics import reset_advanced_analytics_state
 from app.main import app
+from app.models.schemas import GEXSnapshot
 
 
 client = TestClient(app)
@@ -450,6 +452,64 @@ class TestGEXUpdateHelper:
         assert payload["spot_price"] == 6025.0
         assert payload["provider"] == "yfinance"
         mock_cache.set.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_live_websocket_payload_includes_hawkes_baseline_state(self):
+        """Fresh websocket fetches should expose Hawkes analytics even before any volume spike occurs."""
+        reset_advanced_analytics_state()
+        live_snapshot = GEXSnapshot(
+            timestamp=datetime(2026, 3, 27, 10, 30, tzinfo=ET),
+            spot_price=6015.0,
+            total_call_gex=-2.0e8,
+            total_put_gex=1.5e8,
+            net_gex=-5.0e7,
+            zero_gamma_level=6005.0,
+            gex_by_strike={6000.0: -5.0e7},
+            dominant_strike=6000.0,
+            metrics={
+                "capture_quality": 1.0,
+                "meaningful_strike_count": 2.0,
+                "is_replay_eligible": 1.0,
+            },
+            advanced_analytics=None,
+        )
+        options_df = pd.DataFrame(
+            {
+                "strike": [6000.0, 6000.0],
+                "type": ["call", "put"],
+                "volume": [80, 90],
+            }
+        )
+
+        mock_cache = MagicMock()
+        mock_cache.get_if_fresh.return_value = None
+        mock_client = AsyncMock()
+        mock_client.provider_name = "yfinance"
+        mock_client.get_options_chain_for_gex.return_value = (options_df, 6015.0)
+
+        mock_calculator = MagicMock()
+        mock_calculator.calculate_gex_from_chain.return_value = live_snapshot
+        mock_calculator.determine_regime.return_value = ("neutral", "Neutral", "yellow")
+
+        with patch("app.api.websocket.get_cache", return_value=mock_cache):
+            with patch("app.api.websocket.get_data_client", return_value=mock_client):
+                with patch("app.api.websocket.get_gex_calculator", return_value=mock_calculator):
+                    with patch(
+                        "app.api.websocket.annotate_snapshot_quality",
+                        side_effect=lambda snapshot, options_df: snapshot,
+                    ):
+                        payload = await _get_gex_update(
+                            Settings(data_provider="yfinance"),
+                            symbol="SPX",
+                        )
+
+        assert payload["advanced_analytics"]["hawkes"] == {
+            "call_intensity": 0.0,
+            "put_intensity": 0.0,
+            "net_toxicity": 0.0,
+            "squeeze_probability": 0.0,
+        }
+        assert payload["is_stale"] is False
 
 
 class TestConnectionManager:

@@ -3,6 +3,7 @@
  */
 
 import { type ClassValue, clsx } from 'clsx';
+import type { GEXSnapshot } from '@/types';
 
 /**
  * Merge class names with clsx (for conditional classes).
@@ -46,6 +47,52 @@ export function formatCurrency(value: number, decimals: number = 2): string {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   }).format(value);
+}
+
+function readZeroGammaRelation(snapshot?: Pick<GEXSnapshot, 'metrics'> | null) {
+  const relation = snapshot?.metrics?.zero_gamma_relation;
+  return relation === 'below_range' || relation === 'above_range' ? relation : null;
+}
+
+export function hasZeroGammaCrossing(snapshot?: Pick<GEXSnapshot, 'metrics'> | null): boolean {
+  const crossingMetric = snapshot?.metrics?.zero_gamma_crossing_found;
+
+  if (typeof crossingMetric === 'boolean') return crossingMetric;
+  if (typeof crossingMetric === 'number') return crossingMetric !== 0;
+  if (typeof crossingMetric === 'string') {
+    const normalized = crossingMetric.trim().toLowerCase();
+    if (['false', '0', 'no', 'off'].includes(normalized)) return false;
+    if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
+  }
+
+  return true;
+}
+
+export function formatZeroGammaValue(snapshot?: GEXSnapshot | null): string {
+  if (!snapshot) return '--';
+
+  if (!hasZeroGammaCrossing(snapshot)) {
+    return readZeroGammaRelation(snapshot) === 'above_range'
+      ? 'Above Range'
+      : 'Below Range';
+  }
+
+  return formatCurrency(snapshot.zero_gamma_level, 0);
+}
+
+export function formatZeroGammaStatus(snapshot?: GEXSnapshot | null): string {
+  if (!snapshot) return '--';
+
+  if (!hasZeroGammaCrossing(snapshot)) {
+    return readZeroGammaRelation(snapshot) === 'above_range'
+      ? 'Above sampled range'
+      : 'Below sampled range';
+  }
+
+  const distanceToZeroGamma = snapshot.zero_gamma_level - snapshot.spot_price;
+  const distancePercent = (distanceToZeroGamma / snapshot.spot_price) * 100;
+
+  return `${distanceToZeroGamma >= 0 ? '+' : ''}${formatCurrency(distanceToZeroGamma, 0)} (${distancePercent.toFixed(2)}%)`;
 }
 
 /**

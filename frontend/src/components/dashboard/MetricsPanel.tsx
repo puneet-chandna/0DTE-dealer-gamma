@@ -7,7 +7,13 @@
 import { memo } from 'react';
 import { TrendingUp, TrendingDown, Target, Crosshair } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { formatGEX, formatCurrency } from '@/lib/utils';
+import {
+  formatGEX,
+  formatCurrency,
+  formatZeroGammaStatus,
+  formatZeroGammaValue,
+  hasZeroGammaCrossing,
+} from '@/lib/utils';
 import { Card, CardHeader, CardContent, CardTitle, Skeleton } from '@/components/ui';
 import { useRiskFreeRate } from '@/hooks/useAnalyticsData';
 import type { GEXSnapshot } from '@/types';
@@ -86,11 +92,6 @@ function MetricsPanelInner({ data }: { data: GEXSnapshot }) {
   const putGexBillions = data.total_put_gex / 1e9;
   const netGexBillions = data.net_gex / 1e9;
 
-  // Distance from spot to zero gamma
-  const distanceToZeroGamma = data.zero_gamma_level - data.spot_price;
-  const distancePercent = (distanceToZeroGamma / data.spot_price) * 100;
-
-
   return (
     <Card>
       <CardHeader>
@@ -118,13 +119,13 @@ function MetricsPanelInner({ data }: { data: GEXSnapshot }) {
           />
           <MetricRow
             label="Zero Gamma"
-            value={formatCurrency(data.zero_gamma_level, 0)}
+            value={formatZeroGammaValue(data)}
             icon={<Crosshair className="h-3.5 w-3.5 text-violet-400" />}
           />
           <MetricRow
-            label="Distance to 0Γ"
-            value={`${distanceToZeroGamma >= 0 ? '+' : ''}${formatCurrency(distanceToZeroGamma, 0)} (${distancePercent.toFixed(2)}%)`}
-            color={distanceToZeroGamma >= 0 ? 'positive' : 'negative'}
+            label={hasZeroGammaCrossing(data) ? 'Distance to 0Γ' : '0Γ Status'}
+            value={formatZeroGammaStatus(data)}
+            color={hasZeroGammaCrossing(data) && data.zero_gamma_level >= data.spot_price ? 'positive' : 'negative'}
           />
           <MetricRow
             label="Dominant Strike"

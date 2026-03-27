@@ -9,7 +9,7 @@ GEX Formula: GEX_i = OI_i × Γ_i × 100 × S²
 
 import logging
 from datetime import datetime
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -147,7 +147,9 @@ class GEXCalculator:
         net_gex = total_call_gex + total_put_gex
 
         # Find zero gamma level
-        zero_gamma_level = self._find_zero_gamma_level(gex_by_strike, spot_price)
+        zero_gamma_level, zero_gamma_crossing_found, zero_gamma_relation = (
+            self._find_zero_gamma_level(gex_by_strike, spot_price)
+        )
 
         # Find dominant strike (highest absolute GEX)
         if gex_by_strike:
@@ -163,6 +165,8 @@ class GEXCalculator:
             spot_price=spot_price,
             zero_gamma_level=zero_gamma_level,
             gex_by_strike=gex_by_strike,
+            zero_gamma_crossing_found=zero_gamma_crossing_found,
+            zero_gamma_relation=zero_gamma_relation,
         )
 
         # Calculate Charm & Vanna hidden flows
@@ -290,31 +294,38 @@ class GEXCalculator:
         self,
         gex_by_strike: Dict[float, float],
         spot_price: float,
-    ) -> float:
+    ) -> Tuple[float, bool, Optional[str]]:
         """
         Find the Zero Gamma Level using linear interpolation.
 
         The ZGL is where the cumulative GEX curve crosses zero.
-        If no crossing is found, returns spot price.
+        If the curve never crosses zero, return the nearest boundary strike and
+        mark the relation so the UI can avoid presenting it as a true in-range
+        crossing.
         """
         if not gex_by_strike:
-            return spot_price
+            return spot_price, False, None
 
         # Sort strikes
         sorted_strikes = sorted(gex_by_strike.keys())
 
         if len(sorted_strikes) < 2:
-            return spot_price
+            return spot_price, False, None
 
         # Calculate cumulative GEX from lowest to highest strike
         gex_values = np.array([gex_by_strike[k] for k in sorted_strikes])
         cumulative_gex = np.cumsum(gex_values)
 
+        exact_crossings = np.where(cumulative_gex == 0)[0]
+        if exact_crossings.size > 0:
+            return sorted_strikes[int(exact_crossings[0])], True, "in_range"
+
         # Check if all positive or all negative (no crossing possible)
-        if np.all(cumulative_gex >= 0) or np.all(cumulative_gex <= 0):
-            # Return strike with GEX closest to zero
-            closest_idx = np.argmin(np.abs(cumulative_gex))
-            return sorted_strikes[closest_idx]
+        if np.all(cumulative_gex >= 0):
+            return sorted_strikes[0], False, "below_range"
+
+        if np.all(cumulative_gex <= 0):
+            return sorted_strikes[-1], False, "above_range"
 
         # Find zero crossing
         for i in range(len(cumulative_gex) - 1):
@@ -328,10 +339,13 @@ class GEXCalculator:
                     continue
 
                 zero_level = x1 - y1 * (x2 - x1) / (y2 - y1)
-                return float(zero_level)
+                return float(zero_level), True, "in_range"
 
-        # No crossing found (shouldn't reach here given above check)
-        return spot_price
+        # Fall back to the closest boundary if we somehow miss the crossing.
+        closest_idx = int(np.argmin(np.abs(cumulative_gex)))
+        closest_strike = sorted_strikes[closest_idx]
+        relation = "below_range" if closest_strike <= spot_price else "above_range"
+        return closest_strike, False, relation
 
     def _calculate_metrics(
         self,
@@ -341,7 +355,9 @@ class GEXCalculator:
         spot_price: float,
         zero_gamma_level: float,
         gex_by_strike: Dict[float, float],
-    ) -> Dict[str, float]:
+        zero_gamma_crossing_found: bool,
+        zero_gamma_relation: Optional[str],
+    ) -> Dict[str, float | bool | str]:
         """Calculate additional GEX metrics."""
         # Safe division for ratios
         if total_put_gex != 0:
@@ -366,6 +382,8 @@ class GEXCalculator:
             "zgl_distance_pct": zgl_distance_pct,
             "regime_code": regime_code,  # -1=short, 0=neutral, 1=long
             "num_strikes": float(len(gex_by_strike)),
+            "zero_gamma_crossing_found": zero_gamma_crossing_found,
+            "zero_gamma_relation": zero_gamma_relation or "unknown",
         }
 
     def determine_regime(

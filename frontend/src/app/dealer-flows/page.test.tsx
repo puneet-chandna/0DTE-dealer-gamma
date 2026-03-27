@@ -1,11 +1,38 @@
 import type { ReactNode } from 'react';
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 import DealerFlowsPage from './page';
 import type { DataProviderInfo, GEXSnapshot } from '@/types';
 
-const { mockUseUIStore, mockUseDashboardData } = vi.hoisted(() => ({
+const { mockUseUIStore, mockUseDashboardData, getDefaultDashboardData } = vi.hoisted(() => {
+  const getDefaultDashboardData = () => ({
+    gexData: {
+      timestamp: '2026-03-25T10:30:00.000Z',
+      spot_price: 6025,
+      total_call_gex: -2.0e9,
+      total_put_gex: 1.5e9,
+      net_gex: -5.0e8,
+      zero_gamma_level: 6015,
+      gex_by_strike: { 6000: 2.0e8, 6025: -3.0e8 },
+      dominant_strike: 6025,
+      metrics: {},
+      advanced_analytics: null,
+    } as GEXSnapshot,
+    regimeData: null,
+    strikesData: null,
+    isRealtime: false,
+    connectionState: 'connected' as const,
+    isLoading: false,
+    isStale: false,
+    error: null,
+    lastUpdateTime: Date.parse('2026-03-25T10:30:00.000Z'),
+    retryCount: 0,
+    reconnect: vi.fn(),
+    disconnect: vi.fn(),
+  });
+
+  return {
   mockUseUIStore: vi.fn(() => ({
     selectedProvider: 'tradier',
     availableProviders: [
@@ -22,32 +49,10 @@ const { mockUseUIStore, mockUseDashboardData } = vi.hoisted(() => ({
       },
     ] as DataProviderInfo[],
   })),
-  mockUseDashboardData: vi.fn(() => ({
-    gexData: {
-      timestamp: '2026-03-25T10:30:00.000Z',
-      spot_price: 6025,
-      total_call_gex: -2.0e9,
-      total_put_gex: 1.5e9,
-      net_gex: -5.0e8,
-      zero_gamma_level: 6015,
-      gex_by_strike: { 6000: 2.0e8, 6025: -3.0e8 },
-      dominant_strike: 6025,
-      metrics: {},
-      advanced_analytics: null,
-    } as GEXSnapshot,
-    regimeData: null,
-    strikesData: null,
-    isRealtime: false,
-    connectionState: 'connected',
-    isLoading: false,
-    isStale: false,
-    error: null,
-    lastUpdateTime: Date.parse('2026-03-25T10:30:00.000Z'),
-    retryCount: 0,
-    reconnect: vi.fn(),
-    disconnect: vi.fn(),
-  })),
-}));
+  mockUseDashboardData: vi.fn(getDefaultDashboardData),
+  getDefaultDashboardData,
+  };
+});
 
 vi.mock('@/stores/uiStore', () => ({
   useUIStore: mockUseUIStore,
@@ -81,5 +86,31 @@ describe('DealerFlowsPage source label', () => {
     render(<DealerFlowsPage />);
 
     expect(screen.getByText(/source: tradier/i)).toBeInTheDocument();
+  });
+
+  it('treats a zero Hawkes state as valid neutral flow data', () => {
+    const baseData = getDefaultDashboardData();
+    mockUseDashboardData.mockImplementation(() => ({
+      ...baseData,
+      gexData: {
+        ...baseData.gexData,
+        advanced_analytics: {
+          charm_vanna: null,
+          hawkes: {
+            call_intensity: 0,
+            put_intensity: 0,
+            net_toxicity: 0,
+            squeeze_probability: 0,
+          },
+          smoothed_net_gex: null,
+        },
+      } as GEXSnapshot,
+    }));
+
+    render(<DealerFlowsPage />);
+    fireEvent.click(screen.getByRole('button', { name: /hidden flows/i }));
+
+    expect(screen.getByText(/order flow momentum is balanced/i)).toBeInTheDocument();
+    mockUseDashboardData.mockImplementation(getDefaultDashboardData);
   });
 });

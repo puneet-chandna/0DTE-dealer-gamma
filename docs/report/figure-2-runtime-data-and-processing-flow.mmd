@@ -1,0 +1,81 @@
+flowchart TD
+    classDef source fill:#eef4ff,stroke:#4c6fb3,color:#1f2a44,stroke-width:1.4px;
+    classDef backend fill:#f6f9fd,stroke:#5f7596,color:#1f2a44,stroke-width:1.2px;
+    classDef frontend fill:#fdfefe,stroke:#6a8bbd,color:#20304d,stroke-width:1.2px;
+    classDef store fill:#f5f7fa,stroke:#6b7280,color:#1f2937,stroke-width:1.2px;
+    classDef fallback fill:#fff9eb,stroke:#d0a34b,color:#5b4618,stroke-width:1.2px;
+    classDef accent fill:#e9f0fb,stroke:#4f6f9a,color:#1f2a44,stroke-width:1.4px;
+
+    subgraph SRC["External Sources"]
+        PROVIDER["Provider Selection<br/>YFinance or Tradier"]
+        MARKET["Spot Price + Options Chain"]
+    end
+
+    subgraph RT["Real-Time Monitoring"]
+        BG["Background Refresh Services<br/>cache warmup + periodic refresh"]
+        GEX["GEX / Greeks Calculation"]
+        ENRICH["Hawkes + Kalman Enrichment"]
+        CACHE["In-Memory TTL Cache"]
+        REST["FastAPI REST Endpoints"]
+        WS["WebSocket Stream<br/>/ws/gex-stream"]
+        ANALYTICS["Analytics & Backtesting Engines"]
+    end
+
+    subgraph HP["Historical Persistence / Replay"]
+        HIST["Historical Persistence & Replay Service"]
+        PG[("PostgreSQL 18")]
+        DATA["Market Sessions<br/>GEX Snapshots<br/>Raw Options & IV Surface"]
+    end
+
+    subgraph FE["Frontend Consumption"]
+        INITIAL["Frontend Initial Load"]
+        WSHOOK["WebSocket Hook"]
+        RQSYNC["React Query Cache Sync"]
+        DASH["Dashboard Components"]
+        REPORTPAGES["Analytics and Backtest Pages"]
+        POLL["REST Polling Fallback"]
+    end
+
+    subgraph RES["Resilience Paths"]
+        LIVEFETCH["Live fetch on cache miss"]
+        REPLAY["Persisted replay / demo fallback"]
+    end
+
+    PROVIDER -->|"selected provider"| MARKET
+    MARKET -->|"options chain + spot"| BG
+    BG -->|"filtered contracts"| GEX
+    GEX -->|"GEX snapshot"| ENRICH
+    ENRICH -->|"fresh live snapshot"| CACHE
+    ENRICH -->|"persist eligible snapshot"| HIST
+    HIST --> PG
+    PG --> DATA
+
+    INITIAL -->|"REST requests"| REST
+    REST -->|"check cache"| CACHE
+    REST -->|"analytics or backtest requests"| ANALYTICS
+    ANALYTICS -->|"historical and replay queries"| HIST
+    ANALYTICS -.->|"provider-backed indicator fetches when needed"| PROVIDER
+    ANALYTICS -->|"summary, IV, technical, backtest payloads"| REPORTPAGES
+    CACHE -->|"current, strikes, and market payloads"| DASH
+
+    CACHE -->|"live snapshot"| WS
+    WS -->|"gex_update"| WSHOOK
+    WSHOOK -->|"sync latest snapshot"| RQSYNC
+    RQSYNC --> DASH
+
+    REST -->|"cache miss"| LIVEFETCH
+    LIVEFETCH --> PROVIDER
+    LIVEFETCH --> GEX
+    REST -.->|"provider unavailable or low-quality snapshot"| REPLAY
+    PG -.->|"replay-eligible session data"| REPLAY
+    REPLAY -->|"persisted or demo response"| DASH
+
+    WSHOOK -.->|"stream unavailable"| POLL
+    POLL -->|"REST fallback"| REST
+
+    class PROVIDER,MARKET source;
+    class BG,GEX,ENRICH,CACHE,REST,WS,ANALYTICS,HIST backend;
+    class INITIAL,WSHOOK,RQSYNC,DASH,REPORTPAGES,POLL frontend;
+    class PG,DATA store;
+    class LIVEFETCH,REPLAY,POLL fallback;
+    class CACHE,PG accent;

@@ -77,6 +77,12 @@ export function useDashboardData(): DashboardData {
   const polledRegime = useCurrentRegime();
   const polledStrikes = useGEXByStrikes();
 
+  const parseSnapshotTimestamp = useCallback((timestamp?: string | null) => {
+    if (!timestamp) return null;
+    const parsedTimestamp = Date.parse(timestamp);
+    return Number.isNaN(parsedTimestamp) ? null : parsedTimestamp;
+  }, []);
+
   // Update current time periodically for staleness checks
   useEffect(() => {
     const interval = setInterval(() => {
@@ -181,20 +187,29 @@ export function useDashboardData(): DashboardData {
     return polledRegime.data ?? null;
   }, [hasUsableRealtimeData, wsStream.data, polledRegime.data]);
 
+  const websocketTimestamp = useMemo(
+    () => parseSnapshotTimestamp(wsStream.data?.timestamp) ?? wsStream.lastUpdateTime ?? null,
+    [parseSnapshotTimestamp, wsStream.data?.timestamp, wsStream.lastUpdateTime]
+  );
+
+  const polledTimestamp = useMemo(
+    () =>
+      parseSnapshotTimestamp(polledGEX.data?.timestamp) ??
+      (polledGEX.dataUpdatedAt > 0 ? polledGEX.dataUpdatedAt : null),
+    [parseSnapshotTimestamp, polledGEX.data?.timestamp, polledGEX.dataUpdatedAt]
+  );
+
   const effectiveLastUpdateTime = useMemo(() => {
-    if (wsStream.data?.timestamp) {
-      const parsedTimestamp = Date.parse(wsStream.data.timestamp);
-      if (!Number.isNaN(parsedTimestamp)) {
-        return parsedTimestamp;
-      }
+    if (hasUsableRealtimeData) {
+      return websocketTimestamp;
     }
 
-    return wsStream.lastUpdateTime ?? polledGEX.dataUpdatedAt ?? null;
-  }, [wsStream.data, wsStream.lastUpdateTime, polledGEX.dataUpdatedAt]);
+    return polledTimestamp ?? websocketTimestamp;
+  }, [hasUsableRealtimeData, polledTimestamp, websocketTimestamp]);
 
   // Calculate staleness using state-based current time
   const isStale = useMemo(() => {
-    if (wsStream.isConnected && wsStream.data?.is_stale) {
+    if (hasUsableRealtimeData && wsStream.data?.is_stale) {
       return true;
     }
 
@@ -202,7 +217,7 @@ export function useDashboardData(): DashboardData {
 
     const timeSinceUpdate = currentTime - effectiveLastUpdateTime;
     return timeSinceUpdate > STALE_THRESHOLD;
-  }, [wsStream.isConnected, wsStream.data, effectiveLastUpdateTime, currentTime]);
+  }, [hasUsableRealtimeData, wsStream.data, effectiveLastUpdateTime, currentTime]);
 
   // Calculate loading state
   const isLoading =

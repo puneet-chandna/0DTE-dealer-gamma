@@ -42,7 +42,7 @@ interface DashboardHeaderProps {
 }
 
 function DashboardHeaderComponent({
-  isConnected = false,
+  isConnected: _isConnected = false,
   isRealtime = false,
   connectionState = 'idle',
   retryCount = 0,
@@ -60,6 +60,8 @@ function DashboardHeaderComponent({
     toggleDemoMode,
   } =
     useUIStore();
+
+  const isConnected = connectionState === 'connected';
 
   return (
     <header className="border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm">

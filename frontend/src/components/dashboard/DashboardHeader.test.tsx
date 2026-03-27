@@ -74,4 +74,17 @@ describe('DashboardHeader', () => {
     expect(screen.getByRole('link', { name: /dealer flows/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /backtest/i })).toBeInTheDocument();
   });
+
+  it('prioritizes the active connection state over a stale connected prop', () => {
+    render(
+      <DashboardHeader
+        isConnected
+        connectionState="connecting"
+        retryCount={1}
+      />
+    );
+
+    expect(screen.getByText(/connecting/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^connected$/i)).not.toBeInTheDocument();
+  });
 });

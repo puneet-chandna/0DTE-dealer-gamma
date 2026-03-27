@@ -7,6 +7,8 @@ import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
+from app.api.routes import gex as gex_routes
+from app.core.advanced_analytics import reset_advanced_analytics_state
 from app.main import app
 from app.models.schemas import GEXSnapshot
 
@@ -233,6 +235,58 @@ class TestGEXEndpoints:
 
         assert response.status_code == 503
         assert "Unable to fetch GEX data" in response.json()["detail"]
+
+    def test_live_fetch_timeout_is_extended_for_tradier(self):
+        """Tradier live fetches should get more time than the default providers."""
+        assert gex_routes.get_live_fetch_timeout_seconds("tradier") > 4
+        assert gex_routes.get_live_fetch_timeout_seconds("yfinance") == 4
+
+    @pytest.mark.asyncio
+    async def test_live_snapshot_includes_hawkes_analytics_even_on_first_baseline(self):
+        """Live snapshot payloads should always expose Hawkes state, including neutral zero baselines."""
+        reset_advanced_analytics_state()
+        options_df = pd.DataFrame(
+            {
+                "strike": [5800.0, 5800.0],
+                "type": ["call", "put"],
+                "volume": [100, 120],
+            }
+        )
+        live_snapshot = GEXSnapshot(
+            timestamp=pd.Timestamp("2026-03-27T10:30:00-04:00").to_pydatetime(),
+            spot_price=5805.0,
+            total_call_gex=-2.0e8,
+            total_put_gex=1.5e8,
+            net_gex=-5.0e7,
+            zero_gamma_level=5795.0,
+            gex_by_strike={5800.0: -5.0e7},
+            dominant_strike=5800.0,
+            metrics={},
+            advanced_analytics=None,
+        )
+
+        mock_client = MagicMock()
+        mock_client.provider_name = "tradier"
+        mock_client.get_options_chain_for_gex = AsyncMock(return_value=(options_df, 5805.0))
+
+        mock_calculator = MagicMock()
+        mock_calculator.calculate_gex_from_chain.return_value = live_snapshot
+
+        with patch("app.api.routes.gex.get_data_client", return_value=mock_client):
+            with patch("app.api.routes.gex.get_gex_calculator", return_value=mock_calculator):
+                with patch(
+                    "app.api.routes.gex.annotate_snapshot_quality",
+                    side_effect=lambda snapshot, options_df: snapshot,
+                ):
+                    payload = await gex_routes._get_live_gex_snapshot("SPX", "tradier")
+
+        assert payload["provider"] == "tradier"
+        assert payload["advanced_analytics"]["hawkes"] == {
+            "call_intensity": 0.0,
+            "put_intensity": 0.0,
+            "net_toxicity": 0.0,
+            "squeeze_probability": 0.0,
+        }
 
     def test_current_gex_low_quality_live_snapshot_uses_persisted_fallback_without_cache_write(self):
         """Low-quality live snapshots should not replace usable provider-specific fallback data."""

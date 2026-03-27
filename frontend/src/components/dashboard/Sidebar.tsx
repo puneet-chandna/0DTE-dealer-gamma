@@ -7,7 +7,7 @@
 import { memo } from 'react';
 import { ChevronLeft, ChevronRight, Settings, Calendar } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { formatGEX, formatCurrency } from '@/lib/utils';
+import { formatGEX, formatCurrency, formatZeroGammaValue } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
 import { MetricCard, Card, CardContent, Skeleton } from '@/components/ui';
 import { RegimeIndicator } from '@/components/charts';
@@ -108,7 +108,7 @@ function SidebarComponent({
 
               <MetricCard
                 label="Zero Gamma"
-                value={gexData ? formatCurrency(gexData.zero_gamma_level, 0) : '--'}
+                value={formatZeroGammaValue(gexData)}
                 isLoading={isLoading}
               />
 

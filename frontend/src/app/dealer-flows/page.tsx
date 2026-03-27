@@ -208,7 +208,7 @@ function getHiddenFlowsInterpretation(
   hawkes: HawkesState | null | undefined,
 ) {
   const hasCharmVanna = charm_vanna && (charm_vanna.charm_flow !== 0 || charm_vanna.vanna_flow !== 0);
-  const hasHawkes = hawkes && (hawkes.call_intensity !== 0 || hawkes.put_intensity !== 0);
+  const hasHawkes = hawkes !== null && hawkes !== undefined;
 
   if (!hasCharmVanna && !hasHawkes) return null;
 
@@ -232,14 +232,18 @@ function getHiddenFlowsInterpretation(
   if (hasHawkes) {
     const squeeze = Math.round(hawkes!.squeeze_probability * 100);
     const callDominant = hawkes!.call_intensity > hawkes!.put_intensity;
+    const putDominant = hawkes!.put_intensity > hawkes!.call_intensity;
+    const isBalanced = !callDominant && !putDominant;
 
     if (!hero) {
-      hero = `Order flow momentum is ${callDominant ? 'call-dominant' : 'put-dominant'}. Squeeze probability: ${squeeze}%.`;
+      hero = isBalanced
+        ? `Order flow momentum is balanced. Hawkes intensities are quiet right now, so there is no active call or put dominance.`
+        : `Order flow momentum is ${callDominant ? 'call-dominant' : 'put-dominant'}. Squeeze probability: ${squeeze}%.`;
     }
 
-    bullets.push(`Call intensity: ${hawkes!.call_intensity.toFixed(2)} — ${callDominant ? 'dominant' : 'subordinate'} side.`);
-    bullets.push(`Put intensity: ${hawkes!.put_intensity.toFixed(2)} — ${!callDominant ? 'dominant' : 'subordinate'} side.`);
-    bullets.push(`Squeeze probability: ${squeeze}% — ${squeeze > 60 ? 'high — squeeze conditions detected' : squeeze > 40 ? 'moderate — watch for buildup' : 'low — normal flow'}.`);
+    bullets.push(`Call intensity: ${hawkes!.call_intensity.toFixed(2)} — ${isBalanced ? 'balanced with puts' : callDominant ? 'dominant' : 'subordinate'} side.`);
+    bullets.push(`Put intensity: ${hawkes!.put_intensity.toFixed(2)} — ${isBalanced ? 'balanced with calls' : putDominant ? 'dominant' : 'subordinate'} side.`);
+    bullets.push(`Squeeze probability: ${squeeze}% — ${squeeze > 60 ? 'high — squeeze conditions detected' : squeeze > 40 ? 'moderate — watch for buildup' : isBalanced ? 'low — no recent flow imbalance' : 'low — normal flow'}.`);
   }
 
   if (hasCharmVanna) {

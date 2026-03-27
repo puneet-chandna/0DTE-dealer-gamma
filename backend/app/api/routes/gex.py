@@ -20,6 +20,7 @@ from app.core import (
     get_current_trading_date,
     is_market_open,
 )
+from app.core.advanced_analytics import enrich_snapshot_with_advanced_analytics
 from app.core.demo_data import get_demo_data_service
 from app.core.snapshot_quality import annotate_snapshot_quality, is_snapshot_replay_eligible
 from app.models.schemas import (
@@ -32,6 +33,7 @@ from app.models.schemas import (
 from app.services.cache import get_cache
 from app.services.historical_data import get_historical_data_service
 from app.core.rate_provider import get_rate_provider
+from app.core.provider_timeouts import get_live_fetch_timeout_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -39,8 +41,6 @@ router = APIRouter()
 
 # Eastern Time timezone
 ET = ZoneInfo("America/New_York")
-LIVE_FETCH_TIMEOUT_SECONDS = 4
-
 # Module-level instances (lazy initialization)
 _gex_calculator: Optional[GEXCalculator] = None
 
@@ -89,6 +89,12 @@ async def _get_live_gex_snapshot(
         timestamp=datetime.now(ET),
     )
     snapshot = annotate_snapshot_quality(snapshot, options_df=options_df)
+    snapshot = enrich_snapshot_with_advanced_analytics(
+        snapshot,
+        options_df=options_df,
+        symbol=symbol,
+        provider=data_client.provider_name,
+    )
 
     # Add provider info
     raw = snapshot.model_dump()
@@ -231,7 +237,7 @@ async def _resolve_best_snapshot_payload(
     try:
         live_snapshot = await asyncio.wait_for(
             _get_live_gex_snapshot(symbol, active_provider),
-            timeout=LIVE_FETCH_TIMEOUT_SECONDS,
+            timeout=get_live_fetch_timeout_seconds(active_provider),
         )
 
         if _snapshot_is_mock(live_snapshot):

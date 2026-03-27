@@ -1,0 +1,81 @@
+flowchart LR
+    classDef user fill:#eef4ff,stroke:#4c6fb3,color:#1f2a44,stroke-width:1.5px;
+    classDef frontend fill:#f7fbff,stroke:#6a8bbd,color:#20304d,stroke-width:1.2px;
+    classDef backend fill:#f4f7fb,stroke:#5f7596,color:#1f2a44,stroke-width:1.2px;
+    classDef source fill:#fcfdff,stroke:#7f8ea3,color:#273246,stroke-width:1.2px;
+    classDef store fill:#f5f7fa,stroke:#6b7280,color:#1f2937,stroke-width:1.2px;
+    classDef accent fill:#e9f0fb,stroke:#4f6f9a,color:#1f2a44,stroke-width:1.5px;
+
+    subgraph U["End User"]
+        USER["Trader / Analyst / Research User"]
+    end
+
+    subgraph F["Frontend Application"]
+        NEXT["Next.js 16 Web Application"]
+        PAGES["User-Facing Pages<br/>Dashboard | Analytics | Backtest | Dealer Flows"]
+        RQ["React Query Server-State Layer"]
+        ZUSTAND["Zustand UI State"]
+        CHARTS["Charts & Visualization Layer"]
+    end
+
+    subgraph B["Backend Platform"]
+        API["FastAPI REST API"]
+        WS["WebSocket Stream<br/>/ws/gex-stream"]
+        REG["Provider Registry"]
+        CALC["GEX / Greeks Calculation Engine"]
+        ANALYTICS["Analytics & Backtesting Engines"]
+        BG["Background Refresh Services"]
+        CACHE["In-Memory TTL Cache"]
+        HIST["Historical Persistence & Replay Service"]
+    end
+
+    subgraph E["External Market Data Providers"]
+        YF["YFinance Provider"]
+        TR["Tradier Provider"]
+    end
+
+    subgraph D["PostgreSQL Persistence"]
+        PG[("PostgreSQL 18")]
+        SESS["Market Sessions"]
+        GEXDB["GEX Snapshots & Strike Breakdown"]
+        RAW["Raw Options Snapshots & IV Surface"]
+    end
+
+    USER --> NEXT
+    NEXT --> PAGES
+    PAGES --> RQ
+    PAGES --> ZUSTAND
+    PAGES --> CHARTS
+
+    RQ -->|"REST / JSON"| API
+    NEXT -->|"WebSocket updates"| WS
+
+    API --> REG
+    API --> CACHE
+    API --> CALC
+    API --> ANALYTICS
+    API --> HIST
+    WS --> REG
+    WS --> CACHE
+    WS --> CALC
+    BG --> REG
+    BG --> CALC
+    BG --> CACHE
+    BG --> HIST
+    ANALYTICS --> HIST
+    CALC --> CACHE
+
+    REG --> YF
+    REG --> TR
+
+    HIST --> PG
+    PG --> SESS
+    PG --> GEXDB
+    PG --> RAW
+
+    class USER user;
+    class NEXT,PAGES,RQ,ZUSTAND,CHARTS frontend;
+    class API,WS,REG,CALC,ANALYTICS,BG,CACHE,HIST backend;
+    class YF,TR source;
+    class PG,SESS,GEXDB,RAW store;
+    class CACHE,PG accent;

@@ -271,6 +271,43 @@ describe('useDashboardData', () => {
     expect(result.current.lastUpdateTime).toBe(Date.parse('2026-03-23T10:00:00.000Z'));
   });
 
+  it('prefers fresher REST timestamps when websocket data is stale and unusable', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-23T10:30:00.000Z'));
+
+    websocketState.stream = {
+      ...websocketState.createStream(),
+      data: {
+        ...websocketState.createStream().data!,
+        is_stale: true,
+        timestamp: '2026-03-23T10:00:00.000Z',
+      },
+      lastUpdateTime: Date.parse('2026-03-23T10:30:00.000Z'),
+    };
+
+    const freshRestSnapshot: GEXSnapshot = {
+      ...liveCurrentGex,
+      timestamp: '2026-03-23T10:29:55.000Z',
+    };
+
+    const queryClient = createQueryClient();
+    queryClient.setQueryData(
+      queryKeys.gex.current('live', 'yfinance'),
+      freshRestSnapshot
+    );
+
+    const { result } = renderHook(() => useDashboardData(), {
+      wrapper: createWrapper(queryClient),
+    });
+
+    expect(result.current.isRealtime).toBe(false);
+    expect(result.current.gexData).toEqual(freshRestSnapshot);
+    expect(result.current.lastUpdateTime).toBe(
+      Date.parse('2026-03-23T10:29:55.000Z')
+    );
+    expect(result.current.isStale).toBe(false);
+  });
+
   it('falls back to REST data when the websocket payload is mock data', async () => {
     websocketState.stream = {
       ...websocketState.createStream(),

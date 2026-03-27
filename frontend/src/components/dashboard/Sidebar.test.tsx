@@ -84,4 +84,31 @@ describe('Sidebar layout variants', () => {
     expect(screen.queryByRole('link', { name: /dealer flows/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /backtest/i })).not.toBeInTheDocument();
   });
+
+  it('labels zero gamma as below range when no in-range crossing exists', () => {
+    render(
+      <Sidebar
+        {...({
+          layout: 'stack',
+          gexData: {
+            net_gex: 1500000000,
+            zero_gamma_level: 5200,
+            spot_price: 6420,
+            dominant_strike: 6400,
+            metrics: {
+              zero_gamma_crossing_found: false,
+              zero_gamma_relation: 'below_range',
+            },
+          },
+          regimeData: {
+            regime: 'long_gamma',
+            net_gex_billions: 1.5,
+            description: 'Dealers are long gamma',
+          },
+        } as never)}
+      />
+    );
+
+    expect(screen.getByText(/zero gamma: below range/i)).toBeInTheDocument();
+  });
 });

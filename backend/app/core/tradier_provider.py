@@ -375,10 +375,11 @@ class TradierClient(DataProvider):
         Because Tradier supports SPX directly there is no need for a SPY
         proxy conversion.
         """
-        spot_price = await self.get_spot_price(underlying)
+        spot_price, df = await asyncio.gather(
+            self.get_spot_price(underlying),
+            self.get_options_chain_snapshot(underlying),
+        )
         logger.info(f"Tradier spot price: {spot_price}")
-
-        df = await self.get_options_chain_snapshot(underlying)
 
         if df.empty:
             logger.warning("Empty options chain from Tradier")

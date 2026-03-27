@@ -26,6 +26,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useDashboardData, useIntradayTimeSeries } from '@/hooks/useDashboardData';
 import { useGEXByStrikes, queryKeys } from '@/hooks/useGEXData';
 import { getAppDataMode } from '@/lib/appMode';
+import { hasZeroGammaCrossing } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
 import { DashboardHeader, Sidebar, MetricsPanel } from '@/components/dashboard';
 import {
@@ -204,13 +205,17 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent>
                 <ChartErrorBoundary chartName="GEX Bar Chart">
-                  <GEXBarChart
-                    data={barChartData}
-                    spotPrice={effectiveStrikesData?.spot_price ?? gexData?.spot_price ?? 0}
-                    zeroGammaLevel={effectiveStrikesData?.zero_gamma_level ?? gexData?.zero_gamma_level}
-                    isLoading={strikesLoading}
-                    height={350}
-                  />
+                    <GEXBarChart
+                      data={barChartData}
+                      spotPrice={effectiveStrikesData?.spot_price ?? gexData?.spot_price ?? 0}
+                    zeroGammaLevel={
+                      gexData && !hasZeroGammaCrossing(gexData)
+                        ? undefined
+                        : (effectiveStrikesData?.zero_gamma_level ?? gexData?.zero_gamma_level)
+                    }
+                      isLoading={strikesLoading}
+                      height={350}
+                    />
                 </ChartErrorBoundary>
               </CardContent>
             </Card>
