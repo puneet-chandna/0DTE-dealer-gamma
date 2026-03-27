@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
 import pandas as pd
 
 from app.core.constants import MIN_IV
+from app.models.schemas import GEXSnapshot
 
 MEANINGFUL_GEX_ABS_THRESHOLD = 1_000_000.0
 NEAR_SPOT_WINDOW_PCT = 0.015
@@ -127,14 +129,19 @@ def annotate_snapshot_quality(
         "is_replay_eligible": is_replay_eligible,
     }
 
-    if snapshot_like.__class__.__name__ == "GEXSnapshot" and hasattr(snapshot_like, "model_copy"):
+    if isinstance(snapshot_like, GEXSnapshot) and hasattr(snapshot_like, "model_copy"):
         return snapshot_like.model_copy(update={"metrics": merged_metrics})
     if isinstance(snapshot_like, Mapping):
         payload["metrics"] = merged_metrics
         return payload
-    if hasattr(snapshot_like, "__dict__"):
-        snapshot_like.metrics = merged_metrics
-        return snapshot_like
+    if (
+        not isinstance(snapshot_like, Mapping)
+        and not isinstance(snapshot_like, GEXSnapshot)
+        and hasattr(snapshot_like, "__dict__")
+    ):
+        copied_snapshot = copy.copy(snapshot_like)
+        copied_snapshot.metrics = merged_metrics
+        return copied_snapshot
 
     payload["metrics"] = merged_metrics
     return payload
@@ -218,7 +225,7 @@ def _get_gex_imbalance_ratio(total_call_abs: float, total_put_abs: float) -> flo
 def _coerce_snapshot_payload(snapshot_like: Any) -> dict[str, Any]:
     if isinstance(snapshot_like, Mapping):
         return dict(snapshot_like)
-    if snapshot_like.__class__.__name__ == "GEXSnapshot" and hasattr(snapshot_like, "model_dump"):
+    if isinstance(snapshot_like, GEXSnapshot) and hasattr(snapshot_like, "model_dump"):
         dumped = snapshot_like.model_dump()
         if isinstance(dumped, Mapping):
             return dict(dumped)
