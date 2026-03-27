@@ -20,6 +20,7 @@ StreamKey = Tuple[str, str]
 _hawkes_engines: Dict[StreamKey, HawkesEngine] = {}
 _kalman_filters: Dict[StreamKey, GEXKalmanFilter] = {}
 _analytics_lock = threading.Lock()
+_stream_locks = {}
 
 
 def _normalize_stream_key(*, symbol: str, provider: str) -> StreamKey:
@@ -49,12 +50,24 @@ def get_kalman_filter(*, symbol: str, provider: str) -> GEXKalmanFilter:
         return kalman
 
 
+def _get_stream_lock(*, symbol: str, provider: str):
+    """Get or create the per-stream lock for one provider/symbol stream."""
+    key = _normalize_stream_key(symbol=symbol, provider=provider)
+    with _analytics_lock:
+        stream_lock = _stream_locks.get(key)
+        if stream_lock is None:
+            stream_lock = threading.Lock()
+            _stream_locks[key] = stream_lock
+        return stream_lock
+
+
 def reset_advanced_analytics_state(*, symbol: Optional[str] = None, provider: Optional[str] = None) -> None:
     """Reset cached state for tests or lifecycle boundaries."""
     if symbol is None and provider is None:
         with _analytics_lock:
             _hawkes_engines.clear()
             _kalman_filters.clear()
+            _stream_locks.clear()
         return
 
     if symbol is None or provider is None:
@@ -64,6 +77,7 @@ def reset_advanced_analytics_state(*, symbol: Optional[str] = None, provider: Op
     with _analytics_lock:
         _hawkes_engines.pop(key, None)
         _kalman_filters.pop(key, None)
+        _stream_locks.pop(key, None)
 
 
 def enrich_snapshot_with_advanced_analytics(
@@ -82,38 +96,46 @@ def enrich_snapshot_with_advanced_analytics(
         else:
             timestamp_seconds = time.time()
 
+    stream_lock = _get_stream_lock(symbol=symbol, provider=provider)
     hawkes_engine = get_hawkes_engine(symbol=symbol, provider=provider)
     kalman_filter = get_kalman_filter(symbol=symbol, provider=provider)
-    hawkes_pre_state = hawkes_engine.snapshot_state()
-    kalman_pre_state = kalman_filter.snapshot_state()
 
-    try:
-        hawkes_state = hawkes_engine.update(
-            options_df,
-            timestamp_seconds,
-        )
-        smoothed_gex = kalman_filter.update(snapshot.net_gex)
+    with stream_lock:
+        hawkes_pre_state = hawkes_engine.snapshot_state()
+        kalman_pre_state = kalman_filter.snapshot_state()
 
-        advanced = (
-            snapshot.advanced_analytics.model_copy(deep=True)
-            if snapshot.advanced_analytics is not None
-            else AdvancedAnalytics()
-        )
-        advanced.hawkes = HawkesStateModel(
-            call_intensity=hawkes_state.call_intensity,
-            put_intensity=hawkes_state.put_intensity,
-            net_toxicity=hawkes_state.net_toxicity,
-            squeeze_probability=hawkes_state.squeeze_probability,
-        )
-        advanced.smoothed_net_gex = smoothed_gex
-        snapshot.advanced_analytics = advanced
-    except MemoryError:
-        hawkes_engine.restore_state(hawkes_pre_state)
-        kalman_filter.restore_state(kalman_pre_state)
-        raise
-    except Exception as exc:
-        hawkes_engine.restore_state(hawkes_pre_state)
-        kalman_filter.restore_state(kalman_pre_state)
-        logger.warning("Advanced analytics enrichment failed for %s/%s: %s", provider, symbol, exc)
+        try:
+            hawkes_state = hawkes_engine.update(
+                options_df,
+                timestamp_seconds,
+            )
+            smoothed_gex = kalman_filter.update(snapshot.net_gex)
+
+            advanced = (
+                snapshot.advanced_analytics.model_copy(deep=True)
+                if snapshot.advanced_analytics is not None
+                else AdvancedAnalytics()
+            )
+            advanced.hawkes = HawkesStateModel(
+                call_intensity=hawkes_state.call_intensity,
+                put_intensity=hawkes_state.put_intensity,
+                net_toxicity=hawkes_state.net_toxicity,
+                squeeze_probability=hawkes_state.squeeze_probability,
+            )
+            advanced.smoothed_net_gex = smoothed_gex
+            snapshot.advanced_analytics = advanced
+        except MemoryError:
+            hawkes_engine.restore_state(hawkes_pre_state)
+            kalman_filter.restore_state(kalman_pre_state)
+            raise
+        except Exception as exc:
+            hawkes_engine.restore_state(hawkes_pre_state)
+            kalman_filter.restore_state(kalman_pre_state)
+            logger.warning(
+                "Advanced analytics enrichment failed for %s/%s: %s",
+                provider,
+                symbol,
+                exc,
+            )
 
     return snapshot

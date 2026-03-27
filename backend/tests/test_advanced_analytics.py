@@ -128,6 +128,93 @@ class TestAnalyticsStateCaches:
 
 
 class TestAdvancedAnalyticsEnrichment:
+    def setup_method(self) -> None:
+        analytics.reset_advanced_analytics_state()
+
+    def teardown_method(self) -> None:
+        analytics.reset_advanced_analytics_state()
+
+    def test_same_stream_enrichments_do_not_overlap_updates(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        first_update_entered = Event()
+        release_first_update = Event()
+        overlap_detected = Event()
+
+        class FakeEngine:
+            def __init__(self) -> None:
+                self.in_update = False
+
+            def snapshot_state(self) -> dict[str, bool]:
+                return {"in_update": self.in_update}
+
+            def restore_state(self, state: dict[str, bool]) -> None:
+                self.in_update = state["in_update"]
+
+            def update(self, options_df: pd.DataFrame, timestamp: float) -> HawkesState:
+                del options_df, timestamp
+                if self.in_update:
+                    overlap_detected.set()
+                self.in_update = True
+                first_update_entered.set()
+                release_first_update.wait(timeout=1)
+                self.in_update = False
+                return HawkesState(
+                    call_intensity=1.0,
+                    put_intensity=0.5,
+                    net_toxicity=0.5,
+                    squeeze_probability=0.25,
+                )
+
+        class FakeKalmanFilter:
+            def snapshot_state(self) -> dict[str, None]:
+                return {"unused": None}
+
+            def restore_state(self, state: dict[str, None]) -> None:
+                del state
+
+            def update(self, measurement: float) -> float:
+                return measurement
+
+        monkeypatch.setattr(analytics, "HawkesEngine", FakeEngine)
+        monkeypatch.setattr(analytics, "GEXKalmanFilter", FakeKalmanFilter)
+
+        snapshot_one = _build_snapshot()
+        snapshot_two = _build_snapshot()
+        options_df = pd.DataFrame({"strike": [5800.0], "type": ["call"], "volume": [100]})
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            future_one = executor.submit(
+                analytics.enrich_snapshot_with_advanced_analytics,
+                snapshot_one,
+                options_df=options_df,
+                symbol="SPX",
+                provider="tradier",
+                timestamp_seconds=1.0,
+            )
+            assert first_update_entered.wait(timeout=1)
+
+            future_two = executor.submit(
+                analytics.enrich_snapshot_with_advanced_analytics,
+                snapshot_two,
+                options_df=options_df,
+                symbol="SPX",
+                provider="tradier",
+                timestamp_seconds=2.0,
+            )
+
+            try:
+                assert not overlap_detected.wait(timeout=0.1)
+            finally:
+                release_first_update.set()
+
+            future_one.result(timeout=1)
+            future_two.result(timeout=1)
+
+        assert snapshot_one.advanced_analytics is not None
+        assert snapshot_two.advanced_analytics is not None
+
     def test_enrichment_restores_state_and_snapshot_when_kalman_update_fails(
         self,
         monkeypatch: pytest.MonkeyPatch,

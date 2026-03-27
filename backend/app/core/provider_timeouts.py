@@ -1,4 +1,9 @@
-"""Provider-specific timeout helpers for live and capture fetches."""
+"""Provider-specific live fetch timeout utilities.
+
+Defines DEFAULT_LIVE_FETCH_TIMEOUT_SECONDS,
+TRADIER_LIVE_FETCH_TIMEOUT_SECONDS, and
+get_live_fetch_timeout_seconds().
+"""
 
 from __future__ import annotations
 
