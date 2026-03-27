@@ -28,6 +28,14 @@ def _normalize_stream_key(*, symbol: str, provider: str) -> StreamKey:
     return (provider.strip().lower(), symbol.strip().upper())
 
 
+def _resolve_provider_mode(provider: str) -> str:
+    """Map provider names to the Hawkes provider-mode labels."""
+    normalized = provider.strip().lower()
+    if normalized in {"tradier", "tradier_rich"}:
+        return "tradier_rich"
+    return "yfinance_proxy"
+
+
 def get_hawkes_engine(*, symbol: str, provider: str) -> HawkesEngine:
     """Get or create the Hawkes engine for one provider/symbol stream."""
     key = _normalize_stream_key(symbol=symbol, provider=provider)
@@ -108,6 +116,8 @@ def enrich_snapshot_with_advanced_analytics(
             hawkes_state = hawkes_engine.update(
                 options_df,
                 timestamp_seconds,
+                spot_price=snapshot.spot_price,
+                provider_mode=_resolve_provider_mode(provider),
             )
             smoothed_gex = kalman_filter.update(snapshot.net_gex)
 
@@ -121,6 +131,10 @@ def enrich_snapshot_with_advanced_analytics(
                 put_intensity=hawkes_state.put_intensity,
                 net_toxicity=hawkes_state.net_toxicity,
                 squeeze_probability=hawkes_state.squeeze_probability,
+                baseline_ready=hawkes_state.baseline_ready,
+                confidence_score=hawkes_state.confidence_score,
+                provider_mode=hawkes_state.provider_mode,
+                event_count=hawkes_state.event_count,
             )
             advanced.smoothed_net_gex = smoothed_gex
             snapshot.advanced_analytics = advanced

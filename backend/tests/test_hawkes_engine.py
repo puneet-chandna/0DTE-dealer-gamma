@@ -167,3 +167,103 @@ class TestHawkesEngine:
             })
 
         assert engine.snapshot_state() == original_state
+
+    def test_new_contracts_are_baselined_before_scoring_and_metadata_is_exposed(self):
+        """Only contracts seen in consecutive snapshots should contribute events."""
+        engine = HawkesEngine(alpha=1.0, beta=0.0, volume_threshold=1)
+
+        df1 = pd.DataFrame({
+            "strike": [5800.0],
+            "type": ["call"],
+            "volume": [100],
+            "open_interest": [250],
+            "bid": [10.0],
+            "ask": [10.4],
+            "mid": [10.2],
+            "implied_vol": [0.18],
+            "delta": [0.52],
+            "gamma": [0.012],
+            "expiration": ["2099-01-15T16:00:00-05:00"],
+        })
+        engine.update(
+            df1,
+            timestamp=1000.0,
+            spot_price=5805.0,
+            provider_mode="tradier_rich",
+        )
+
+        df2 = pd.DataFrame({
+            "strike": [5800.0, 5820.0],
+            "type": ["call", "call"],
+            "volume": [140, 500],
+            "open_interest": [265, 900],
+            "bid": [10.1, 4.5],
+            "ask": [10.5, 5.0],
+            "mid": [10.3, 4.75],
+            "implied_vol": [0.18, 0.22],
+            "delta": [0.53, 0.21],
+            "gamma": [0.012, 0.008],
+            "expiration": ["2099-01-15T16:00:00-05:00", "2099-01-15T16:00:00-05:00"],
+        })
+        state = engine.update(
+            df2,
+            timestamp=1005.0,
+            spot_price=5805.0,
+            provider_mode="tradier_rich",
+        )
+
+        assert state.call_intensity > 0
+        assert state.event_count == 1
+        assert state.baseline_ready is True
+        assert state.provider_mode == "tradier_rich"
+        assert state.confidence_score > 0.8
+
+    def test_yfinance_proxy_mode_computes_missing_greeks_and_reports_lower_confidence(self):
+        """yfinance snapshots without provider Greeks should still yield a lower-confidence signal."""
+        engine = HawkesEngine(alpha=1.0, beta=0.0, volume_threshold=1)
+
+        df1 = pd.DataFrame({
+            "strike": [6000.0],
+            "type": ["call"],
+            "volume": [75],
+            "open_interest": [180],
+            "bid": [9.8],
+            "ask": [10.2],
+            "mid": [10.0],
+            "implied_vol": [0.21],
+            "delta": [None],
+            "gamma": [None],
+            "expiration": ["2099-01-15T16:00:00-05:00"],
+        })
+        engine.update(
+            df1,
+            timestamp=1000.0,
+            spot_price=6030.0,
+            provider_mode="yfinance_proxy",
+        )
+
+        df2 = pd.DataFrame({
+            "strike": [6000.0],
+            "type": ["call"],
+            "volume": [110],
+            "open_interest": [205],
+            "bid": [10.0],
+            "ask": [10.5],
+            "mid": [10.25],
+            "implied_vol": [0.22],
+            "delta": [None],
+            "gamma": [None],
+            "expiration": ["2099-01-15T16:00:00-05:00"],
+        })
+        state = engine.update(
+            df2,
+            timestamp=1005.0,
+            spot_price=6030.0,
+            provider_mode="yfinance_proxy",
+        )
+
+        assert state.call_intensity > 0
+        assert state.baseline_ready is True
+        assert state.provider_mode == "yfinance_proxy"
+        assert 0.0 < state.confidence_score < 0.8
+        assert state.event_count == 1

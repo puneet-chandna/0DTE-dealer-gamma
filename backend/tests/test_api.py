@@ -281,12 +281,87 @@ class TestGEXEndpoints:
                     payload = await gex_routes._get_live_gex_snapshot("SPX", "tradier")
 
         assert payload["provider"] == "tradier"
-        assert payload["advanced_analytics"]["hawkes"] == {
-            "call_intensity": 0.0,
-            "put_intensity": 0.0,
-            "net_toxicity": 0.0,
-            "squeeze_probability": 0.0,
-        }
+        hawkes_payload = payload["advanced_analytics"]["hawkes"]
+        assert hawkes_payload["call_intensity"] == 0.0
+        assert hawkes_payload["put_intensity"] == 0.0
+        assert hawkes_payload["net_toxicity"] == 0.0
+        assert hawkes_payload["squeeze_probability"] == 0.0
+        assert hawkes_payload["baseline_ready"] is False
+        assert hawkes_payload["provider_mode"] == "tradier_rich"
+        assert hawkes_payload["event_count"] == 0
+        assert 0.0 < hawkes_payload["confidence_score"] < 1.0
+
+    @pytest.mark.asyncio
+    async def test_live_snapshot_exposes_provider_metadata_once_baseline_is_ready(self):
+        """Live payloads should expose baseline/confidence metadata after consecutive snapshots."""
+        reset_advanced_analytics_state()
+        first_df = pd.DataFrame(
+            {
+                "strike": [6000.0],
+                "type": ["call"],
+                "volume": [70],
+                "open_interest": [180],
+                "bid": [9.8],
+                "ask": [10.2],
+                "mid": [10.0],
+                "implied_vol": [0.21],
+                "delta": [None],
+                "gamma": [None],
+                "expiration": ["2099-01-15T16:00:00-05:00"],
+            }
+        )
+        second_df = pd.DataFrame(
+            {
+                "strike": [6000.0],
+                "type": ["call"],
+                "volume": [105],
+                "open_interest": [205],
+                "bid": [10.0],
+                "ask": [10.5],
+                "mid": [10.25],
+                "implied_vol": [0.22],
+                "delta": [None],
+                "gamma": [None],
+                "expiration": ["2099-01-15T16:00:00-05:00"],
+            }
+        )
+        live_snapshot = GEXSnapshot(
+            timestamp=pd.Timestamp("2026-03-28T10:30:00-04:00").to_pydatetime(),
+            spot_price=6030.0,
+            total_call_gex=-2.0e8,
+            total_put_gex=1.5e8,
+            net_gex=-5.0e7,
+            zero_gamma_level=6010.0,
+            gex_by_strike={6000.0: -5.0e7},
+            dominant_strike=6000.0,
+            metrics={},
+            advanced_analytics=None,
+        )
+
+        mock_client = MagicMock()
+        mock_client.provider_name = "yfinance"
+        mock_client.get_options_chain_for_gex = AsyncMock(
+            side_effect=[(first_df, 6030.0), (second_df, 6030.0)]
+        )
+        mock_client._get_ticker_symbol = lambda symbol: "SPY"
+
+        mock_calculator = MagicMock()
+        mock_calculator.calculate_gex_from_chain.side_effect = [live_snapshot, live_snapshot.model_copy(deep=True)]
+
+        with patch("app.api.routes.gex.get_data_client", return_value=mock_client):
+            with patch("app.api.routes.gex.get_gex_calculator", return_value=mock_calculator):
+                with patch(
+                    "app.api.routes.gex.annotate_snapshot_quality",
+                    side_effect=lambda snapshot, options_df: snapshot,
+                ):
+                    await gex_routes._get_live_gex_snapshot("SPX", "yfinance")
+                    payload = await gex_routes._get_live_gex_snapshot("SPX", "yfinance")
+
+        hawkes_payload = payload["advanced_analytics"]["hawkes"]
+        assert hawkes_payload["baseline_ready"] is True
+        assert hawkes_payload["provider_mode"] == "yfinance_proxy"
+        assert 0.0 < hawkes_payload["confidence_score"] < 0.8
+        assert hawkes_payload["event_count"] == 1
 
     def test_current_gex_low_quality_live_snapshot_uses_persisted_fallback_without_cache_write(self):
         """Low-quality live snapshots should not replace usable provider-specific fallback data."""

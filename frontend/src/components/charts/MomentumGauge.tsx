@@ -1,11 +1,10 @@
 /**
- * MomentumGauge - Hawkes Process Order Flow Toxicity Gauge
+ * MomentumGauge - Hawkes-Style Flow Intensity Gauge
  *
- * A semicircular gauge showing the momentum/toxicity of order flow.
- * Driven by the Hawkes process intensity values:
- * - Left (red): Put toxicity dominant
+ * Snapshot-based excitation proxy from volume/open-interest deltas:
+ * - Left (red): Put flow dominance
  * - Center (neutral): Balanced flow
- * - Right (green): Call toxicity dominant
+ * - Right (green): Call flow dominance
  */
 
 'use client';
@@ -18,6 +17,28 @@ import type { HawkesState } from '@/types';
 interface MomentumGaugeProps {
   data?: HawkesState | null;
   isLoading?: boolean;
+}
+
+function getProviderModeLabel(providerMode?: HawkesState['provider_mode']) {
+  if (providerMode === 'tradier_rich') return 'Tradier-Rich Mode';
+  if (providerMode === 'yfinance_proxy') return 'YFinance Proxy Mode';
+  return 'Snapshot Proxy Mode';
+}
+
+function getConfidenceLabel(confidenceScore: number) {
+  if (confidenceScore >= 0.8) return 'High Confidence';
+  if (confidenceScore >= 0.55) return 'Moderate Confidence';
+  return 'Low Confidence';
+}
+
+function getConfidencePillClasses(confidenceScore: number) {
+  if (confidenceScore >= 0.8) {
+    return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
+  }
+  if (confidenceScore >= 0.55) {
+    return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
+  }
+  return 'border-rose-500/30 bg-rose-500/10 text-rose-300';
 }
 
 function MomentumGaugeComponent({ data, isLoading }: MomentumGaugeProps) {
@@ -36,16 +57,21 @@ function MomentumGaugeComponent({ data, isLoading }: MomentumGaugeProps) {
 
   const squeezePercent = data ? Math.round(data.squeeze_probability * 100) : 0;
   const isHighSqueeze = squeezePercent >= 60;
+  const baselineReady = data?.baseline_ready ?? true;
+  const confidenceScore = data?.confidence_score ?? 0;
+  const confidenceLabel = getConfidenceLabel(confidenceScore);
+  const confidencePillClasses = getConfidencePillClasses(confidenceScore);
+  const providerModeLabel = getProviderModeLabel(data?.provider_mode);
 
   if (isLoading || !data) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Order Flow Momentum</CardTitle>
+          <CardTitle>Hawkes-Style Flow Intensity</CardTitle>
         </CardHeader>
         <CardContent>
           <p className="text-sm text-zinc-500">
-            {isLoading ? 'Analyzing order flow...' : 'Awaiting Hawkes data'}
+            {isLoading ? 'Analyzing snapshot flow...' : 'Awaiting Hawkes-style data'}
           </p>
         </CardContent>
       </Card>
@@ -55,8 +81,15 @@ function MomentumGaugeComponent({ data, isLoading }: MomentumGaugeProps) {
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
-          <CardTitle>Order Flow Momentum</CardTitle>
+        <div className="flex items-start justify-between gap-3">
+          <div className="space-y-1">
+            <CardTitle title="Snapshot-based excitation proxy from consecutive volume and open-interest changes.">
+              Hawkes-Style Flow Intensity
+            </CardTitle>
+            <p className="text-xs text-zinc-500">
+              Snapshot-based excitation proxy from volume/OI changes.
+            </p>
+          </div>
           {isHighSqueeze && (
             <div className="animate-pulse rounded-md bg-amber-900/60 px-2 py-0.5 text-xs font-bold text-amber-300">
               ⚡ SQUEEZE {squeezePercent}%
@@ -133,6 +166,36 @@ function MomentumGaugeComponent({ data, isLoading }: MomentumGaugeProps) {
             <span className="text-emerald-400/70">CALL</span>
           </div>
         </div>
+
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          <span
+            className={cn(
+              'rounded-full border px-2.5 py-1 text-[11px] font-medium',
+              confidencePillClasses
+            )}
+          >
+            {confidenceLabel}
+          </span>
+          <span className="rounded-full border border-zinc-700 bg-zinc-900/80 px-2.5 py-1 text-[11px] font-medium text-zinc-300">
+            {providerModeLabel}
+          </span>
+          <span
+            className={cn(
+              'rounded-full border px-2.5 py-1 text-[11px] font-medium',
+              baselineReady
+                ? 'border-sky-500/30 bg-sky-500/10 text-sky-300'
+                : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+            )}
+          >
+            {baselineReady ? 'Baseline Ready' : 'Baselining'}
+          </span>
+        </div>
+
+        <p className="mt-3 text-xs leading-5 text-zinc-500">
+          {baselineReady
+            ? `Tracking ${data.event_count ?? 0} eligible flow event${(data.event_count ?? 0) === 1 ? '' : 's'} from consecutive snapshots.`
+            : 'Building flow baseline from consecutive snapshots before new contracts contribute to the signal.'}
+        </p>
 
         {/* Metrics row */}
         <div className="mt-4 grid grid-cols-3 gap-2 text-center">

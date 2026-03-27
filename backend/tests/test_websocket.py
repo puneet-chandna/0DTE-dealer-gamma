@@ -503,13 +503,94 @@ class TestGEXUpdateHelper:
                             symbol="SPX",
                         )
 
-        assert payload["advanced_analytics"]["hawkes"] == {
-            "call_intensity": 0.0,
-            "put_intensity": 0.0,
-            "net_toxicity": 0.0,
-            "squeeze_probability": 0.0,
-        }
+        hawkes_payload = payload["advanced_analytics"]["hawkes"]
+        assert hawkes_payload["call_intensity"] == 0.0
+        assert hawkes_payload["put_intensity"] == 0.0
+        assert hawkes_payload["net_toxicity"] == 0.0
+        assert hawkes_payload["squeeze_probability"] == 0.0
+        assert hawkes_payload["baseline_ready"] is False
+        assert hawkes_payload["provider_mode"] == "yfinance_proxy"
+        assert hawkes_payload["event_count"] == 0
+        assert 0.0 < hawkes_payload["confidence_score"] < 1.0
         assert payload["is_stale"] is False
+
+    @pytest.mark.asyncio
+    async def test_live_websocket_payload_exposes_provider_metadata_after_baseline(self):
+        """Websocket payloads should expose provider mode and confidence metadata after two snapshots."""
+        reset_advanced_analytics_state()
+        live_snapshot = GEXSnapshot(
+            timestamp=datetime(2026, 3, 28, 10, 30, tzinfo=ET),
+            spot_price=6030.0,
+            total_call_gex=-2.0e8,
+            total_put_gex=1.5e8,
+            net_gex=-5.0e7,
+            zero_gamma_level=6010.0,
+            gex_by_strike={6000.0: -5.0e7},
+            dominant_strike=6000.0,
+            metrics={
+                "capture_quality": 1.0,
+                "meaningful_strike_count": 2.0,
+                "is_replay_eligible": 1.0,
+            },
+            advanced_analytics=None,
+        )
+        first_df = pd.DataFrame(
+            {
+                "strike": [6000.0],
+                "type": ["call"],
+                "volume": [70],
+                "open_interest": [180],
+                "bid": [9.8],
+                "ask": [10.2],
+                "mid": [10.0],
+                "implied_vol": [0.21],
+                "delta": [None],
+                "gamma": [None],
+                "expiration": ["2099-01-15T16:00:00-05:00"],
+            }
+        )
+        second_df = pd.DataFrame(
+            {
+                "strike": [6000.0],
+                "type": ["call"],
+                "volume": [105],
+                "open_interest": [205],
+                "bid": [10.0],
+                "ask": [10.5],
+                "mid": [10.25],
+                "implied_vol": [0.22],
+                "delta": [None],
+                "gamma": [None],
+                "expiration": ["2099-01-15T16:00:00-05:00"],
+            }
+        )
+
+        mock_cache = MagicMock()
+        mock_cache.get_if_fresh.return_value = None
+        mock_client = AsyncMock()
+        mock_client.provider_name = "yfinance"
+        mock_client.get_options_chain_for_gex.return_value = (first_df, 6030.0)
+
+        mock_calculator = MagicMock()
+        mock_calculator.calculate_gex_from_chain.return_value = live_snapshot
+        mock_calculator.determine_regime.return_value = ("neutral", "Neutral", "yellow")
+
+        with patch("app.api.websocket.get_cache", return_value=mock_cache):
+            with patch("app.api.websocket.get_data_client", return_value=mock_client):
+                with patch("app.api.websocket.get_gex_calculator", return_value=mock_calculator):
+                    with patch(
+                        "app.api.websocket.annotate_snapshot_quality",
+                        side_effect=lambda snapshot, options_df: snapshot,
+                    ):
+                        await _get_gex_update(Settings(data_provider="yfinance"), symbol="SPX")
+                        mock_client.get_options_chain_for_gex.return_value = (second_df, 6030.0)
+                        payload = await _get_gex_update(Settings(data_provider="yfinance"), symbol="SPX")
+
+        hawkes_payload = payload["advanced_analytics"]["hawkes"]
+        assert hawkes_payload["baseline_ready"] is True
+        assert hawkes_payload["provider_mode"] == "yfinance_proxy"
+        assert 0.0 < hawkes_payload["confidence_score"] < 0.8
+        assert hawkes_payload["event_count"] == 1
 
 
 class TestConnectionManager:

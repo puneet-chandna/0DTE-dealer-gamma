@@ -111,7 +111,7 @@ class CharmVannaSnapshot(BaseModel):
 
 
 class HawkesStateModel(BaseModel):
-    """Current state of the Hawkes order flow momentum process."""
+    """Current state of the Hawkes-style snapshot flow process."""
 
     call_intensity: float = Field(
         ..., description="Self-exciting intensity of call order flow"
@@ -124,6 +124,22 @@ class HawkesStateModel(BaseModel):
     )
     squeeze_probability: float = Field(
         ..., description="Normalized 0-1 probability of a gamma squeeze"
+    )
+    baseline_ready: bool = Field(
+        default=False,
+        description="Whether consecutive snapshots have established a valid baseline",
+    )
+    confidence_score: float = Field(
+        default=0.0,
+        description="Estimated trust score for the current Hawkes-style snapshot proxy",
+    )
+    provider_mode: str = Field(
+        default="tradier_rich",
+        description="Provider quality mode: tradier_rich or yfinance_proxy",
+    )
+    event_count: int = Field(
+        default=0,
+        description="Number of contracts that contributed new events in this update",
     )
 
 

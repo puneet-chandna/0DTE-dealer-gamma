@@ -5,6 +5,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { ChartErrorBoundary } from './ChartErrorBoundary';
+import { MomentumGauge } from './MomentumGauge';
 import { RegimeIndicator } from './RegimeIndicator';
 import { ZeroGammaLine, zeroGammaReferenceLineConfig } from './ZeroGammaLine';
 import { TechnicalOverlayChart } from './TechnicalOverlayChart';
@@ -116,6 +117,73 @@ describe('RegimeIndicator', () => {
       />
     );
     expect(screen.getByText('Custom description text')).toBeInTheDocument();
+  });
+});
+
+describe('MomentumGauge', () => {
+  it('uses the Hawkes-style dual label and shows provider confidence metadata', () => {
+    render(
+      <MomentumGauge
+        data={{
+          call_intensity: 1.2,
+          put_intensity: 0.4,
+          net_toxicity: 0.8,
+          squeeze_probability: 0.7,
+          baseline_ready: true,
+          confidence_score: 0.92,
+          provider_mode: 'tradier_rich',
+          event_count: 3,
+        }}
+      />
+    );
+
+    expect(screen.getByText(/hawkes-style flow intensity/i)).toBeInTheDocument();
+    expect(screen.getByText(/high confidence/i)).toBeInTheDocument();
+    expect(screen.getByText(/tradier-rich mode/i)).toBeInTheDocument();
+  });
+
+  it('shows baseline-building copy instead of treating low-confidence zero state as missing', () => {
+    render(
+      <MomentumGauge
+        data={{
+          call_intensity: 0,
+          put_intensity: 0,
+          net_toxicity: 0,
+          squeeze_probability: 0,
+          baseline_ready: false,
+          confidence_score: 0.2,
+          provider_mode: 'yfinance_proxy',
+          event_count: 0,
+        }}
+      />
+    );
+
+    expect(screen.getByText(/building flow baseline/i)).toBeInTheDocument();
+    expect(screen.getByText(/yfinance proxy mode/i)).toBeInTheDocument();
+    expect(screen.queryByText(/awaiting hawkes data/i)).not.toBeInTheDocument();
+  });
+
+  it('colors the confidence pill to match a low-confidence state', () => {
+    render(
+      <MomentumGauge
+        data={{
+          call_intensity: 0.2,
+          put_intensity: 0.3,
+          net_toxicity: -0.1,
+          squeeze_probability: 0.1,
+          baseline_ready: true,
+          confidence_score: 0.2,
+          provider_mode: 'yfinance_proxy',
+          event_count: 1,
+        }}
+      />
+    );
+
+    expect(screen.getByText(/low confidence/i)).toHaveClass(
+      'border-rose-500/30',
+      'bg-rose-500/10',
+      'text-rose-300'
+    );
   });
 });
 

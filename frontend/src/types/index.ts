@@ -318,13 +318,17 @@ export interface CharmVannaSnapshot {
 }
 
 /**
- * Hawkes process order flow momentum state.
+ * Hawkes-style snapshot flow intensity state.
  */
 export interface HawkesState {
   call_intensity: number;
   put_intensity: number;
   net_toxicity: number;
   squeeze_probability: number;
+  baseline_ready?: boolean;
+  confidence_score?: number;
+  provider_mode?: 'tradier_rich' | 'yfinance_proxy' | string;
+  event_count?: number;
 }
 
 /**
