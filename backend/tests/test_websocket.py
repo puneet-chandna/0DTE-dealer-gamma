@@ -396,6 +396,61 @@ class TestGEXUpdateHelper:
         assert payload["spot_price"] == 6575.0
         assert payload["net_gex"] == -1.6e12
 
+    @pytest.mark.asyncio
+    async def test_low_quality_live_snapshot_uses_persisted_provider_fallback_without_cache_write(self):
+        """Low-quality live websocket snapshots should not displace persisted provider data."""
+        low_quality_snapshot = MagicMock()
+        low_quality_snapshot.net_gex = -1.0e12
+        low_quality_snapshot.zero_gamma_level = 5250.0
+        low_quality_snapshot.spot_price = 6530.0
+        low_quality_snapshot.timestamp = datetime(2026, 3, 24, 15, 59, tzinfo=ET)
+        low_quality_snapshot.advanced_analytics = None
+        low_quality_snapshot.metrics = {
+            "capture_quality": 0.0,
+            "meaningful_strike_count": 1.0,
+            "is_replay_eligible": 0.0,
+        }
+
+        persisted_snapshot = MagicMock()
+        persisted_snapshot.net_gex = -6.0e8
+        persisted_snapshot.zero_gamma_level = 6010.0
+        persisted_snapshot.spot_price = 6025.0
+        persisted_snapshot.timestamp = datetime(2026, 3, 24, 15, 50, tzinfo=ET)
+        persisted_snapshot.advanced_analytics = None
+
+        mock_cache = MagicMock()
+        mock_cache.get_if_fresh.return_value = None
+        mock_cache.get.return_value = None
+
+        mock_client = AsyncMock()
+        mock_client.provider_name = "yfinance"
+        mock_client.get_options_chain_for_gex.return_value = (
+            pd.DataFrame([{"contract": 1}]),
+            6530.0,
+        )
+
+        mock_calculator = MagicMock()
+        mock_calculator.calculate_gex_from_chain.return_value = low_quality_snapshot
+
+        mock_history_service = MagicMock()
+        mock_history_service.get_latest_snapshot = AsyncMock(return_value=persisted_snapshot)
+
+        with patch("app.api.websocket.get_cache", return_value=mock_cache):
+            with patch("app.api.websocket.get_data_client", return_value=mock_client):
+                with patch("app.api.websocket.get_gex_calculator", return_value=mock_calculator):
+                    with patch(
+                        "app.api.websocket.get_historical_data_service",
+                        return_value=mock_history_service,
+                    ):
+                        payload = await _get_gex_update(
+                            Settings(data_provider="yfinance"),
+                            symbol="SPX",
+                        )
+
+        assert payload["spot_price"] == 6025.0
+        assert payload["provider"] == "yfinance"
+        mock_cache.set.assert_not_called()
+
 
 class TestConnectionManager:
     """Unit tests for low-level websocket connection bookkeeping."""

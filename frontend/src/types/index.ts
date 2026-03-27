@@ -8,6 +8,8 @@
 /**
  * GEX calculation snapshot for a point in time.
  */
+export type SnapshotMetricValue = number | string | boolean | null | string[];
+
 export interface GEXSnapshot {
   timestamp: string;
   spot_price: number;
@@ -17,7 +19,8 @@ export interface GEXSnapshot {
   zero_gamma_level: number;
   gex_by_strike: Record<number, number>;
   dominant_strike: number;
-  metrics: Record<string, number>;
+  metrics: Record<string, SnapshotMetricValue>;
+  provider?: string;
   advanced_analytics?: AdvancedAnalytics | null;
 }
 

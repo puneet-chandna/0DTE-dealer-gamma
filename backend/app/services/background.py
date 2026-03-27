@@ -15,6 +15,7 @@ from app.core.provider_registry import ProviderRegistry, get_data_client
 from app.core.gex_calculator import GEXCalculator
 from app.core.hawkes_engine import HawkesEngine
 from app.core.kalman_filter import GEXKalmanFilter
+from app.core.snapshot_quality import annotate_snapshot_quality, is_snapshot_replay_eligible
 from app.models.schemas import HawkesStateModel, AdvancedAnalytics
 from app.services.cache import get_cache
 from app.db.session import dispose_engine
@@ -263,10 +264,18 @@ async def _capture_symbol_for_provider(
         spot_price=spot_price,
         timestamp=datetime.now(ET),
     )
+    snapshot = annotate_snapshot_quality(snapshot, options_df=options_df)
 
-    cache.set(f"gex:current:{symbol}:{provider_name}", snapshot)
-    if provider_name == default_provider:
-        cache.set(f"gex:current:{symbol}", snapshot)
+    if is_snapshot_replay_eligible(snapshot):
+        cache.set(f"gex:current:{symbol}:{provider_name}", snapshot)
+        if provider_name == default_provider:
+            cache.set(f"gex:current:{symbol}", snapshot)
+    else:
+        logger.warning(
+            "Skipping cache update for low-quality historical capture of %s via %s",
+            symbol,
+            provider_name,
+        )
 
     persisted = await historical_data_service.persist_capture(
         provider=provider_name,

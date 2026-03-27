@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from app.core.analytics import TradingStrategy, VolatilityAnalyzer
+from app.core.snapshot_quality import is_snapshot_replay_eligible
 from app.core.technical_indicators import TechnicalIndicatorEngine
 from app.core.vectorbt_backtester import VectorBTBacktester
 from app.db.models import (
@@ -255,8 +256,12 @@ class HistoricalDataService:
             start_date=start_date,
             end_date=end_date,
         )
+        if prefer_replay:
+            records = self._filter_replay_eligible_records(records)
         if not records and prefer_replay:
-            records = await self._load_latest_replay_snapshot_records(provider=provider, symbol=symbol)
+            records = self._filter_replay_eligible_records(
+                await self._load_latest_replay_snapshot_records(provider=provider, symbol=symbol)
+            )
 
         return self._records_to_snapshots(records, interval=interval)
 
@@ -419,8 +424,12 @@ class HistoricalDataService:
             start_date=start_date,
             end_date=end_date,
         )
+        if prefer_replay:
+            records = self._filter_replay_eligible_records(records)
         if not records and prefer_replay:
-            records = await self._load_latest_replay_snapshot_records(provider=provider, symbol=symbol)
+            records = self._filter_replay_eligible_records(
+                await self._load_latest_replay_snapshot_records(provider=provider, symbol=symbol)
+            )
         if not records:
             return pd.DataFrame(), pd.DataFrame()
 
@@ -549,9 +558,11 @@ class HistoricalDataService:
         try:
             async with self._get_session_factory()() as session:
                 if prefer_replay:
-                    records = await self._load_latest_replay_snapshot_records(
-                        provider=provider_name,
-                        symbol=underlying,
+                    records = self._filter_replay_eligible_records(
+                        await self._load_latest_replay_snapshot_records(
+                            provider=provider_name,
+                            symbol=underlying,
+                        )
                     )
                     return records[-1].captured_at if records else None
 
@@ -572,6 +583,7 @@ class HistoricalDataService:
         provider: str,
         symbol: str,
         prefer_replay: bool = False,
+        replay_eligible_only: bool = False,
     ) -> Optional[GEXSnapshot]:
         """Return the newest stored snapshot for a provider/symbol."""
         provider_name = provider.strip().lower()
@@ -579,15 +591,33 @@ class HistoricalDataService:
 
         try:
             if prefer_replay:
-                replay_records = await self._load_latest_replay_snapshot_records(
-                    provider=provider_name,
-                    symbol=underlying,
+                replay_records = self._filter_replay_eligible_records(
+                    await self._load_latest_replay_snapshot_records(
+                        provider=provider_name,
+                        symbol=underlying,
+                    )
                 )
                 if not replay_records:
                     return None
                 return self._record_to_snapshot(replay_records[-1])
 
             async with self._get_session_factory()() as session:
+                if not replay_eligible_only:
+                    result = await session.execute(
+                        select(GEXSnapshotRecord)
+                        .options(selectinload(GEXSnapshotRecord.strike_points))
+                        .where(
+                            GEXSnapshotRecord.provider == provider_name,
+                            GEXSnapshotRecord.symbol == underlying,
+                        )
+                        .order_by(GEXSnapshotRecord.captured_at.desc())
+                        .limit(1)
+                    )
+                    latest_record = result.scalar_one_or_none()
+                    if latest_record is None:
+                        return None
+                    return self._record_to_snapshot(latest_record)
+
                 result = await session.execute(
                     select(GEXSnapshotRecord)
                     .options(selectinload(GEXSnapshotRecord.strike_points))
@@ -596,12 +626,11 @@ class HistoricalDataService:
                         GEXSnapshotRecord.symbol == underlying,
                     )
                     .order_by(GEXSnapshotRecord.captured_at.desc())
-                    .limit(1)
                 )
-                latest_record = result.scalar_one_or_none()
-                if latest_record is None:
-                    return None
-                return self._record_to_snapshot(latest_record)
+                for candidate in result.scalars():
+                    if self._record_is_replay_eligible(candidate):
+                        return self._record_to_snapshot(candidate)
+                return None
         except Exception as exc:
             logger.warning(
                 "Latest snapshot lookup failed for %s/%s: %s",
@@ -610,6 +639,33 @@ class HistoricalDataService:
                 exc,
             )
             return None
+
+    @classmethod
+    def _filter_replay_eligible_records(
+        cls,
+        records: list[GEXSnapshotRecord],
+    ) -> list[GEXSnapshotRecord]:
+        return [record for record in records if cls._record_is_replay_eligible(record)]
+
+    @classmethod
+    def _record_is_replay_eligible(cls, record: GEXSnapshotRecord) -> bool:
+        metrics = dict(record.metrics or {})
+
+        explicit_eligibility = metrics.get("is_replay_eligible")
+        if isinstance(explicit_eligibility, bool):
+            return explicit_eligibility
+        if isinstance(explicit_eligibility, (int, float)):
+            return bool(explicit_eligibility)
+
+        quality_flags = metrics.get("quality_flags")
+        if isinstance(quality_flags, list) and quality_flags:
+            return False
+
+        capture_quality = metrics.get("capture_quality")
+        if isinstance(capture_quality, (int, float)):
+            return float(capture_quality) > 0
+
+        return is_snapshot_replay_eligible(cls._record_to_snapshot(record))
 
     async def _get_or_create_market_session(
         self,

@@ -19,6 +19,8 @@ import { HiddenFlowsPanel, GammaMagnetField, HedgingCascadeSimulator } from '@/c
 import { MomentumGauge, GammaDecayClock } from '@/components/charts';
 import { useDashboardData } from '@/hooks/useDashboardData';
 import { cn } from '@/lib/utils';
+import { useUIStore } from '@/stores/uiStore';
+import { PROVIDER_FEATURES } from '@/types';
 import type { GEXSnapshot, CharmVannaSnapshot, HawkesState } from '@/types';
 
 // ============================================================================
@@ -275,8 +277,19 @@ function getBias(data: GEXSnapshot): { text: string; color: string } {
 
 export default function DealerFlowsPage() {
   const { gexData, isLoading } = useDashboardData();
+  const { selectedProvider, availableProviders = [] } = useUIStore();
   const [activeTab, setActiveTab] = useState<TabId>('magnetics');
   const lastUpdated = gexData?.timestamp ? new Date(gexData.timestamp) : null;
+  const selectedProviderInfo = availableProviders.find(
+    (provider) => provider.name === selectedProvider
+  );
+  const providerFeatures =
+    PROVIDER_FEATURES[selectedProvider as keyof typeof PROVIDER_FEATURES] ??
+    PROVIDER_FEATURES.yfinance;
+  const providerDisplayName =
+    selectedProviderInfo?.display_name ??
+    providerFeatures.displayName ??
+    selectedProvider;
 
   // Interpretations
   const magneticsInterp = useMemo(() => getMagneticsInterpretation(gexData), [gexData]);
@@ -311,7 +324,7 @@ export default function DealerFlowsPage() {
           </div>
           {/* Trust signals */}
           <div className="flex flex-wrap items-center gap-3 text-[11px] text-zinc-600">
-            <span>Source: Yahoo Finance</span>
+            <span>Source: {providerDisplayName}</span>
             {lastUpdated && (
               <span>
                 Updated {lastUpdated.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}

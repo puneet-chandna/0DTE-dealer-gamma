@@ -234,6 +234,59 @@ class TestGEXEndpoints:
         assert response.status_code == 503
         assert "Unable to fetch GEX data" in response.json()["detail"]
 
+    def test_current_gex_low_quality_live_snapshot_uses_persisted_fallback_without_cache_write(self):
+        """Low-quality live snapshots should not replace usable provider-specific fallback data."""
+        low_quality_snapshot = {
+            "timestamp": "2099-01-15T10:30:00-05:00",
+            "spot_price": 6530.0,
+            "total_call_gex": -1.0e12,
+            "total_put_gex": 0.0,
+            "net_gex": -1.0e12,
+            "zero_gamma_level": 5250.0,
+            "gex_by_strike": {"6530.0": -1.0e12},
+            "dominant_strike": 6530.0,
+            "metrics": {
+                "capture_quality": 0.0,
+                "meaningful_strike_count": 1.0,
+                "is_replay_eligible": 0.0,
+            },
+        }
+        persisted_snapshot = {
+            "timestamp": "2099-01-15T10:25:00-05:00",
+            "spot_price": 6025.0,
+            "total_call_gex": -2.0e9,
+            "total_put_gex": 1.4e9,
+            "net_gex": -6.0e8,
+            "zero_gamma_level": 6010.0,
+            "gex_by_strike": {"6000.0": 2.0e8, "6025.0": -3.5e8},
+            "dominant_strike": 6025.0,
+            "metrics": {"capture_quality": 0.95, "is_replay_eligible": 1.0},
+        }
+        mock_cache = MagicMock()
+        mock_cache.get_if_fresh.return_value = None
+        mock_cache.get.return_value = None
+
+        with patch("app.api.routes.gex.get_cache", return_value=mock_cache):
+            with patch("app.api.routes.gex.get_settings") as mock_get_settings:
+                mock_get_settings.return_value.data_provider = "yfinance"
+                with patch(
+                    "app.api.routes.gex._get_live_gex_snapshot",
+                    new_callable=AsyncMock,
+                    return_value=low_quality_snapshot,
+                ):
+                    with patch(
+                        "app.api.routes.gex._get_latest_persisted_snapshot",
+                        new_callable=AsyncMock,
+                        return_value=GEXSnapshot(**persisted_snapshot),
+                    ):
+                        response = client.get("/api/gex/current?provider=yfinance")
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["spot_price"] == 6025.0
+        assert body["metrics"]["is_persisted_fallback"] == 1.0
+        mock_cache.set.assert_not_called()
+
     def test_regime_prefers_stale_cache_before_persisted_fallback(self):
         """Regime should derive from stale cache before jumping to persisted DB history."""
         stale_snapshot = {

@@ -1,7 +1,7 @@
 """0DTE GEX Backend - Pydantic Schemas for API Models."""
 
 from datetime import date, datetime
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -89,7 +89,8 @@ class GEXSnapshot(BaseModel):
     zero_gamma_level: float  # Price where net_gex = 0
     gex_by_strike: Dict[float, float]  # Strike-level breakdown
     dominant_strike: float  # Strike with max |GEX|
-    metrics: Dict[str, float] = Field(default_factory=dict)
+    metrics: Dict[str, Any] = Field(default_factory=dict)
+    provider: Optional[str] = None
     advanced_analytics: Optional["AdvancedAnalytics"] = None
 
 
@@ -297,4 +298,3 @@ class VectorBTBacktestResult(BaseModel):
     start_date: datetime
     end_date: datetime
     equity_curve: List[float]
-

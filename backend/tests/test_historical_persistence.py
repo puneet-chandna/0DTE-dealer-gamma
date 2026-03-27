@@ -52,6 +52,17 @@ def _build_snapshot(
     )
 
 
+def _with_metrics(snapshot: GEXSnapshot, **metrics) -> GEXSnapshot:
+    return snapshot.model_copy(
+        update={
+            "metrics": {
+                **snapshot.metrics,
+                **metrics,
+            }
+        }
+    )
+
+
 def _build_options_df() -> pd.DataFrame:
     return pd.DataFrame(
         [
@@ -291,6 +302,138 @@ async def test_demo_historical_falls_back_to_synthetic_when_no_persisted_snapsho
     assert body["count"] == 1
     assert body["data"][0]["spot_price"] == 5922.0
     assert body["data"][0]["net_gex"] == -5.5e8
+
+
+@pytest.mark.asyncio
+async def test_demo_current_skips_ineligible_latest_replay_and_uses_latest_good_same_provider_snapshot(
+    history_service,
+):
+    service, session_factory = history_service
+    earlier_good = datetime(2026, 3, 20, 15, 45, 0, tzinfo=ET)
+    later_bad = datetime(2026, 3, 20, 15, 58, 0, tzinfo=ET)
+
+    await service.persist_capture(
+        provider="yfinance",
+        symbol="SPX",
+        snapshot=_with_metrics(
+            _build_snapshot(earlier_good, spot_price=6011.0, net_gex=-7.5e8),
+            is_replay_eligible=1.0,
+        ),
+        options_df=_build_options_df(),
+        force_raw_capture=True,
+    )
+    await service.persist_capture(
+        provider="yfinance",
+        symbol="SPX",
+        snapshot=_with_metrics(
+            _build_snapshot(later_bad, spot_price=6530.0, net_gex=-1.05e12),
+            capture_quality=0.0,
+            meaningful_strike_count=1.0,
+            is_replay_eligible=0.0,
+        ),
+        options_df=_build_options_df(),
+        force_raw_capture=True,
+    )
+
+    async with session_factory() as session:
+        market_session = (
+            await session.execute(
+                select(MarketSessionRecord).where(
+                    MarketSessionRecord.provider == "yfinance",
+                    MarketSessionRecord.symbol == "SPX",
+                    MarketSessionRecord.trading_date == date(2026, 3, 20),
+                )
+            )
+        ).scalar_one()
+        market_session.status = "complete"
+        await session.commit()
+
+    class _FailingDemoService:
+        def get_current_snapshot(self, *args, **kwargs):
+            raise AssertionError("synthetic demo fallback should not be used")
+
+    with patch("app.api.routes.gex.get_historical_data_service", return_value=service):
+        with patch("app.api.routes.gex.get_demo_data_service", return_value=_FailingDemoService()):
+            response = client.get(
+                "/api/gex/current",
+                params={
+                    "provider": "yfinance",
+                    "symbol": "SPX",
+                    "demo": "true",
+                },
+            )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["spot_price"] == 6011.0
+    assert body["metrics"]["is_replay_data"] == 1.0
+
+
+@pytest.mark.asyncio
+async def test_demo_current_falls_back_to_synthetic_without_cross_provider_replay_when_only_other_provider_is_good(
+    history_service,
+):
+    service, session_factory = history_service
+    captured_at = datetime(2026, 3, 20, 15, 58, 0, tzinfo=ET)
+
+    await service.persist_capture(
+        provider="yfinance",
+        symbol="SPX",
+        snapshot=_with_metrics(
+            _build_snapshot(captured_at, spot_price=6530.0, net_gex=-1.05e12),
+            capture_quality=0.0,
+            meaningful_strike_count=1.0,
+            is_replay_eligible=0.0,
+        ),
+        options_df=_build_options_df(),
+        force_raw_capture=True,
+    )
+    await service.persist_capture(
+        provider="tradier",
+        symbol="SPX",
+        snapshot=_with_metrics(
+            _build_snapshot(captured_at, spot_price=6042.0, net_gex=8.2e8),
+            is_replay_eligible=1.0,
+        ),
+        options_df=_build_options_df(),
+        force_raw_capture=True,
+    )
+
+    async with session_factory() as session:
+        sessions = (
+            await session.execute(select(MarketSessionRecord))
+        ).scalars().all()
+        for market_session in sessions:
+            market_session.status = "complete"
+        await session.commit()
+
+    synthetic_snapshot = _build_snapshot(
+        datetime(2026, 3, 21, 10, 0, 0, tzinfo=ET),
+        spot_price=5902.0,
+        net_gex=-4.8e8,
+    )
+
+    class _DemoService:
+        def get_current_snapshot(self, symbol, now=None, *, anchor_snapshot):
+            assert symbol == "SPX"
+            assert anchor_snapshot is None
+            return synthetic_snapshot
+
+    with patch("app.api.routes.gex.get_historical_data_service", return_value=service):
+        with patch("app.api.routes.gex.get_demo_data_service", return_value=_DemoService()):
+            response = client.get(
+                "/api/gex/current",
+                params={
+                    "provider": "yfinance",
+                    "symbol": "SPX",
+                    "demo": "true",
+                },
+            )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["spot_price"] == 5902.0
+    assert body["provider"] == "yfinance"
 
 
 @pytest.mark.asyncio

@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from app.config import Settings, get_settings
 from app.core.data_acquisition import is_market_open
 from app.core.demo_data import get_demo_data_service
+from app.core.snapshot_quality import annotate_snapshot_quality, is_snapshot_replay_eligible
 from app.core.provider_registry import ProviderRegistry, get_data_client
 from app.core.gex_calculator import GEXCalculator
 from app.services.cache import get_cache
@@ -123,6 +124,24 @@ def _generate_mock_gex_data() -> dict:
     }
 
 
+def _resolve_regime(net_gex: float) -> str:
+    """Resolve a regime label with a safe fallback for partial mocks."""
+    try:
+        regime_result = get_gex_calculator().determine_regime(net_gex)
+        if isinstance(regime_result, tuple) and regime_result:
+            return str(regime_result[0])
+        if isinstance(regime_result, str):
+            return regime_result
+    except Exception:
+        pass
+
+    if net_gex > 0:
+        return "long_gamma"
+    if net_gex < 0:
+        return "short_gamma"
+    return "neutral"
+
+
 def _build_ws_payload_from_snapshot(
     *,
     snapshot,
@@ -131,14 +150,12 @@ def _build_ws_payload_from_snapshot(
     is_replay: bool,
 ) -> dict:
     """Convert a stored or synthetic snapshot into the websocket payload shape."""
-    gex_calculator = get_gex_calculator()
-    regime, _, _ = gex_calculator.determine_regime(snapshot.net_gex)
     payload = {
         "net_gex": snapshot.net_gex,
         "net_gex_billions": snapshot.net_gex / 1e9,
         "zero_gamma_level": snapshot.zero_gamma_level,
         "spot_price": snapshot.spot_price,
-        "regime": regime,
+        "regime": _resolve_regime(snapshot.net_gex),
         "provider": provider,
         "timestamp": snapshot.timestamp.isoformat() if hasattr(snapshot.timestamp, "isoformat") else str(snapshot.timestamp),
         "is_mock": is_demo and not is_replay,
@@ -185,17 +202,48 @@ def _coerce_gex_snapshot(snapshot_like):
     return snapshot_like
 
 
+def _get_cached_snapshot(
+    *,
+    cache,
+    cache_key: str,
+    legacy_cache_key: Optional[str],
+    provider: str,
+    fresh_only: bool,
+):
+    """Return the first eligible cached snapshot and the key it came from."""
+    getter = cache.get_if_fresh if fresh_only else cache.get
+    freshness_label = "fresh" if fresh_only else "stale"
+
+    for key in (cache_key, legacy_cache_key):
+        if key is None:
+            continue
+
+        cached_snapshot = getter(key)
+        if cached_snapshot is None:
+            continue
+
+        normalized_snapshot = _coerce_gex_snapshot(cached_snapshot)
+        if is_snapshot_replay_eligible(normalized_snapshot):
+            return normalized_snapshot, key
+
+        logger.warning(
+            "Ignoring low-quality %s websocket cache snapshot for %s (%s)",
+            freshness_label,
+            key,
+            provider,
+        )
+
+    return None, None
+
+
 def _build_live_ws_payload_from_snapshot(snapshot, provider: str, *, is_stale: bool) -> dict:
     """Build a websocket payload from a live or cached snapshot."""
-    gex_calculator = get_gex_calculator()
-    regime, _, _ = gex_calculator.determine_regime(snapshot.net_gex)
-
     payload = {
         "net_gex": snapshot.net_gex,
         "net_gex_billions": snapshot.net_gex / 1e9,
         "zero_gamma_level": snapshot.zero_gamma_level,
         "spot_price": snapshot.spot_price,
-        "regime": regime,
+        "regime": _resolve_regime(snapshot.net_gex),
         "is_mock": False,
         "is_stale": is_stale,
         "provider": provider,
@@ -218,6 +266,7 @@ async def _get_latest_persisted_ws_payload(
     snapshot = await get_historical_data_service().get_latest_snapshot(
         provider=provider,
         symbol=symbol,
+        replay_eligible_only=True,
     )
     if snapshot is None:
         return None
@@ -273,6 +322,7 @@ async def _get_gex_update(
         anchor_snapshot = await history_service.get_latest_snapshot(
             provider=active_provider,
             symbol=symbol,
+            replay_eligible_only=True,
         )
         payload = get_demo_data_service().get_ws_update(
             symbol=symbol,
@@ -289,15 +339,16 @@ async def _get_gex_update(
         if active_provider == default_provider
         else None
     )
-    cached_key = cache_key
 
     # Prefer fresh cache only; stale data is handled as a fallback after live fetch fails.
-    cached = cache.get_if_fresh(cache_key)
-    if cached is None and legacy_cache_key is not None:
-        cached_key = legacy_cache_key
-        cached = cache.get_if_fresh(legacy_cache_key)
+    cached, _ = _get_cached_snapshot(
+        cache=cache,
+        cache_key=cache_key,
+        legacy_cache_key=legacy_cache_key,
+        provider=active_provider,
+        fresh_only=True,
+    )
     if cached is not None:
-        cached = _coerce_gex_snapshot(cached)
         return _build_live_ws_payload_from_snapshot(
             cached,
             active_provider,
@@ -332,6 +383,16 @@ async def _get_gex_update(
             spot_price=spot_price,
             timestamp=datetime.now(ET),
         )
+        snapshot = annotate_snapshot_quality(snapshot, options_df=options_df)
+        snapshot = _coerce_gex_snapshot(snapshot)
+
+        if not is_snapshot_replay_eligible(snapshot):
+            logger.warning(
+                "WebSocket update: rejecting low-quality live snapshot for %s (%s)",
+                symbol,
+                provider_name,
+            )
+            raise RuntimeError("live provider returned a low-quality snapshot")
 
         # Store in specific active provider cache and default cache
         cache.set(cache_key, snapshot)
@@ -357,13 +418,14 @@ async def _get_gex_update(
 
     except Exception as e:
         logger.warning(f"Failed to fetch GEX data for WebSocket: {e}")
-        stale = cache.get(cache_key)
-        stale_key = cache_key
-        if stale is None and legacy_cache_key is not None:
-            stale = cache.get(legacy_cache_key)
-            stale_key = legacy_cache_key
-        if stale is not None:
-            stale_snapshot = _coerce_gex_snapshot(stale)
+        stale_snapshot, stale_key = _get_cached_snapshot(
+            cache=cache,
+            cache_key=cache_key,
+            legacy_cache_key=legacy_cache_key,
+            provider=active_provider,
+            fresh_only=False,
+        )
+        if stale_snapshot is not None and stale_key is not None:
             return _build_live_ws_payload_from_snapshot(
                 stale_snapshot,
                 active_provider,
