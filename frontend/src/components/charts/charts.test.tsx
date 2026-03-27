@@ -163,6 +163,26 @@ describe('MomentumGauge', () => {
     expect(screen.queryByText(/awaiting hawkes data/i)).not.toBeInTheDocument();
   });
 
+  it('treats missing baseline_ready metadata as baselining instead of ready', () => {
+    render(
+      <MomentumGauge
+        data={{
+          call_intensity: 0.4,
+          put_intensity: 0.2,
+          net_toxicity: 0.2,
+          squeeze_probability: 0.15,
+          confidence_score: 0.6,
+          provider_mode: 'yfinance_proxy',
+          event_count: 2,
+        }}
+      />
+    );
+
+    expect(screen.getByText(/^baselining$/i)).toBeInTheDocument();
+    expect(screen.getByText(/building flow baseline/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^baseline ready$/i)).not.toBeInTheDocument();
+  });
+
   it('colors the confidence pill to match a low-confidence state', () => {
     render(
       <MomentumGauge

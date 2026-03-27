@@ -57,7 +57,7 @@ function MomentumGaugeComponent({ data, isLoading }: MomentumGaugeProps) {
 
   const squeezePercent = data ? Math.round(data.squeeze_probability * 100) : 0;
   const isHighSqueeze = squeezePercent >= 60;
-  const baselineReady = data?.baseline_ready ?? true;
+  const baselineReady = data?.baseline_ready ?? false;
   const confidenceScore = data?.confidence_score ?? 0;
   const confidenceLabel = getConfidenceLabel(confidenceScore);
   const confidencePillClasses = getConfidencePillClasses(confidenceScore);
