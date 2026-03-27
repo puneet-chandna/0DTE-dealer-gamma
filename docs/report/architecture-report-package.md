@@ -157,7 +157,8 @@ Diagram 2 primary flows:
 - FastAPI REST Endpoints -> In-Memory TTL Cache labeled "check cache"
 - FastAPI REST Endpoints -> Analytics & Backtesting Engines labeled "analytics or backtest requests"
 - Analytics & Backtesting Engines -> Historical Persistence & Replay Service labeled "historical and replay queries"
-- Analytics & Backtesting Engines -> Analytics and Backtest Pages labeled "summary, IV, technical, backtest payloads"
+- Analytics & Backtesting Engines -> FastAPI REST Endpoints
+- FastAPI REST Endpoints -> Analytics and Backtest Pages labeled "summary, IV, technical, backtest payloads"
 - In-Memory TTL Cache -> Dashboard Components labeled "current, strikes, and market payloads"
 - In-Memory TTL Cache -> WebSocket Stream labeled "live snapshot"
 - WebSocket Stream -> WebSocket Hook labeled "gex_update"

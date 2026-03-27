@@ -117,4 +117,29 @@ describe('DealerFlowsPage source label', () => {
 
     expect(screen.getByText(/order flow momentum is balanced/i)).toBeInTheDocument();
   });
+
+  it('distinguishes balanced but elevated Hawkes intensity from quiet flow', () => {
+    const baseData = getDefaultDashboardData();
+    mockUseDashboardData.mockReturnValue({
+      ...baseData,
+      gexData: {
+        ...baseData.gexData,
+        advanced_analytics: {
+          charm_vanna: null,
+          hawkes: {
+            call_intensity: 0.75,
+            put_intensity: 0.75,
+            net_toxicity: 0,
+            squeeze_probability: 0.5,
+          },
+          smoothed_net_gex: null,
+        },
+      } as GEXSnapshot,
+    });
+
+    render(<DealerFlowsPage />);
+    fireEvent.click(screen.getByRole('button', { name: /hidden flows/i }));
+
+    expect(screen.getByText(/balanced, but hawkes intensities are elevated on both sides/i)).toBeInTheDocument();
+  });
 });

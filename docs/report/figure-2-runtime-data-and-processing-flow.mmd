@@ -54,8 +54,9 @@ flowchart TD
     REST -->|"check cache"| CACHE
     REST -->|"analytics or backtest requests"| ANALYTICS
     ANALYTICS -->|"historical and replay queries"| HIST
+    ANALYTICS --> REST
     ANALYTICS -.->|"provider-backed indicator fetches when needed"| PROVIDER
-    ANALYTICS -->|"summary, IV, technical, backtest payloads"| REPORTPAGES
+    REST -->|"summary, IV, technical, backtest payloads"| REPORTPAGES
     CACHE -->|"current, strikes, and market payloads"| DASH
 
     CACHE -->|"live snapshot"| WS

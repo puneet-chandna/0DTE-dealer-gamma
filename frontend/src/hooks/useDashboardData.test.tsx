@@ -296,8 +296,16 @@ describe('useDashboardData', () => {
       freshRestSnapshot
     );
 
+    vi.mocked(gexAPI.getCurrentGEX).mockResolvedValue(freshRestSnapshot);
+    vi.mocked(gexAPI.getCurrentRegime).mockResolvedValue(liveRegime);
+    vi.mocked(gexAPI.getGEXByStrikes).mockResolvedValue(liveStrikes);
+
     const { result } = renderHook(() => useDashboardData(), {
       wrapper: createWrapper(queryClient),
+    });
+
+    await act(async () => {
+      await Promise.resolve();
     });
 
     expect(result.current.isRealtime).toBe(false);
@@ -306,6 +314,37 @@ describe('useDashboardData', () => {
       Date.parse('2026-03-23T10:29:55.000Z')
     );
     expect(result.current.isStale).toBe(false);
+  });
+
+  it('marks websocket data stale immediately when the server flags it stale even with a fresh timestamp', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-23T10:30:00.000Z'));
+
+    websocketState.stream = {
+      ...websocketState.createStream(),
+      data: {
+        ...websocketState.createStream().data!,
+        is_stale: true,
+        timestamp: '2026-03-23T10:30:00.000Z',
+      },
+      lastUpdateTime: Date.parse('2026-03-23T10:30:00.000Z'),
+    };
+
+    vi.mocked(gexAPI.getCurrentGEX).mockResolvedValue(liveCurrentGex);
+    vi.mocked(gexAPI.getCurrentRegime).mockResolvedValue(liveRegime);
+    vi.mocked(gexAPI.getGEXByStrikes).mockResolvedValue(liveStrikes);
+
+    const { result } = renderHook(() => useDashboardData(), {
+      wrapper: createWrapper(createQueryClient()),
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(result.current.isRealtime).toBe(false);
+    expect(result.current.isStale).toBe(true);
+    expect(result.current.lastUpdateTime).toBe(Date.parse('2026-03-23T10:30:00.000Z'));
   });
 
   it('falls back to REST data when the websocket payload is mock data', async () => {

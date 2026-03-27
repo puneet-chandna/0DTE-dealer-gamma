@@ -231,19 +231,27 @@ function getHiddenFlowsInterpretation(
 
   if (hasHawkes) {
     const squeeze = Math.round(hawkes!.squeeze_probability * 100);
+    const intensityThreshold = 0.2;
     const callDominant = hawkes!.call_intensity > hawkes!.put_intensity;
     const putDominant = hawkes!.put_intensity > hawkes!.call_intensity;
-    const isBalanced = !callDominant && !putDominant;
+    const hasBalancedFlow = !callDominant && !putDominant;
+    const isBalanced =
+      hasBalancedFlow &&
+      hawkes!.call_intensity < intensityThreshold &&
+      hawkes!.put_intensity < intensityThreshold;
+    const isBalancedButElevated = hasBalancedFlow && !isBalanced;
 
     if (!hero) {
       hero = isBalanced
         ? `Order flow momentum is balanced. Hawkes intensities are quiet right now, so there is no active call or put dominance.`
+        : isBalancedButElevated
+          ? `Order flow momentum is balanced, but Hawkes intensities are elevated on both sides. Squeeze probability: ${squeeze}%.`
         : `Order flow momentum is ${callDominant ? 'call-dominant' : 'put-dominant'}. Squeeze probability: ${squeeze}%.`;
     }
 
-    bullets.push(`Call intensity: ${hawkes!.call_intensity.toFixed(2)} — ${isBalanced ? 'balanced with puts' : callDominant ? 'dominant' : 'subordinate'} side.`);
-    bullets.push(`Put intensity: ${hawkes!.put_intensity.toFixed(2)} — ${isBalanced ? 'balanced with calls' : putDominant ? 'dominant' : 'subordinate'} side.`);
-    bullets.push(`Squeeze probability: ${squeeze}% — ${squeeze > 60 ? 'high — squeeze conditions detected' : squeeze > 40 ? 'moderate — watch for buildup' : isBalanced ? 'low — no recent flow imbalance' : 'low — normal flow'}.`);
+    bullets.push(`Call intensity: ${hawkes!.call_intensity.toFixed(2)} — ${hasBalancedFlow ? 'balanced with puts' : callDominant ? 'dominant' : 'subordinate'} side.`);
+    bullets.push(`Put intensity: ${hawkes!.put_intensity.toFixed(2)} — ${hasBalancedFlow ? 'balanced with calls' : putDominant ? 'dominant' : 'subordinate'} side.`);
+    bullets.push(`Squeeze probability: ${squeeze}% — ${squeeze > 60 ? 'high — squeeze conditions detected' : squeeze > 40 ? 'moderate — watch for buildup' : isBalanced ? 'low — no recent flow imbalance' : isBalancedButElevated ? 'low — balanced flow is elevated on both sides' : 'low — normal flow'}.`);
   }
 
   if (hasCharmVanna) {

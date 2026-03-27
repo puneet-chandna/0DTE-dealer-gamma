@@ -190,17 +190,41 @@ class HawkesEngine:
 
     def restore_state(self, state: dict[str, Any]) -> None:
         """Restore a previously captured engine state."""
+        required_keys = (
+            "call_intensity",
+            "put_intensity",
+            "max_observed_intensity",
+        )
+        missing_keys = [key for key in required_keys if key not in state]
+        if missing_keys:
+            raise ValueError(
+                f"restore_state missing required keys: {', '.join(missing_keys)}"
+            )
+
         last_volumes = state.get("last_volumes")
         last_timestamp = state.get("last_timestamp")
-        self._call_intensity = float(state["call_intensity"])
-        self._put_intensity = float(state["put_intensity"])
-        self._last_volumes = dict(last_volumes) if isinstance(last_volumes, dict) else {}
-        self._last_timestamp = (
+        try:
+            call_intensity = float(state["call_intensity"])
+            put_intensity = float(state["put_intensity"])
+            max_observed_intensity = float(state["max_observed_intensity"])
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "restore_state requires numeric call_intensity, put_intensity, "
+                "and max_observed_intensity values"
+            ) from exc
+
+        restored_last_volumes = dict(last_volumes) if isinstance(last_volumes, dict) else {}
+        restored_last_timestamp = (
             float(last_timestamp)
             if isinstance(last_timestamp, int | float)
             else None
         )
-        self._max_observed_intensity = float(state["max_observed_intensity"])
+
+        self._call_intensity = call_intensity
+        self._put_intensity = put_intensity
+        self._last_volumes = restored_last_volumes
+        self._last_timestamp = restored_last_timestamp
+        self._max_observed_intensity = max_observed_intensity
 
     def reset(self) -> None:
         """Reset the engine state (e.g., at market open)."""

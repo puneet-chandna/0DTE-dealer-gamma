@@ -209,7 +209,12 @@ export function useDashboardData(): DashboardData {
 
   // Calculate staleness using state-based current time
   const isStale = useMemo(() => {
-    if (hasUsableRealtimeData && wsStream.data?.is_stale) {
+    const hasFresherPolledSnapshot =
+      polledTimestamp !== null &&
+      websocketTimestamp !== null &&
+      polledTimestamp > websocketTimestamp;
+
+    if (wsStream.isConnected && wsStream.data?.is_stale && !hasFresherPolledSnapshot) {
       return true;
     }
 
@@ -217,7 +222,14 @@ export function useDashboardData(): DashboardData {
 
     const timeSinceUpdate = currentTime - effectiveLastUpdateTime;
     return timeSinceUpdate > STALE_THRESHOLD;
-  }, [hasUsableRealtimeData, wsStream.data, effectiveLastUpdateTime, currentTime]);
+  }, [
+    wsStream.isConnected,
+    wsStream.data,
+    polledTimestamp,
+    websocketTimestamp,
+    effectiveLastUpdateTime,
+    currentTime,
+  ]);
 
   // Calculate loading state
   const isLoading =

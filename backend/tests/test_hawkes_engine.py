@@ -154,3 +154,16 @@ class TestHawkesEngine:
         engine = HawkesEngine()
         state = engine.update(pd.DataFrame())
         assert state.call_intensity == 0.0
+
+    def test_restore_state_rejects_missing_required_keys_without_mutating_state(self):
+        """Invalid restore payloads should fail before mutating engine state."""
+        engine = HawkesEngine()
+        original_state = engine.snapshot_state()
+
+        with pytest.raises(ValueError, match="missing required keys"):
+            engine.restore_state({
+                "call_intensity": 99.0,
+                "put_intensity": 77.0,
+            })
+
+        assert engine.snapshot_state() == original_state
