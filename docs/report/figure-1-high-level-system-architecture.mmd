@@ -4,7 +4,8 @@ flowchart LR
     classDef backend fill:#f4f7fb,stroke:#5f7596,color:#1f2a44,stroke-width:1.2px;
     classDef source fill:#fcfdff,stroke:#7f8ea3,color:#273246,stroke-width:1.2px;
     classDef store fill:#f5f7fa,stroke:#6b7280,color:#1f2937,stroke-width:1.2px;
-    classDef accent fill:#e9f0fb,stroke:#4f6f9a,color:#1f2a44,stroke-width:1.5px;
+    classDef backendAccent fill:#e9f0fb,stroke:#4f6f9a,color:#1f2a44,stroke-width:1.5px;
+    classDef storeAccent fill:#e9f0fb,stroke:#4f6f9a,color:#1f2a44,stroke-width:1.5px;
 
     subgraph U["End User"]
         USER["Trader / Analyst / Research User"]
@@ -69,10 +70,14 @@ flowchart LR
     REG --> TR
 
     HIST --> PG
+    HIST --> SESS
+    HIST --> GEXDB
+    HIST --> RAW
 
     class USER user;
     class NEXT,PAGES,RQ,ZUSTAND,CHARTS frontend;
-    class API,WS,REG,CALC,ANALYTICS,BG,CACHE,HIST backend;
+    class API,WS,REG,CALC,ANALYTICS,BG,HIST backend;
+    class CACHE backendAccent;
     class YF,TR source;
-    class PG,SESS,GEXDB,RAW store;
-    class CACHE,PG accent;
+    class SESS,GEXDB,RAW store;
+    class PG storeAccent;

@@ -9,7 +9,7 @@ feel institutional-grade.
 """
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 import numpy as np
 
@@ -136,6 +136,23 @@ class GEXKalmanFilter:
     def is_initialized(self) -> bool:
         """Whether the filter has received at least one measurement."""
         return self._initialized
+
+    def snapshot_state(self) -> dict[str, Any]:
+        """Capture the mutable filter state for rollback-safe updates."""
+        return {
+            "x": self._x,
+            "P": self._P,
+            "initialized": self._initialized,
+            "update_count": self._update_count,
+        }
+
+    def restore_state(self, state: dict[str, Any]) -> None:
+        """Restore a previously captured filter state."""
+        x = state["x"]
+        self._x = float(x) if isinstance(x, int | float) else None
+        self._P = float(state["P"])
+        self._initialized = bool(state["initialized"])
+        self._update_count = int(state["update_count"])
 
     def reset(self, initial_estimate: Optional[float] = None) -> None:
         """Reset the filter state."""

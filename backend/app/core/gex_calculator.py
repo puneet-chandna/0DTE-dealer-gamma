@@ -316,7 +316,14 @@ class GEXCalculator:
         gex_values = np.array([gex_by_strike[k] for k in sorted_strikes])
         cumulative_gex = np.cumsum(gex_values)
 
-        exact_crossings = np.where(cumulative_gex == 0)[0]
+        zero_crossing_tolerance = 1e-8
+        exact_crossing_mask = np.isclose(
+            cumulative_gex,
+            0.0,
+            atol=zero_crossing_tolerance,
+            rtol=0.0,
+        )
+        exact_crossings = np.where(exact_crossing_mask)[0]
         if exact_crossings.size > 0:
             return sorted_strikes[int(exact_crossings[0])], True, "in_range"
 

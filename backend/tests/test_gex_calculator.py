@@ -166,6 +166,21 @@ class TestGEXCalculator:
         assert result.metrics["zero_gamma_crossing_found"] is False
         assert result.metrics["zero_gamma_relation"] == "below_range"
 
+    def test_zero_gamma_treats_near_zero_cumulative_value_as_exact_crossing(self, gex_calculator):
+        """Floating-point residue near zero should still count as an in-range crossing."""
+        zero_gamma_level, crossing_found, relation = gex_calculator._find_zero_gamma_level(
+            {
+                4000.0: 0.1,
+                4100.0: 0.2,
+                4200.0: -0.3,
+            },
+            spot_price=4100.0,
+        )
+
+        assert zero_gamma_level == 4200.0
+        assert crossing_found is True
+        assert relation == "in_range"
+
     def test_dominant_strike(self, sample_options_df, gex_calculator):
         """Test dominant strike is the one with highest absolute GEX."""
         timestamp = datetime(2024, 1, 15, 12, 0, 0, tzinfo=ET)

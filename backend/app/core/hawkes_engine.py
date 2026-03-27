@@ -16,7 +16,7 @@ A spike in put_intensity means put buying is self-reinforcing.
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import numpy as np
 import pandas as pd
@@ -177,6 +177,30 @@ class HawkesEngine:
             net_toxicity=round(net_toxicity, 6),
             squeeze_probability=round(squeeze_probability, 6),
         )
+
+    def snapshot_state(self) -> dict[str, Any]:
+        """Capture the full mutable engine state for rollback-safe updates."""
+        return {
+            "call_intensity": self._call_intensity,
+            "put_intensity": self._put_intensity,
+            "last_volumes": dict(self._last_volumes),
+            "last_timestamp": self._last_timestamp,
+            "max_observed_intensity": self._max_observed_intensity,
+        }
+
+    def restore_state(self, state: dict[str, Any]) -> None:
+        """Restore a previously captured engine state."""
+        last_volumes = state.get("last_volumes")
+        last_timestamp = state.get("last_timestamp")
+        self._call_intensity = float(state["call_intensity"])
+        self._put_intensity = float(state["put_intensity"])
+        self._last_volumes = dict(last_volumes) if isinstance(last_volumes, dict) else {}
+        self._last_timestamp = (
+            float(last_timestamp)
+            if isinstance(last_timestamp, int | float)
+            else None
+        )
+        self._max_observed_intensity = float(state["max_observed_intensity"])
 
     def reset(self) -> None:
         """Reset the engine state (e.g., at market open)."""

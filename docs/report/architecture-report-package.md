@@ -273,6 +273,7 @@ Show how live market data moves through the system during operation, including b
 - `check cache`
 - `analytics or backtest requests`
 - `historical and replay queries`
+- `provider-backed indicator fetches when needed`
 - `summary, IV, technical, backtest payloads`
 - `current, strikes, and market payloads`
 - `live snapshot`
