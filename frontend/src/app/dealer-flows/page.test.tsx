@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { describe, it, expect, vi } from 'vitest';
+import { afterEach, describe, it, expect, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 
 import DealerFlowsPage from './page';
@@ -82,6 +82,11 @@ vi.mock('@/components/charts', () => ({
 }));
 
 describe('DealerFlowsPage source label', () => {
+  afterEach(() => {
+    mockUseDashboardData.mockReset();
+    mockUseDashboardData.mockImplementation(getDefaultDashboardData);
+  });
+
   it('shows the selected provider display name instead of a hardcoded Yahoo label', () => {
     render(<DealerFlowsPage />);
 
@@ -90,7 +95,7 @@ describe('DealerFlowsPage source label', () => {
 
   it('treats a zero Hawkes state as valid neutral flow data', () => {
     const baseData = getDefaultDashboardData();
-    mockUseDashboardData.mockImplementation(() => ({
+    mockUseDashboardData.mockReturnValue({
       ...baseData,
       gexData: {
         ...baseData.gexData,
@@ -105,12 +110,11 @@ describe('DealerFlowsPage source label', () => {
           smoothed_net_gex: null,
         },
       } as GEXSnapshot,
-    }));
+    });
 
     render(<DealerFlowsPage />);
     fireEvent.click(screen.getByRole('button', { name: /hidden flows/i }));
 
     expect(screen.getByText(/order flow momentum is balanced/i)).toBeInTheDocument();
-    mockUseDashboardData.mockImplementation(getDefaultDashboardData);
   });
 });

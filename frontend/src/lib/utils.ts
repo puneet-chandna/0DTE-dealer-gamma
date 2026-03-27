@@ -54,28 +54,37 @@ function readZeroGammaRelation(snapshot?: Pick<GEXSnapshot, 'metrics'> | null) {
   return relation === 'below_range' || relation === 'above_range' ? relation : null;
 }
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
 export function hasZeroGammaCrossing(snapshot?: Pick<GEXSnapshot, 'metrics'> | null): boolean {
   const crossingMetric = snapshot?.metrics?.zero_gamma_crossing_found;
 
   if (typeof crossingMetric === 'boolean') return crossingMetric;
-  if (typeof crossingMetric === 'number') return crossingMetric !== 0;
+  if (typeof crossingMetric === 'number') return Number.isFinite(crossingMetric) && crossingMetric !== 0;
   if (typeof crossingMetric === 'string') {
     const normalized = crossingMetric.trim().toLowerCase();
     if (['false', '0', 'no', 'off'].includes(normalized)) return false;
     if (['true', '1', 'yes', 'on'].includes(normalized)) return true;
   }
 
-  return true;
+  return false;
 }
 
 export function formatZeroGammaValue(snapshot?: GEXSnapshot | null): string {
   if (!snapshot) return '--';
 
   if (!hasZeroGammaCrossing(snapshot)) {
-    return readZeroGammaRelation(snapshot) === 'above_range'
-      ? 'Above Range'
-      : 'Below Range';
+    const relation = readZeroGammaRelation(snapshot);
+
+    if (relation === 'above_range') return 'Above Range';
+    if (relation === 'below_range') return 'Below Range';
+
+    return 'Unknown';
   }
+
+  if (!isFiniteNumber(snapshot.zero_gamma_level)) return 'Unknown';
 
   return formatCurrency(snapshot.zero_gamma_level, 0);
 }
@@ -84,15 +93,27 @@ export function formatZeroGammaStatus(snapshot?: GEXSnapshot | null): string {
   if (!snapshot) return '--';
 
   if (!hasZeroGammaCrossing(snapshot)) {
-    return readZeroGammaRelation(snapshot) === 'above_range'
-      ? 'Above sampled range'
-      : 'Below sampled range';
+    const relation = readZeroGammaRelation(snapshot);
+
+    if (relation === 'above_range') return 'Above sampled range';
+    if (relation === 'below_range') return 'Below sampled range';
+
+    return 'Unknown';
+  }
+
+  if (!isFiniteNumber(snapshot.zero_gamma_level) || !isFiniteNumber(snapshot.spot_price)) {
+    return 'Unknown';
   }
 
   const distanceToZeroGamma = snapshot.zero_gamma_level - snapshot.spot_price;
-  const distancePercent = (distanceToZeroGamma / snapshot.spot_price) * 100;
+  const distancePercent =
+    snapshot.spot_price === 0 ? null : (distanceToZeroGamma / snapshot.spot_price) * 100;
+  const percentText =
+    distancePercent === null || !Number.isFinite(distancePercent)
+      ? 'N/A'
+      : `${distanceToZeroGamma >= 0 ? '+' : '-'}${Math.abs(distancePercent).toFixed(2)}%`;
 
-  return `${distanceToZeroGamma >= 0 ? '+' : ''}${formatCurrency(distanceToZeroGamma, 0)} (${distancePercent.toFixed(2)}%)`;
+  return `${distanceToZeroGamma >= 0 ? '+' : ''}${formatCurrency(distanceToZeroGamma, 0)} (${percentText})`;
 }
 
 /**

@@ -7,11 +7,15 @@ import {
   formatNumber,
   formatGEX,
   formatCurrency,
+  formatZeroGammaStatus,
+  formatZeroGammaValue,
   formatPercent,
   getRegimeColor,
   getRegimeBackgroundColor,
+  hasZeroGammaCrossing,
   isMarketOpen,
 } from './utils';
+import type { GEXSnapshot } from '@/types';
 
 describe('formatNumber', () => {
   it('formats billions correctly', () => {
@@ -88,6 +92,88 @@ describe('formatPercent', () => {
 
   it('formats zero', () => {
     expect(formatPercent(0)).toBe('+0.00%');
+  });
+});
+
+describe('zero gamma helpers', () => {
+  const createSnapshot = (overrides: Partial<GEXSnapshot> = {}): GEXSnapshot => ({
+    timestamp: '2026-03-25T10:30:00.000Z',
+    spot_price: 6000,
+    total_call_gex: -2.0e9,
+    total_put_gex: 1.5e9,
+    net_gex: -5.0e8,
+    zero_gamma_level: 6010,
+    gex_by_strike: { 6000: 1.0e8 },
+    dominant_strike: 6000,
+    metrics: {
+      zero_gamma_crossing_found: true,
+    },
+    ...overrides,
+  });
+
+  it('treats missing crossing metadata as no zero gamma crossing', () => {
+    expect(hasZeroGammaCrossing(createSnapshot({ metrics: {} }))).toBe(false);
+  });
+
+  it('treats unrecognized crossing metadata as no zero gamma crossing', () => {
+    expect(
+      hasZeroGammaCrossing(
+        createSnapshot({
+          metrics: {
+            zero_gamma_crossing_found: 'maybe',
+          },
+        })
+      )
+    ).toBe(false);
+  });
+
+  it('returns Unknown when range relation metadata is absent', () => {
+    const snapshot = createSnapshot({
+      metrics: {
+        zero_gamma_crossing_found: false,
+      },
+    });
+
+    expect(formatZeroGammaValue(snapshot)).toBe('Unknown');
+    expect(formatZeroGammaStatus(snapshot)).toBe('Unknown');
+  });
+
+  it('returns Above Range and Above sampled range for above-range snapshots', () => {
+    const snapshot = createSnapshot({
+      metrics: {
+        zero_gamma_crossing_found: false,
+        zero_gamma_relation: 'above_range',
+      },
+    });
+
+    expect(formatZeroGammaValue(snapshot)).toBe('Above Range');
+    expect(formatZeroGammaStatus(snapshot)).toBe('Above sampled range');
+  });
+
+  it('returns Unknown instead of formatting a missing zero gamma level', () => {
+    const snapshot = createSnapshot({
+      zero_gamma_level: undefined as unknown as number,
+    });
+
+    expect(formatZeroGammaValue(snapshot)).toBe('Unknown');
+  });
+
+  it('returns a signed distance and percent for valid crossing data', () => {
+    const snapshot = createSnapshot({
+      spot_price: 6000,
+      zero_gamma_level: 6005,
+    });
+
+    expect(formatZeroGammaStatus(snapshot)).toBe('+$5 (+0.08%)');
+  });
+
+  it('returns N/A percent when spot price is zero', () => {
+    const snapshot = createSnapshot({
+      spot_price: 0,
+      zero_gamma_level: 6005,
+    });
+
+    expect(formatZeroGammaStatus(snapshot)).toBe('+$6,005 (N/A)');
   });
 });
 
