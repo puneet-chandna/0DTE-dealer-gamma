@@ -2,7 +2,7 @@
 
 from datetime import date, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -244,3 +244,239 @@ def test_anchored_demo_session_applies_zero_total_put_gex_anchor():
     assert abs(float(anchored_session.gex_data["total_put_gex"].mean())) < 1e-6
     recomputed_call = anchored_session.gex_data["net_gex"] - anchored_session.gex_data["total_put_gex"]
     assert (anchored_session.gex_data["total_call_gex"] == recomputed_call).all()
+
+
+def test_demo_vectorbt_backtest_always_uses_requested_range_synthetic_series(monkeypatch):
+    """Demo vectorbt backtests should bypass persisted backtest helpers entirely."""
+    import app.api.routes.analytics as analytics_routes
+
+    anchor_snapshot = _build_snapshot(
+        spot_price=6030.0,
+        net_gex=-8.2e8,
+        zero_gamma_level=6021.5,
+    )
+    history_service = SimpleNamespace(
+        run_vectorbt_backtest=AsyncMock(
+            side_effect=AssertionError("persisted vectorbt backtest should not be used in demo mode")
+        ),
+        get_latest_snapshot=AsyncMock(return_value=anchor_snapshot),
+    )
+    captured_demo_request: dict[str, object] = {}
+
+    class _DemoService:
+        def get_time_series(self, symbol, start_date, end_date, interval="1min", *, anchor_snapshot=None):
+            captured_demo_request.update(
+                {
+                    "symbol": symbol,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "anchor_snapshot": anchor_snapshot,
+                }
+            )
+            return "demo-price-series", "demo-gex-series"
+
+    monkeypatch.setattr(
+        analytics_routes,
+        "get_historical_data_service",
+        lambda: history_service,
+    )
+    monkeypatch.setattr(
+        analytics_routes,
+        "get_demo_data_service",
+        lambda: _DemoService(),
+    )
+
+    demo_result = SimpleNamespace(
+        total_return=0.08,
+        sharpe_ratio=1.6,
+        sortino_ratio=2.0,
+        calmar_ratio=1.1,
+        max_drawdown=-0.05,
+        total_trades=6,
+        winning_trades=4,
+        losing_trades=2,
+        win_rate=4 / 6,
+        profit_factor=1.8,
+        avg_trade_return=0.012,
+        best_trade=0.04,
+        worst_trade=-0.01,
+        avg_trade_duration_minutes=42.0,
+        start_date=datetime(2025, 1, 1, 9, 30, tzinfo=ET),
+        end_date=datetime(2025, 3, 1, 15, 55, tzinfo=ET),
+        equity_curve=[100000.0, 103500.0, 108000.0],
+    )
+
+    with patch(
+        "app.core.vectorbt_backtester.VectorBTBacktester.run_gex_signal_backtest",
+        return_value=demo_result,
+    ):
+        response = client.get(
+            "/api/analytics/vectorbt-backtest",
+            params={
+                "provider": "yfinance",
+                "symbol": "SPX",
+                "start_date": "2025-01-01",
+                "end_date": "2025-03-01",
+                "demo": "true",
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["start_date"].startswith("2025-01-01T09:30:00")
+    assert body["end_date"].startswith("2025-03-01T15:55:00")
+    assert captured_demo_request == {
+        "symbol": "SPX",
+        "start_date": date(2025, 1, 1),
+        "end_date": date(2025, 3, 1),
+        "anchor_snapshot": anchor_snapshot,
+    }
+    history_service.get_latest_snapshot.assert_awaited_once_with(
+        provider="yfinance",
+        symbol="SPX",
+    )
+
+
+def test_demo_legacy_backtest_always_uses_requested_range_synthetic_series(monkeypatch):
+    """Demo legacy backtests should bypass persisted backtest helpers entirely."""
+    import app.api.routes.analytics as analytics_routes
+
+    anchor_snapshot = _build_snapshot(
+        spot_price=5995.0,
+        net_gex=-6.1e8,
+        zero_gamma_level=6004.5,
+    )
+    history_service = SimpleNamespace(
+        run_backtest=AsyncMock(
+            side_effect=AssertionError("persisted legacy backtest should not be used in demo mode")
+        ),
+        get_latest_snapshot=AsyncMock(return_value=anchor_snapshot),
+    )
+    captured_demo_request: dict[str, object] = {}
+
+    class _DemoService:
+        def get_time_series(self, symbol, start_date, end_date, interval="1min", *, anchor_snapshot=None):
+            captured_demo_request.update(
+                {
+                    "symbol": symbol,
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "anchor_snapshot": anchor_snapshot,
+                }
+            )
+            return "demo-price-series", "demo-gex-series"
+
+    monkeypatch.setattr(
+        analytics_routes,
+        "get_historical_data_service",
+        lambda: history_service,
+    )
+    monkeypatch.setattr(
+        analytics_routes,
+        "get_demo_data_service",
+        lambda: _DemoService(),
+    )
+
+    demo_result = SimpleNamespace(
+        total_trades=5,
+        winning_trades=3,
+        losing_trades=2,
+        win_rate=0.6,
+        total_return=0.07,
+        average_return=0.013,
+        sharpe_ratio=1.4,
+        max_drawdown=-0.04,
+        profit_factor=1.7,
+        average_trade_duration=37.0,
+        start_date=datetime(2025, 1, 1, 9, 30, tzinfo=ET),
+        end_date=datetime(2025, 3, 1, 15, 55, tzinfo=ET),
+    )
+
+    with patch.object(
+        analytics_routes.TradingStrategy,
+        "volatility_breakout_strategy",
+        return_value=demo_result,
+    ):
+        response = client.get(
+            "/api/analytics/backtest",
+            params={
+                "provider": "yfinance",
+                "symbol": "SPX",
+                "start_date": "2025-01-01",
+                "end_date": "2025-03-01",
+                "demo": "true",
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["start_date"].startswith("2025-01-01T09:30:00")
+    assert body["end_date"].startswith("2025-03-01T15:55:00")
+    assert captured_demo_request == {
+        "symbol": "SPX",
+        "start_date": date(2025, 1, 1),
+        "end_date": date(2025, 3, 1),
+        "anchor_snapshot": anchor_snapshot,
+    }
+    history_service.get_latest_snapshot.assert_awaited_once_with(
+        provider="yfinance",
+        symbol="SPX",
+    )
+
+
+@pytest.mark.parametrize(
+    ("endpoint", "start_date", "end_date"),
+    [
+        ("/api/analytics/vectorbt-backtest", "2026-03-28", "2026-03-29"),
+        ("/api/analytics/vectorbt-backtest", "2026-03-26", "2026-03-28"),
+        ("/api/analytics/backtest", "2026-03-28", "2026-03-29"),
+        ("/api/analytics/backtest", "2026-03-26", "2026-03-28"),
+    ],
+)
+def test_backtest_endpoints_reject_future_dates_against_current_new_york_market_date(
+    monkeypatch,
+    endpoint,
+    start_date,
+    end_date,
+):
+    """Future backtest dates should fail fast against the New York market date."""
+    import app.api.routes.analytics as analytics_routes
+
+    history_service = SimpleNamespace(
+        run_vectorbt_backtest=AsyncMock(
+            side_effect=AssertionError("persisted vectorbt backtest should not run for future dates")
+        ),
+        run_backtest=AsyncMock(
+            side_effect=AssertionError("persisted legacy backtest should not run for future dates")
+        ),
+        get_latest_snapshot=AsyncMock(
+            side_effect=AssertionError("demo anchor lookup should not run for future dates")
+        ),
+    )
+
+    monkeypatch.setattr(
+        analytics_routes,
+        "get_current_trading_date",
+        lambda now=None: date(2026, 3, 27),
+    )
+    monkeypatch.setattr(
+        analytics_routes,
+        "get_historical_data_service",
+        lambda: history_service,
+    )
+
+    response = client.get(
+        endpoint,
+        params={
+            "provider": "yfinance",
+            "symbol": "SPX",
+            "start_date": start_date,
+            "end_date": end_date,
+            "demo": "true",
+        },
+    )
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert "2026-03-27" in detail
+    assert "new york market date" in detail.lower()

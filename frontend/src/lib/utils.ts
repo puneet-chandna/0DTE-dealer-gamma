@@ -5,6 +5,8 @@
 import { type ClassValue, clsx } from 'clsx';
 import type { GEXSnapshot } from '@/types';
 
+const MARKET_TIME_ZONE = 'America/New_York';
+
 /**
  * Merge class names with clsx (for conditional classes).
  */
@@ -160,6 +162,27 @@ export function parseETDate(dateString: string): Date {
   return new Date(dateString);
 }
 
+export function getCurrentMarketDateString(now: Date = new Date()): string {
+  const formatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: MARKET_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  });
+  const parts = formatter.formatToParts(now);
+  const partLookup = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  return `${partLookup.year}-${partLookup.month}-${partLookup.day}`;
+}
+
+export function isFutureMarketDate(
+  dateString: string,
+  marketDate: string = getCurrentMarketDateString()
+): boolean {
+  if (!dateString) return false;
+  return dateString > marketDate;
+}
+
 /**
  * Check if current time is within market hours (9:30 AM - 4:00 PM ET).
  */
@@ -167,7 +190,7 @@ export function isMarketOpen(): boolean {
   const now = new Date();
   // Convert to ET
   const etTime = new Date(
-    now.toLocaleString('en-US', { timeZone: 'America/New_York' })
+    now.toLocaleString('en-US', { timeZone: MARKET_TIME_ZONE })
   );
 
   const hours = etTime.getHours();

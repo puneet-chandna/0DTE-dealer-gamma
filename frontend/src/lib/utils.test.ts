@@ -12,7 +12,9 @@ import {
   formatPercent,
   getRegimeColor,
   getRegimeBackgroundColor,
+  getCurrentMarketDateString,
   hasZeroGammaCrossing,
+  isFutureMarketDate,
   isMarketOpen,
 } from './utils';
 import type { GEXSnapshot } from '@/types';
@@ -253,5 +255,27 @@ describe('isMarketOpen', () => {
     // Monday 5:00 PM ET
     vi.setSystemTime(new Date('2026-01-26T17:00:00-05:00'));
     expect(isMarketOpen()).toBe(false);
+  });
+});
+
+describe('market date helpers', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('uses the New York calendar date around UTC day boundaries', () => {
+    vi.setSystemTime(new Date('2026-03-31T02:30:00Z'));
+
+    expect(getCurrentMarketDateString()).toBe('2026-03-30');
+  });
+
+  it('detects dates after the current New York market date', () => {
+    expect(isFutureMarketDate('2026-03-31', '2026-03-30')).toBe(true);
+    expect(isFutureMarketDate('2026-03-30', '2026-03-30')).toBe(false);
+    expect(isFutureMarketDate('2026-03-29', '2026-03-30')).toBe(false);
   });
 });
