@@ -71,13 +71,23 @@ vi.mock('@/components/ui/PageShell', () => ({
 }));
 
 vi.mock('@/components/dashboard', () => ({
-  HiddenFlowsPanel: () => <div>Hidden Flows Panel</div>,
+  HiddenFlowsPanel: ({ data }: { data?: { net_hidden_flow?: number } | null }) => (
+    <div>
+      Hidden Flows Panel
+      {data ? ` ${data.net_hidden_flow}` : ' no-data'}
+    </div>
+  ),
   GammaMagnetField: () => <div>Gamma Magnet Field</div>,
   HedgingCascadeSimulator: () => <div>Hedging Cascade Simulator</div>,
 }));
 
 vi.mock('@/components/charts', () => ({
-  MomentumGauge: () => <div>Momentum Gauge</div>,
+  MomentumGauge: ({ data }: { data?: { call_intensity?: number } | null }) => (
+    <div>
+      Momentum Gauge
+      {data ? ` ${data.call_intensity}` : ' no-data'}
+    </div>
+  ),
   GammaDecayClock: () => <div>Gamma Decay Clock</div>,
 }));
 
@@ -141,5 +151,37 @@ describe('DealerFlowsPage source label', () => {
     fireEvent.click(screen.getByRole('button', { name: /hidden flows/i }));
 
     expect(screen.getByText(/balanced, but hawkes intensities are elevated on both sides/i)).toBeInTheDocument();
+  });
+
+  it('passes demo fallback analytics through to the hidden-flow panels', () => {
+    const baseData = getDefaultDashboardData();
+    mockUseDashboardData.mockReturnValue({
+      ...baseData,
+      gexData: {
+        ...baseData.gexData,
+        advanced_analytics: {
+          charm_vanna: {
+            charm_flow: 1.2e7,
+            vanna_flow: -4.0e6,
+            net_hidden_flow: 8.0e6,
+            charm_by_strike: {},
+            vanna_by_strike: {},
+          },
+          hawkes: {
+            call_intensity: 0.33,
+            put_intensity: 0.12,
+            net_toxicity: 0.21,
+            squeeze_probability: 0.27,
+          },
+          smoothed_net_gex: -4.8e8,
+        },
+      } as GEXSnapshot,
+    });
+
+    render(<DealerFlowsPage />);
+    fireEvent.click(screen.getByRole('button', { name: /hidden flows/i }));
+
+    expect(screen.getByText(/Hidden Flows Panel 8000000/)).toBeInTheDocument();
+    expect(screen.getByText(/Momentum Gauge 0.33/)).toBeInTheDocument();
   });
 });

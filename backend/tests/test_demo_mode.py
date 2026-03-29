@@ -77,9 +77,10 @@ def test_current_gex_demo_mode_shapes_synthetic_fallback_from_latest_snapshot(mo
     )
 
     class _AnchoredDemoService:
-        def get_current_snapshot(self, symbol, now=None, *, anchor_snapshot):
+        def get_current_snapshot(self, symbol, now=None, *, anchor_snapshot, provider="demo"):
             assert symbol == "SPX"
             assert anchor_snapshot.spot_price == 6030.0
+            assert provider == "yfinance"
             return anchored_demo_snapshot
 
     monkeypatch.setattr(gex_routes, "_get_replay_snapshot", AsyncMock(return_value=None))
@@ -100,6 +101,29 @@ def test_current_gex_demo_mode_shapes_synthetic_fallback_from_latest_snapshot(mo
     assert data["spot_price"] == 6028.0
     assert data["zero_gamma_level"] == 6020.0
     assert data["net_gex"] == -7.9e8
+
+
+def test_current_gex_demo_mode_synthetic_fallback_includes_advanced_analytics(monkeypatch):
+    """Synthetic demo current GEX should include advanced analytics when replay is unavailable."""
+    import app.api.routes.gex as gex_routes
+
+    monkeypatch.setattr(gex_routes, "_get_replay_snapshot", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        gex_routes,
+        "_get_latest_persisted_snapshot",
+        AsyncMock(return_value=None),
+    )
+
+    response = client.get(
+        "/api/gex/current",
+        params={"demo": "true", "provider": "tradier", "symbol": "SPX"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["advanced_analytics"]["charm_vanna"] is not None
+    assert data["advanced_analytics"]["hawkes"] is not None
+    assert data["advanced_analytics"]["smoothed_net_gex"] is not None
 
 
 def test_demo_iv_surface_endpoint_skips_live_market_calls(monkeypatch):
@@ -142,9 +166,10 @@ async def test_demo_websocket_shapes_synthetic_fallback_from_latest_snapshot(mon
     )
 
     class _AnchoredDemoService:
-        def get_ws_update(self, symbol="SPX", now=None, *, anchor_snapshot):
+        def get_ws_update(self, symbol="SPX", now=None, *, anchor_snapshot, provider="demo"):
             assert symbol == "SPX"
             assert anchor_snapshot.spot_price == 6012.0
+            assert provider == "yfinance"
             return {
                 "net_gex": -6.5e8,
                 "net_gex_billions": -0.65,
@@ -155,6 +180,10 @@ async def test_demo_websocket_shapes_synthetic_fallback_from_latest_snapshot(mon
                 "is_mock": True,
                 "is_demo": True,
                 "is_stale": False,
+                "advanced_analytics": {
+                    "charm_vanna": {"charm_flow": 1.0, "vanna_flow": 2.0, "net_hidden_flow": 3.0, "charm_by_strike": {}, "vanna_by_strike": {}},
+                    "hawkes": {"call_intensity": 0.0, "put_intensity": 0.0, "net_toxicity": 0.0, "squeeze_probability": 0.0},
+                },
             }
 
     history_service = SimpleNamespace(
@@ -183,6 +212,36 @@ async def test_demo_websocket_shapes_synthetic_fallback_from_latest_snapshot(mon
     assert payload["spot_price"] == 6010.0
     assert payload["zero_gamma_level"] == 6004.0
     assert payload["is_demo"] is True
+
+
+@pytest.mark.asyncio
+async def test_demo_websocket_synthetic_fallback_includes_advanced_analytics(monkeypatch):
+    """Synthetic demo websocket fallback should include advanced analytics payloads."""
+    import app.api.websocket as websocket_routes
+    from app.config import Settings
+
+    history_service = SimpleNamespace(
+        get_historical_snapshots=AsyncMock(return_value=[]),
+        get_latest_snapshot=AsyncMock(return_value=None),
+    )
+
+    monkeypatch.setattr(
+        websocket_routes,
+        "get_historical_data_service",
+        lambda: history_service,
+    )
+
+    payload = await websocket_routes._get_gex_update(
+        Settings(data_provider="tradier"),
+        demo=True,
+        symbol="SPX",
+        provider="tradier",
+    )
+
+    assert payload["is_demo"] is True
+    assert payload["is_replay"] is False
+    assert payload["advanced_analytics"]["charm_vanna"] is not None
+    assert payload["advanced_analytics"]["hawkes"] is not None
 
 
 def test_websocket_rejects_unsupported_symbol():

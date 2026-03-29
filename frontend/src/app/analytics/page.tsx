@@ -41,7 +41,6 @@ export default function AnalyticsPage() {
     selectedProviderInfo?.display_name ??
     providerFeatures.displayName ??
     selectedProvider;
-  const technicalIndicatorsEnabled = providerFeatures.supportsTechnicalIndicators;
 
   const { data: ivData, isLoading: ivLoading, error: ivError } = useIVSurface(
     symbol,
@@ -51,8 +50,7 @@ export default function AnalyticsPage() {
     symbol,
     period,
     interval,
-    'ATR,RSI,BBANDS',
-    technicalIndicatorsEnabled
+    'ATR,RSI,BBANDS'
   );
   const { data: rateData } = useRiskFreeRate();
 
@@ -214,14 +212,7 @@ export default function AnalyticsPage() {
               </CardHeader>
               <CardContent>
                 <ChartErrorBoundary chartName="Technical Indicators">
-                  {!technicalIndicatorsEnabled ? (
-                    <div className="flex h-[400px] items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/50">
-                      <p className="text-sm text-amber-300">
-                        {providerFeatures.technicalIndicatorsUnavailableReason ??
-                          `Technical indicators are currently unavailable for ${providerDisplayName}.`}
-                      </p>
-                    </div>
-                  ) : techError ? (
+                  {techError ? (
                     <div className="flex h-[400px] items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/50">
                       <p className="text-sm text-rose-400">Failed to load indicator data</p>
                     </div>

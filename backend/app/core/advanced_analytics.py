@@ -31,6 +31,8 @@ def _normalize_stream_key(*, symbol: str, provider: str) -> StreamKey:
 def _resolve_provider_mode(provider: str) -> str:
     """Map provider names to the Hawkes provider-mode labels."""
     normalized = provider.strip().lower()
+    if normalized.startswith("demo:"):
+        normalized = normalized.split(":", 1)[1]
     if normalized in {"tradier", "tradier_rich"}:
         return "tradier_rich"
     return "yfinance_proxy"

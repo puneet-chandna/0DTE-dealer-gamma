@@ -52,12 +52,13 @@ vi.mock('@/stores/uiStore', () => ({
 }));
 
 describe('AnalyticsPage provider gating', () => {
-  it('shows an explicit technical-indicator unavailable message for Tradier', () => {
+  it('renders the technical indicators chart for Tradier', () => {
     render(<AnalyticsPage />);
 
+    expect(screen.getByText('Technical Overlay Chart')).toBeInTheDocument();
     expect(
-      screen.getByText(/technical indicators are currently unavailable for tradier/i)
-    ).toBeInTheDocument();
+      screen.queryByText(/technical indicators are currently unavailable for tradier/i)
+    ).not.toBeInTheDocument();
   });
 
   it('falls back safely when the persisted provider is unknown', () => {
