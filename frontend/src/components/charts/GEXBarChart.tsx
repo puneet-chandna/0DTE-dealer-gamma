@@ -2,7 +2,7 @@
  * GEXBarChart - Strike-by-strike GEX visualization
  *
  * Primary visualization for the dashboard.
- * RULE: Use React.memo() for chart components (master_plan.md)
+ * Use React.memo() to avoid unnecessary chart re-renders.
  * RULE: Throttle updates - max 1 render per 200ms
  *
  * Visual:

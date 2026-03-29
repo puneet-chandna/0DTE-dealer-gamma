@@ -10,7 +10,8 @@ This package turns the project architecture into three synchronized report artif
 
 - Mermaid source: `docs/report/figure-1-high-level-system-architecture.mmd`
 - Mermaid source: `docs/report/figure-2-runtime-data-and-processing-flow.mmd`
-- Optional rendered output target: same directory as `.svg` if you export the diagrams
+- Rendered SVG: `docs/report/figure-1-high-level-system-architecture.svg`
+- Rendered SVG: `docs/report/figure-2-runtime-data-and-processing-flow.svg`
 
 ## Canonical Architecture Notes
 
@@ -22,6 +23,8 @@ This package turns the project architecture into three synchronized report artif
 - Redis is intentionally excluded from the report diagrams because it is commented out as an optional service and is not part of the active runtime architecture.
 
 ## DiagramGPT Prompt
+
+Copy only the text inside the fenced `text` code block below. The sections after this block are reference material for your report package and are not part of the DiagramGPT prompt.
 
 ```text
 Create a clean, report-ready, C4-lite academic architecture set for a project titled:

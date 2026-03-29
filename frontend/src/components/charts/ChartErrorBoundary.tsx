@@ -1,7 +1,7 @@
 /**
  * ChartErrorBoundary - Error boundary for chart components
  *
- * RULE: Always wrap charts in error boundary (from master_plan.md)
+ * Keep chart rendering isolated so a chart failure does not break the page.
  */
 
 'use client';
