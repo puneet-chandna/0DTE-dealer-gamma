@@ -9,7 +9,9 @@ This package turns the project architecture into three synchronized report artif
 ## Artifact Index
 
 - Mermaid source: `docs/report/figure-1-high-level-system-architecture.mmd`
+- Eraser source: `docs/report/figure-1-high-level-system-architecture.eraserdiagram`
 - Mermaid source: `docs/report/figure-2-runtime-data-and-processing-flow.mmd`
+- Eraser source: `docs/report/figure-2-runtime-data-and-processing-flow.eraserdiagram`
 - Rendered SVG: `docs/report/figure-1-high-level-system-architecture.svg`
 - Rendered SVG: `docs/report/figure-2-runtime-data-and-processing-flow.svg`
 

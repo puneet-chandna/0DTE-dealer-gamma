@@ -1,0 +1,59 @@
+cloud-architecture-diagram
+title Figure 1. High-Level System Architecture
+direction right
+typeface clean
+colorMode outline
+styleMode plain
+
+End User [icon: user] {
+  Browser Client [icon: chrome]
+}
+
+Frontend Application [icon: react] {
+  Next.js 16 Web Application
+  User-Facing Pages
+  React Query Server State Layer
+  Zustand UI State
+  Charts and Visualization Layer
+}
+
+Backend Platform [icon: server] {
+  FastAPI REST API [icon: fastapi]
+  WebSocket Stream
+  Provider Registry
+  GEX and Greeks Calculation Engine [icon: cpu]
+  Analytics and Backtesting Engines
+  Background Refresh Services
+  In-Memory TTL Cache [icon: database]
+  Historical Persistence and Replay Service
+}
+
+External Market Data Providers [icon: cloud] {
+  YFinance [icon: bar-chart-2]
+  Tradier [icon: trending-up]
+}
+
+PostgreSQL Persistence [icon: postgres] {
+  PostgreSQL 18 [icon: postgres]
+  Market Sessions
+  GEX Snapshots and Strike Breakdown
+  Raw Options Snapshots and IV Surface
+}
+
+Browser Client > Next.js 16 Web Application
+Next.js 16 Web Application > User-Facing Pages
+User-Facing Pages > React Query Server State Layer, Zustand UI State, Charts and Visualization Layer
+
+React Query Server State Layer > FastAPI REST API: REST / JSON
+Next.js 16 Web Application > WebSocket Stream: WebSocket updates
+
+FastAPI REST API > GEX and Greeks Calculation Engine, Analytics and Backtesting Engines, In-Memory TTL Cache, Historical Persistence and Replay Service
+Background Refresh Services > Provider Registry, GEX and Greeks Calculation Engine, Historical Persistence and Replay Service
+WebSocket Stream > In-Memory TTL Cache
+GEX and Greeks Calculation Engine > Provider Registry, In-Memory TTL Cache
+Analytics and Backtesting Engines > Historical Persistence and Replay Service
+
+Provider Registry > YFinance, Tradier
+
+Historical Persistence and Replay Service > PostgreSQL 18
+PostgreSQL 18 > Market Sessions, GEX Snapshots and Strike Breakdown, Raw Options Snapshots and IV Surface
