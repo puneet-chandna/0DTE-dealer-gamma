@@ -152,8 +152,17 @@ class TestAdvancedAnalyticsEnrichment:
             def restore_state(self, state: dict[str, bool]) -> None:
                 self.in_update = state["in_update"]
 
-            def update(self, options_df: pd.DataFrame, timestamp: float) -> HawkesState:
+            def update(
+                self,
+                options_df: pd.DataFrame,
+                timestamp: float,
+                *,
+                spot_price: float | None = None,
+                provider_mode: str | None = None,
+            ) -> HawkesState:
                 del options_df, timestamp
+                assert spot_price == 5805.0
+                assert provider_mode == "tradier_rich"
                 if self.in_update:
                     overlap_detected.set()
                 self.in_update = True
@@ -229,8 +238,17 @@ class TestAdvancedAnalyticsEnrichment:
             def restore_state(self, state: dict[str, int]) -> None:
                 self.state = dict(state)
 
-            def update(self, options_df: pd.DataFrame, timestamp: float) -> HawkesState:
+            def update(
+                self,
+                options_df: pd.DataFrame,
+                timestamp: float,
+                *,
+                spot_price: float | None = None,
+                provider_mode: str | None = None,
+            ) -> HawkesState:
                 del options_df, timestamp
+                assert spot_price == 5805.0
+                assert provider_mode == "tradier_rich"
                 self.state["updates"] += 1
                 return HawkesState(
                     call_intensity=1.0,
@@ -297,8 +315,17 @@ class TestAdvancedAnalyticsEnrichment:
             def restore_state(self, state: dict[str, int]) -> None:
                 self.state = dict(state)
 
-            def update(self, options_df: pd.DataFrame, timestamp: float) -> HawkesState:
+            def update(
+                self,
+                options_df: pd.DataFrame,
+                timestamp: float,
+                *,
+                spot_price: float | None = None,
+                provider_mode: str | None = None,
+            ) -> HawkesState:
                 del options_df, timestamp
+                assert spot_price == 5805.0
+                assert provider_mode == "tradier_rich"
                 self.state["updates"] += 1
                 return HawkesState(
                     call_intensity=1.0,

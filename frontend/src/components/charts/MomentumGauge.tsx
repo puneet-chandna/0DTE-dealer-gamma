@@ -82,8 +82,11 @@ function MomentumGaugeComponent({ data, isLoading }: MomentumGaugeProps) {
     <Card>
       <CardHeader>
         <div className="flex items-start justify-between gap-3">
-          <div className="space-y-1">
-            <CardTitle title="Snapshot-based excitation proxy from consecutive volume and open-interest changes.">
+          <div
+            className="space-y-1"
+            title="Snapshot-based excitation proxy from consecutive volume and open-interest changes."
+          >
+            <CardTitle>
               Hawkes-Style Flow Intensity
             </CardTitle>
             <p className="text-xs text-zinc-500">
