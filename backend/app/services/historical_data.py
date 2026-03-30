@@ -416,6 +416,7 @@ class HistoricalDataService:
         end_date: date,
         interval: str = "1m",
         prefer_replay: bool = False,
+        allow_latest_replay_fallback: bool = True,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Return price and GEX DataFrames derived from stored captures."""
         records = await self._load_snapshot_records(
@@ -426,7 +427,7 @@ class HistoricalDataService:
         )
         if prefer_replay:
             records = self._filter_replay_eligible_records(records)
-        if not records and prefer_replay:
+        if not records and prefer_replay and allow_latest_replay_fallback:
             records = self._filter_replay_eligible_records(
                 await self._load_latest_replay_snapshot_records(provider=provider, symbol=symbol)
             )
@@ -490,6 +491,7 @@ class HistoricalDataService:
         stop_loss_pct: float,
         take_profit_pct: float,
         prefer_replay: bool = False,
+        allow_latest_replay_fallback: bool = True,
     ):
         """Run the core backtest from persisted history."""
         price_data, gex_data = await self.get_time_series_frames(
@@ -499,6 +501,7 @@ class HistoricalDataService:
             end_date=end_date,
             interval="1m",
             prefer_replay=prefer_replay,
+            allow_latest_replay_fallback=allow_latest_replay_fallback,
         )
         if gex_data.empty or price_data.empty:
             return None
@@ -524,6 +527,7 @@ class HistoricalDataService:
         exit_threshold: float,
         initial_cash: float,
         prefer_replay: bool = False,
+        allow_latest_replay_fallback: bool = True,
     ):
         """Run the vectorbt backtest from persisted history."""
         price_data, gex_data = await self.get_time_series_frames(
@@ -533,6 +537,7 @@ class HistoricalDataService:
             end_date=end_date,
             interval="1m",
             prefer_replay=prefer_replay,
+            allow_latest_replay_fallback=allow_latest_replay_fallback,
         )
         if gex_data.empty or price_data.empty:
             return None

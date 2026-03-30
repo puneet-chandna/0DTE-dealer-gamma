@@ -94,6 +94,36 @@ def _build_options_df() -> pd.DataFrame:
     )
 
 
+def _build_time_series_frames(
+    start_time: datetime,
+    *,
+    periods: int = 15,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    index = pd.date_range(start_time, periods=periods, freq="1min")
+    close = pd.Series(5900.0 + (0.5 * pd.RangeIndex(periods)), index=index, dtype=float)
+    price_data = pd.DataFrame(
+        {
+            "open": close - 0.25,
+            "high": close + 0.5,
+            "low": close - 0.5,
+            "close": close,
+            "volume": 0.0,
+        },
+        index=index,
+    )
+    gex_data = pd.DataFrame(
+        {
+            "spot_price": close,
+            "net_gex": [-2.0e9] * 5 + [2.0e9] * (periods - 5),
+            "total_call_gex": [-2.4e9] * periods,
+            "total_put_gex": [4.0e8] * periods,
+            "zero_gamma_level": [5910.0] * periods,
+        },
+        index=index,
+    )
+    return price_data, gex_data
+
+
 @pytest.fixture
 async def history_service(tmp_path: Path):
     db_path = tmp_path / "history-test.db"
@@ -302,6 +332,191 @@ async def test_demo_historical_falls_back_to_synthetic_when_no_persisted_snapsho
     assert body["count"] == 1
     assert body["data"][0]["spot_price"] == 5922.0
     assert body["data"][0]["net_gex"] == -5.5e8
+
+
+@pytest.mark.asyncio
+async def test_range_sensitive_backtest_helpers_skip_latest_replay_when_requested_window_is_empty(
+    history_service,
+):
+    service, session_factory = history_service
+    captured_at = datetime(2026, 3, 20, 15, 58, 0, tzinfo=ET)
+
+    await service.persist_capture(
+        provider="yfinance",
+        symbol="SPX",
+        snapshot=_build_snapshot(captured_at, spot_price=5911.0, net_gex=-7.5e8),
+        options_df=_build_options_df(),
+        force_raw_capture=True,
+    )
+
+    async with session_factory() as session:
+        market_session = (
+            await session.execute(
+                select(MarketSessionRecord).where(
+                    MarketSessionRecord.provider == "yfinance",
+                    MarketSessionRecord.symbol == "SPX",
+                    MarketSessionRecord.trading_date == date(2026, 3, 20),
+                )
+            )
+        ).scalar_one()
+        market_session.status = "complete"
+        await session.commit()
+
+    vectorbt_result = await service.run_vectorbt_backtest(
+        provider="yfinance",
+        symbol="SPX",
+        start_date=date(2025, 1, 1),
+        end_date=date(2025, 3, 1),
+        entry_threshold=-1e9,
+        exit_threshold=0.0,
+        initial_cash=100_000.0,
+        prefer_replay=True,
+        allow_latest_replay_fallback=False,
+    )
+    legacy_result = await service.run_backtest(
+        provider="yfinance",
+        symbol="SPX",
+        start_date=date(2025, 1, 1),
+        end_date=date(2025, 3, 1),
+        strategy="volatility_breakout",
+        entry_threshold=-1e9,
+        exit_threshold=0.0,
+        stop_loss_pct=0.02,
+        take_profit_pct=0.05,
+        prefer_replay=True,
+        allow_latest_replay_fallback=False,
+    )
+
+    assert vectorbt_result is None
+    assert legacy_result is None
+
+
+@pytest.mark.asyncio
+async def test_demo_vectorbt_backtest_honors_requested_range_when_replay_window_is_empty(
+    history_service,
+):
+    service, session_factory = history_service
+    captured_at = datetime(2026, 3, 20, 15, 58, 0, tzinfo=ET)
+
+    await service.persist_capture(
+        provider="yfinance",
+        symbol="SPX",
+        snapshot=_build_snapshot(captured_at, spot_price=6031.0, net_gex=-7.5e8),
+        options_df=_build_options_df(),
+        force_raw_capture=True,
+    )
+
+    async with session_factory() as session:
+        market_session = (
+            await session.execute(
+                select(MarketSessionRecord).where(
+                    MarketSessionRecord.provider == "yfinance",
+                    MarketSessionRecord.symbol == "SPX",
+                    MarketSessionRecord.trading_date == date(2026, 3, 20),
+                )
+            )
+        ).scalar_one()
+        market_session.status = "complete"
+        await session.commit()
+
+    expected_anchor = await service.get_latest_snapshot(provider="yfinance", symbol="SPX")
+    demo_price_data, demo_gex_data = _build_time_series_frames(
+        datetime(2025, 1, 2, 9, 30, tzinfo=ET)
+    )
+    demo_gex_data = demo_gex_data.copy()
+    demo_gex_data["net_gex"] = 2.0e9
+
+    class _DemoService:
+        def get_time_series(self, symbol, start_date, end_date, interval="1min", *, anchor_snapshot=None):
+            assert symbol == "SPX"
+            assert start_date == date(2025, 1, 1)
+            assert end_date == date(2025, 3, 1)
+            assert anchor_snapshot is not None
+            assert anchor_snapshot.spot_price == expected_anchor.spot_price
+            return demo_price_data, demo_gex_data
+
+    with patch("app.api.routes.analytics.get_historical_data_service", return_value=service):
+        with patch("app.api.routes.analytics.get_demo_data_service", return_value=_DemoService()):
+            response = client.get(
+                "/api/analytics/vectorbt-backtest",
+                params={
+                    "provider": "yfinance",
+                    "symbol": "SPX",
+                    "start_date": "2025-01-01",
+                    "end_date": "2025-03-01",
+                    "demo": "true",
+                },
+            )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["start_date"].startswith("2025-01-02T09:30:00")
+    assert body["end_date"].startswith("2025-01-02T09:44:00")
+    assert body["total_trades"] == 0
+
+
+@pytest.mark.asyncio
+async def test_demo_legacy_backtest_honors_requested_range_when_replay_window_is_empty(
+    history_service,
+):
+    service, session_factory = history_service
+    captured_at = datetime(2026, 3, 20, 15, 58, 0, tzinfo=ET)
+
+    await service.persist_capture(
+        provider="yfinance",
+        symbol="SPX",
+        snapshot=_build_snapshot(captured_at, spot_price=6031.0, net_gex=-7.5e8),
+        options_df=_build_options_df(),
+        force_raw_capture=True,
+    )
+
+    async with session_factory() as session:
+        market_session = (
+            await session.execute(
+                select(MarketSessionRecord).where(
+                    MarketSessionRecord.provider == "yfinance",
+                    MarketSessionRecord.symbol == "SPX",
+                    MarketSessionRecord.trading_date == date(2026, 3, 20),
+                )
+            )
+        ).scalar_one()
+        market_session.status = "complete"
+        await session.commit()
+
+    expected_anchor = await service.get_latest_snapshot(provider="yfinance", symbol="SPX")
+    demo_price_data, demo_gex_data = _build_time_series_frames(
+        datetime(2025, 1, 2, 9, 30, tzinfo=ET)
+    )
+    demo_gex_data = demo_gex_data.copy()
+    demo_gex_data["net_gex"] = 2.0e9
+
+    class _DemoService:
+        def get_time_series(self, symbol, start_date, end_date, interval="1min", *, anchor_snapshot=None):
+            assert symbol == "SPX"
+            assert start_date == date(2025, 1, 1)
+            assert end_date == date(2025, 3, 1)
+            assert anchor_snapshot is not None
+            assert anchor_snapshot.spot_price == expected_anchor.spot_price
+            return demo_price_data, demo_gex_data
+
+    with patch("app.api.routes.analytics.get_historical_data_service", return_value=service):
+        with patch("app.api.routes.analytics.get_demo_data_service", return_value=_DemoService()):
+            response = client.get(
+                "/api/analytics/backtest",
+                params={
+                    "provider": "yfinance",
+                    "symbol": "SPX",
+                    "start_date": "2025-01-01",
+                    "end_date": "2025-03-01",
+                    "demo": "true",
+                },
+            )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["start_date"].startswith("2025-01-02T09:30:00")
+    assert body["end_date"].startswith("2025-01-02T09:44:00")
+    assert body["total_trades"] == 0
 
 
 @pytest.mark.asyncio

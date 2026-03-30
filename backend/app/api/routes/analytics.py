@@ -100,6 +100,26 @@ def _load_yfinance_history(
     return ticker.history(period=period, interval=interval)
 
 
+async def _get_demo_backtest_series(
+    *,
+    provider: str,
+    symbol: str,
+    start_date: date,
+    end_date: date,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Return requested-range demo data anchored to the latest same-provider snapshot."""
+    anchor_snapshot = await get_historical_data_service().get_latest_snapshot(
+        provider=provider,
+        symbol=symbol,
+    )
+    return get_demo_data_service().get_time_series(
+        symbol=symbol,
+        start_date=start_date,
+        end_date=end_date,
+        anchor_snapshot=anchor_snapshot,
+    )
+
+
 @router.get("/gex-volatility", response_model=AnalyticsResult)
 async def analyze_gex_volatility(
     start_date: date = Query(..., description="Start date for analysis"),
@@ -189,7 +209,8 @@ async def backtest_strategy(
     Supported strategies:
     - volatility_breakout: Enter long volatility when Net GEX < entry_threshold
 
-    Note: Currently uses synthetic data for demonstration.
+    Demo mode uses requested-range deterministic demo data when the selected
+    range has no persisted history, rather than substituting a later replay session.
     """
     # Validate strategy
     if strategy not in ["volatility_breakout"]:
@@ -254,6 +275,7 @@ async def backtest_strategy(
             stop_loss_pct=stop_loss_pct,
             take_profit_pct=take_profit_pct,
             prefer_replay=demo,
+            allow_latest_replay_fallback=False,
         )
         if persisted_result is not None:
             return BacktestResult(
@@ -276,7 +298,8 @@ async def backtest_strategy(
         end_dt = datetime.combine(end_date, datetime.max.time())
 
         if demo:
-            price_data, gex_data = get_demo_data_service().get_time_series(
+            price_data, gex_data = await _get_demo_backtest_series(
+                provider=active_provider,
                 symbol=symbol,
                 start_date=start_date,
                 end_date=end_date,
@@ -649,7 +672,8 @@ async def run_vectorbt_backtest(
     Strategy: Enter long when net GEX < entry_threshold (short gamma),
     exit when net GEX > exit_threshold.
 
-    Note: Currently uses synthetic data for demonstration.
+    Demo mode uses requested-range deterministic demo data when the selected
+    range has no persisted history, rather than substituting a later replay session.
     """
     from app.core.vectorbt_backtester import VectorBTBacktester
 
@@ -679,6 +703,7 @@ async def run_vectorbt_backtest(
             exit_threshold=exit_threshold,
             initial_cash=initial_cash,
             prefer_replay=demo,
+            allow_latest_replay_fallback=False,
         )
         if persisted_result is not None:
             return {
@@ -705,7 +730,8 @@ async def run_vectorbt_backtest(
         end_dt = datetime.combine(end_date, datetime.max.time())
 
         if demo:
-            price_data, gex_data = get_demo_data_service().get_time_series(
+            price_data, gex_data = await _get_demo_backtest_series(
+                provider=active_provider,
                 symbol=symbol,
                 start_date=start_date,
                 end_date=end_date,
