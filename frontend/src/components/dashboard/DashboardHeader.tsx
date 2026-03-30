@@ -42,7 +42,6 @@ interface DashboardHeaderProps {
 }
 
 function DashboardHeaderComponent({
-  isConnected: _isConnected = false,
   isRealtime = false,
   connectionState = 'idle',
   retryCount = 0,

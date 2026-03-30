@@ -328,6 +328,7 @@ async def _get_gex_update(
         payload = get_demo_data_service().get_ws_update(
             symbol=symbol,
             anchor_snapshot=anchor_snapshot,
+            provider=active_provider,
         )
         payload["provider"] = active_provider
         payload["is_replay"] = False

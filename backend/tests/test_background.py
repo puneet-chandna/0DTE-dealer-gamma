@@ -5,7 +5,6 @@ Tests periodic refresh, cache warmup, and task lifecycle management.
 """
 
 import asyncio
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from zoneinfo import ZoneInfo
 
@@ -14,16 +13,15 @@ import pytest
 
 from app.services import background
 from app.services.background import (
-    get_gex_calculator,
-    get_data_client,
-    periodic_gex_refresh,
-    periodic_spot_refresh,
-    periodic_historical_capture,
-    cache_warmup,
-    start_background_tasks,
-    stop_background_tasks,
     GEX_REFRESH_INTERVAL,
     SPOT_REFRESH_INTERVAL,
+    cache_warmup,
+    get_data_client,
+    get_gex_calculator,
+    periodic_gex_refresh,
+    periodic_spot_refresh,
+    start_background_tasks,
+    stop_background_tasks,
 )
 from app.services.cache import reset_cache
 
@@ -117,6 +115,7 @@ class TestCacheWarmup:
         """Should populate cache when market is open and data fetch succeeds."""
         mock_df = _make_options_df()
         mock_client = AsyncMock()
+        mock_client.provider_name = "yfinance"
         mock_client.get_options_chain_for_gex = AsyncMock(return_value=(mock_df, 5900.0))
 
         mock_snapshot = MagicMock()
@@ -208,6 +207,7 @@ class TestPeriodicGEXRefresh:
 
         mock_df = _make_options_df()
         mock_client = AsyncMock()
+        mock_client.provider_name = "yfinance"
         mock_client.get_options_chain_for_gex = AsyncMock(return_value=(mock_df, 5900.0))
 
         mock_snap = MagicMock()
@@ -251,7 +251,7 @@ class TestPeriodicGEXRefresh:
                 task.cancel()
                 try:
                     await asyncio.wait_for(task, timeout=1.0)
-                except (asyncio.CancelledError, asyncio.TimeoutError):
+                except (asyncio.CancelledError, TimeoutError):
                     pass
 
 
@@ -380,15 +380,16 @@ class TestHistoricalCaptureHelpers:
             ],
         ):
             with patch("app.services.background.get_data_client", side_effect=_get_client):
-                with patch("app.services.background.WATCHLIST_SYMBOLS", ("SPX",)):
-                    with patch("app.services.background.get_settings") as mock_get_settings:
-                        mock_get_settings.return_value.data_provider = "yfinance"
-                        await background.capture_historical_watchlist_once(
-                            cache=mock_cache,
-                            gex_calculator=mock_calculator,
-                            historical_data_service=mock_history_service,
-                            capture_timeout_seconds=0.01,
-                        )
+                with patch("app.services.background.get_live_fetch_timeout_seconds", return_value=0.01):
+                    with patch("app.services.background.WATCHLIST_SYMBOLS", ("SPX",)):
+                        with patch("app.services.background.get_settings") as mock_get_settings:
+                            mock_get_settings.return_value.data_provider = "yfinance"
+                            await background.capture_historical_watchlist_once(
+                                cache=mock_cache,
+                                gex_calculator=mock_calculator,
+                                historical_data_service=mock_history_service,
+                                capture_timeout_seconds=0.01,
+                            )
 
         mock_history_service.persist_capture.assert_awaited_once()
         persist_call = mock_history_service.persist_capture.await_args

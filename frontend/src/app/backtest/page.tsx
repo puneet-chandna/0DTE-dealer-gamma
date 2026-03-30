@@ -21,7 +21,7 @@ import { NavBar } from '@/components/ui/NavBar';
 import { Card, CardHeader, CardContent, CardTitle, PageShell } from '@/components/ui';
 import { ChartErrorBoundary, EquityCurveChart } from '@/components/charts';
 import { useVectorbtBacktest } from '@/hooks/useAnalyticsData';
-import { cn } from '@/lib/utils';
+import { cn, getCurrentMarketDateString, isFutureMarketDate } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
 
 interface BacktestParams {
@@ -39,16 +39,28 @@ interface BacktestRunState {
 
 type BacktestRunAction =
   | { type: 'submit'; params: BacktestParams }
-  | { type: 'auto-submit-demo'; params: BacktestParams };
+  | { type: 'auto-submit-demo'; params: BacktestParams }
+  | { type: 'clear' };
 
 function formatPct(value: number): string {
   return `${(value * 100).toFixed(2)}%`;
 }
 
 function backtestRunReducer(
-  _state: BacktestRunState,
+  state: BacktestRunState,
   action: BacktestRunAction
 ): BacktestRunState {
+  if (action.type === 'clear') {
+    if (state.submitted === null && !state.runEnabled) {
+      return state;
+    }
+
+    return {
+      submitted: null,
+      runEnabled: false,
+    };
+  }
+
   return {
     submitted: { ...action.params },
     runEnabled: true,
@@ -76,11 +88,30 @@ export default function BacktestPage() {
     runState.runEnabled
   );
 
+  const marketToday = getCurrentMarketDateString();
+  const futureDateError =
+    isFutureMarketDate(params.start_date, marketToday) ||
+    isFutureMarketDate(params.end_date, marketToday)
+      ? `Future dates aren't available for backtests. Choose a date on or before ${marketToday} (New York market date).`
+      : null;
   const handleRun = useCallback(() => {
+    if (futureDateError || !params.start_date || !params.end_date) {
+      return;
+    }
+
     dispatchRun({ type: 'submit', params });
-  }, [params]);
+  }, [futureDateError, params]);
 
   const isRunning = isLoading || isFetching;
+  const canRunBacktest = !isRunning && !futureDateError && !!params.start_date && !!params.end_date;
+
+  useEffect(() => {
+    if (!futureDateError) {
+      return;
+    }
+
+    dispatchRun({ type: 'clear' });
+  }, [futureDateError]);
 
   useEffect(() => {
     if (!demoModeEnabled) {
@@ -88,13 +119,19 @@ export default function BacktestPage() {
       return;
     }
 
-    if (autoStartedDemoRef.current || runState.submitted !== null) {
+    if (
+      futureDateError ||
+      !params.start_date ||
+      !params.end_date ||
+      autoStartedDemoRef.current ||
+      runState.submitted !== null
+    ) {
       return;
     }
 
     autoStartedDemoRef.current = true;
     dispatchRun({ type: 'auto-submit-demo', params });
-  }, [demoModeEnabled, params, runState.submitted]);
+  }, [demoModeEnabled, futureDateError, params, runState.submitted]);
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-50">
@@ -120,10 +157,14 @@ export default function BacktestPage() {
               {/* Date Range */}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
-                  <label className="text-xs font-medium text-zinc-400 block mb-1.5">
+                  <label
+                    htmlFor="backtest-start-date"
+                    className="text-xs font-medium text-zinc-400 block mb-1.5"
+                  >
                     Start Date
                   </label>
                   <input
+                    id="backtest-start-date"
                     type="date"
                     value={params.start_date}
                     onChange={(e) => setParams((p) => ({ ...p, start_date: e.target.value }))}
@@ -131,10 +172,14 @@ export default function BacktestPage() {
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-zinc-400 block mb-1.5">
+                  <label
+                    htmlFor="backtest-end-date"
+                    className="text-xs font-medium text-zinc-400 block mb-1.5"
+                  >
                     End Date
                   </label>
                   <input
+                    id="backtest-end-date"
                     type="date"
                     value={params.end_date}
                     onChange={(e) => setParams((p) => ({ ...p, end_date: e.target.value }))}
@@ -142,6 +187,12 @@ export default function BacktestPage() {
                   />
                 </div>
               </div>
+
+              {futureDateError && (
+                <div className="rounded-lg border border-amber-500/20 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+                  {futureDateError}
+                </div>
+              )}
 
               {/* Thresholds */}
               <div>
@@ -193,12 +244,14 @@ export default function BacktestPage() {
               {/* Run Button */}
               <button
                 onClick={handleRun}
-                disabled={isRunning}
+                disabled={!canRunBacktest}
                 className={cn(
                   'w-full rounded-lg py-2.5 text-sm font-semibold transition-all',
                   isRunning
                     ? 'cursor-wait bg-violet-500/30 text-violet-300'
-                    : 'bg-violet-500 text-white hover:bg-violet-600 active:bg-violet-700'
+                    : canRunBacktest
+                      ? 'bg-violet-500 text-white hover:bg-violet-600 active:bg-violet-700'
+                      : 'cursor-not-allowed bg-zinc-800 text-zinc-500'
                 )}
               >
                 {isRunning ? (
@@ -211,7 +264,7 @@ export default function BacktestPage() {
                 )}
               </button>
 
-              {error && (
+              {error && !futureDateError && (
                 <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-400">
                   {error.message}
                 </div>

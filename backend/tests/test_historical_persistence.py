@@ -629,9 +629,10 @@ async def test_demo_current_falls_back_to_synthetic_without_cross_provider_repla
     )
 
     class _DemoService:
-        def get_current_snapshot(self, symbol, now=None, *, anchor_snapshot):
+        def get_current_snapshot(self, symbol, now=None, *, anchor_snapshot, provider="demo"):
             assert symbol == "SPX"
             assert anchor_snapshot is None
+            assert provider == "yfinance"
             return synthetic_snapshot
 
     with patch("app.api.routes.gex.get_historical_data_service", return_value=service):

@@ -13,11 +13,13 @@ import numpy as np
 import pandas as pd
 
 from app.core.analytics import VolatilityAnalyzer
+from app.core.advanced_analytics import enrich_snapshot_with_advanced_analytics
+from app.core.charm_vanna_calculator import CharmVannaCalculator
 from app.core.constants import LONG_GAMMA_THRESHOLD, SHORT_GAMMA_THRESHOLD
 from app.core.data_acquisition import get_current_trading_date
 from app.core.gex_calculator import GEXCalculator
 from app.core.technical_indicators import TechnicalIndicatorEngine
-from app.models.schemas import GEXSnapshot
+from app.models.schemas import AdvancedAnalytics, CharmVannaSnapshot, GEXSnapshot
 
 ET = ZoneInfo("America/New_York")
 SESSION_START = time(9, 30)
@@ -73,12 +75,14 @@ class DemoDataService:
 
     def __init__(self) -> None:
         self._gex_calculator = GEXCalculator()
+        self._charm_vanna = CharmVannaCalculator()
 
     def get_current_snapshot(
         self,
         symbol: str = "SPX",
         now: Optional[datetime] = None,
         anchor_snapshot: Optional[GEXSnapshot] = None,
+        provider: str = "demo",
     ) -> GEXSnapshot:
         """Return the current synthetic snapshot for the active 5-second bucket."""
         normalized_now = self._normalize_now(now)
@@ -89,11 +93,18 @@ class DemoDataService:
         )
         bucket_index = int(normalized_now.timestamp()) // WEBSOCKET_BUCKET_SECONDS
         row_index = bucket_index % len(session.gex_data)
-        return self._snapshot_from_session_row(
+        snapshot = self._snapshot_from_session_row(
             session=session,
             row_index=row_index,
             timestamp=normalized_now,
             bucket_index=bucket_index,
+        )
+        return self._enrich_demo_snapshot(
+            snapshot=snapshot,
+            session=session,
+            row_index=row_index,
+            timestamp=normalized_now,
+            provider=provider,
         )
 
     def get_time_series(
@@ -306,15 +317,17 @@ class DemoDataService:
         symbol: str = "SPX",
         now: Optional[datetime] = None,
         anchor_snapshot: Optional[GEXSnapshot] = None,
+        provider: str = "demo",
     ) -> dict:
         """Build the lightweight WebSocket update payload for demo mode."""
         snapshot = self.get_current_snapshot(
             symbol=symbol,
             now=now,
             anchor_snapshot=anchor_snapshot,
+            provider=provider,
         )
         regime, _, _ = self._gex_calculator.determine_regime(snapshot.net_gex)
-        return {
+        payload = {
             "net_gex": snapshot.net_gex,
             "net_gex_billions": snapshot.net_gex / 1e9,
             "zero_gamma_level": snapshot.zero_gamma_level,
@@ -325,6 +338,116 @@ class DemoDataService:
             "is_demo": True,
             "is_stale": False,
         }
+        if snapshot.advanced_analytics is not None:
+            payload["advanced_analytics"] = snapshot.advanced_analytics.model_dump()
+        return payload
+
+    def _enrich_demo_snapshot(
+        self,
+        *,
+        snapshot: GEXSnapshot,
+        session: DemoSession,
+        row_index: int,
+        timestamp: datetime,
+        provider: str,
+    ) -> GEXSnapshot:
+        """Attach deterministic advanced analytics to synthetic demo snapshots."""
+        options_df = self._build_demo_options_chain(
+            session=session,
+            row_index=row_index,
+            timestamp=timestamp,
+        )
+
+        expiry_timestamps = pd.to_datetime(options_df["expiration"], utc=True)
+        expiry_ts = pd.Series(expiry_timestamps).dt.tz_convert(timestamp.tzinfo or ET)
+        time_to_expiry = np.maximum(
+            (expiry_ts - timestamp).dt.total_seconds().to_numpy() / (365.25 * 24 * 3600),
+            0.0,
+        )
+
+        cv_result = self._charm_vanna.calculate_all(
+            options_df=options_df,
+            spot_price=snapshot.spot_price,
+            T=time_to_expiry,
+        )
+        snapshot.advanced_analytics = AdvancedAnalytics(
+            charm_vanna=CharmVannaSnapshot(
+                charm_flow=cv_result["charm_flow"],
+                vanna_flow=cv_result["vanna_flow"],
+                net_hidden_flow=cv_result["net_hidden_flow"],
+                charm_by_strike=cv_result["charm_by_strike"],
+                vanna_by_strike=cv_result["vanna_by_strike"],
+            )
+        )
+
+        return enrich_snapshot_with_advanced_analytics(
+            snapshot,
+            options_df=options_df,
+            symbol=session.symbol,
+            provider=f"demo:{provider}",
+            timestamp_seconds=timestamp.timestamp(),
+        )
+
+    def _build_demo_options_chain(
+        self,
+        *,
+        session: DemoSession,
+        row_index: int,
+        timestamp: datetime,
+    ) -> pd.DataFrame:
+        """Create a deterministic synthetic options chain for demo analytics engines."""
+        row = session.gex_data.iloc[row_index]
+        spot = float(row["spot_price"])
+        strike_step = session.strike_step
+        center = round(spot / strike_step) * strike_step
+        offsets = np.arange(-8, 9, dtype=float)
+        expiration = datetime.combine(session.trading_date, time(16, 0), tzinfo=ET).astimezone(
+            timezone.utc
+        )
+
+        records: list[dict[str, float | str]] = []
+        for offset in offsets:
+            strike = float(round(center + offset * strike_step, 4))
+            moneyness = abs((strike - spot) / max(spot, 1.0))
+            base_oi = max(60.0, 420.0 - abs(offset) * 22.0)
+            base_volume = max(10.0, 40.0 + row_index * 1.35 - abs(offset) * 2.5)
+            iv = max(0.08, 0.14 + moneyness * 3.8 + 0.01 * np.sin((row_index + offset) / 5.0))
+            mid = max(0.1, spot * (0.004 + moneyness * 0.7))
+            spread = max(0.05, mid * 0.08)
+
+            call_oi = base_oi * (1.12 - min(0.24, max(0.0, offset) * 0.018))
+            put_oi = base_oi * (1.12 - min(0.24, max(0.0, -offset) * 0.018))
+            call_volume = base_volume * (1.0 + max(0.0, offset) * 0.05)
+            put_volume = base_volume * (1.0 + max(0.0, -offset) * 0.05)
+
+            records.append(
+                {
+                    "strike": strike,
+                    "type": "call",
+                    "open_interest": float(round(call_oi, 4)),
+                    "volume": float(round(call_volume, 4)),
+                    "implied_vol": float(round(iv, 6)),
+                    "expiration": expiration.isoformat(),
+                    "bid": float(round(max(0.01, mid - spread / 2.0), 4)),
+                    "ask": float(round(mid + spread / 2.0, 4)),
+                    "mid": float(round(mid, 4)),
+                }
+            )
+            records.append(
+                {
+                    "strike": strike,
+                    "type": "put",
+                    "open_interest": float(round(put_oi, 4)),
+                    "volume": float(round(put_volume, 4)),
+                    "implied_vol": float(round(iv + 0.015, 6)),
+                    "expiration": expiration.isoformat(),
+                    "bid": float(round(max(0.01, mid - spread / 2.0), 4)),
+                    "ask": float(round(mid + spread / 2.0, 4)),
+                    "mid": float(round(mid, 4)),
+                }
+            )
+
+        return pd.DataFrame.from_records(records)
 
     @staticmethod
     def _optional_rounded_anchor(value: Optional[float], *, digits: int = 4) -> Optional[float]:

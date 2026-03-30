@@ -1,0 +1,82 @@
+cloud-architecture-diagram
+title Figure 2. Runtime Data and Processing Flow
+direction right
+typeface clean
+colorMode outline
+styleMode plain
+
+legend [position: right] {
+  [connection: >, label: "Primary data and processing flow"]
+  [connection: -->, color: orange, label: "Fallback and resilience flow"]
+}
+
+External Sources [icon: cloud, color: blue] {
+  Provider Selection
+  Spot Price and Options Chain
+}
+
+Real-Time Monitoring [icon: server, color: blue] {
+  Background Refresh Services
+  GEX and Greeks Calculation
+  Hawkes and Kalman Enrichment
+  In-Memory TTL Cache [icon: database]
+  FastAPI REST Endpoints [icon: fastapi]
+  WebSocket Stream
+  Analytics and Backtesting Engines
+}
+
+Historical Persistence and Replay [icon: database, color: gray] {
+  Historical Persistence and Replay Service
+  PostgreSQL 18 [icon: postgres]
+  Market Sessions
+  GEX Snapshots and Strike Breakdown
+  Raw Options Snapshots and IV Surface
+}
+
+Frontend Consumption [icon: react, color: blue] {
+  Frontend Initial Load
+  WebSocket Hook
+  React Query Cache Sync
+  Dashboard Components
+  Analytics and Backtest Pages
+  REST Polling Fallback
+}
+
+Resilience Paths [color: orange] {
+  Live Fetch on Cache Miss
+  Persisted Replay or Demo Fallback
+}
+
+Provider Selection > Spot Price and Options Chain: selected provider
+Spot Price and Options Chain > Background Refresh Services: options chain + spot
+Background Refresh Services > GEX and Greeks Calculation: filtered contracts
+GEX and Greeks Calculation > Hawkes and Kalman Enrichment: GEX snapshot
+Hawkes and Kalman Enrichment > In-Memory TTL Cache: fresh live snapshot
+Hawkes and Kalman Enrichment > Historical Persistence and Replay Service: persist eligible snapshot
+
+Historical Persistence and Replay Service > PostgreSQL 18
+PostgreSQL 18 > Market Sessions, GEX Snapshots and Strike Breakdown, Raw Options Snapshots and IV Surface
+
+Frontend Initial Load > FastAPI REST Endpoints: REST requests
+FastAPI REST Endpoints > In-Memory TTL Cache: check cache
+FastAPI REST Endpoints > Analytics and Backtesting Engines: analytics or backtest requests
+Analytics and Backtesting Engines > Historical Persistence and Replay Service: historical and replay queries
+Analytics and Backtesting Engines > Analytics and Backtest Pages: summary, IV, technical, backtest payloads
+
+In-Memory TTL Cache > WebSocket Stream: live snapshot
+WebSocket Stream > WebSocket Hook: gex_update
+WebSocket Hook > React Query Cache Sync: sync latest snapshot
+React Query Cache Sync > Dashboard Components
+In-Memory TTL Cache > Dashboard Components: current, strikes, and market payloads
+
+FastAPI REST Endpoints --> Live Fetch on Cache Miss: cache miss [color: orange]
+Live Fetch on Cache Miss --> Provider Selection [color: orange]
+Live Fetch on Cache Miss --> GEX and Greeks Calculation [color: orange]
+
+FastAPI REST Endpoints --> Persisted Replay or Demo Fallback: provider unavailable or low-quality snapshot [color: orange]
+PostgreSQL 18 --> Persisted Replay or Demo Fallback: replay-eligible session data [color: orange]
+Persisted Replay or Demo Fallback --> Dashboard Components: persisted or demo response [color: orange]
+
+WebSocket Hook --> REST Polling Fallback: stream unavailable [color: orange]
+REST Polling Fallback --> FastAPI REST Endpoints: REST fallback [color: orange]
+Analytics and Backtesting Engines --> Provider Selection: provider-backed indicator fetches when needed [color: orange]

@@ -361,6 +361,7 @@ async def get_current_gex(
         demo_snapshot = get_demo_data_service().get_current_snapshot(
             symbol=symbol,
             anchor_snapshot=anchor_snapshot,
+            provider=active_provider,
         )
         replay_payload = demo_snapshot.model_dump()
         replay_payload["provider"] = active_provider
@@ -480,6 +481,7 @@ async def get_gex_by_strikes(
             snapshot = get_demo_data_service().get_current_snapshot(
                 symbol=symbol,
                 anchor_snapshot=anchor_snapshot,
+                provider=active_provider,
             )
         sorted_strikes = sorted(snapshot.gex_by_strike.keys())
         sorted_values = [snapshot.gex_by_strike[strike] for strike in sorted_strikes]
@@ -544,6 +546,7 @@ async def get_market_regime(
             snapshot = get_demo_data_service().get_current_snapshot(
                 symbol=symbol,
                 anchor_snapshot=anchor_snapshot,
+                provider=active_provider,
             )
         regime, description, color = get_gex_calculator().determine_regime(snapshot.net_gex)
         return RegimeData(

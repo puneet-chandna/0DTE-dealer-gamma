@@ -18,6 +18,7 @@ from app.core import (
     TradingStrategy,
     ProviderRegistry,
     get_data_client,
+    get_current_trading_date,
 )
 from app.core.analytics import (
     generate_synthetic_gex_data,
@@ -120,6 +121,17 @@ async def _get_demo_backtest_series(
     )
 
 
+def _reject_future_backtest_dates(start_date: date, end_date: date) -> None:
+    """Reject requested backtests that extend past the current New York market date."""
+    market_date = get_current_trading_date()
+    if start_date > market_date or end_date > market_date:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Backtest dates cannot be after the current New York market date "
+                f"({market_date.isoformat()})."
+            ),
+        )
 @router.get("/gex-volatility", response_model=AnalyticsResult)
 async def analyze_gex_volatility(
     start_date: date = Query(..., description="Start date for analysis"),
@@ -209,8 +221,10 @@ async def backtest_strategy(
     Supported strategies:
     - volatility_breakout: Enter long volatility when Net GEX < entry_threshold
 
-    Demo mode uses requested-range deterministic demo data when the selected
-    range has no persisted history, rather than substituting a later replay session.
+    Demo mode always uses requested-range deterministic demo data anchored to
+    the latest same-provider snapshot when available, rather than substituting
+    a later replay session. Future dates are rejected against the current New
+    York market date.
     """
     # Validate strategy
     if strategy not in ["volatility_breakout"]:
@@ -225,6 +239,8 @@ async def backtest_strategy(
             status_code=400,
             detail="start_date must be before or equal to end_date",
         )
+
+    _reject_future_backtest_dates(start_date, end_date)
 
     if not demo and (end_date - start_date).days < 5:
         raise HTTPException(
@@ -264,39 +280,6 @@ async def backtest_strategy(
             default_provider=settings.data_provider,
         )
 
-        persisted_result = await get_historical_data_service().run_backtest(
-            provider=active_provider,
-            symbol=symbol,
-            start_date=start_date,
-            end_date=end_date,
-            strategy=strategy,
-            entry_threshold=entry_threshold,
-            exit_threshold=exit_threshold,
-            stop_loss_pct=stop_loss_pct,
-            take_profit_pct=take_profit_pct,
-            prefer_replay=demo,
-            allow_latest_replay_fallback=False,
-        )
-        if persisted_result is not None:
-            return BacktestResult(
-                total_trades=persisted_result.total_trades,
-                winning_trades=persisted_result.winning_trades,
-                losing_trades=persisted_result.losing_trades,
-                win_rate=persisted_result.win_rate,
-                total_return=persisted_result.total_return,
-                average_return=persisted_result.average_return,
-                sharpe_ratio=persisted_result.sharpe_ratio,
-                max_drawdown=persisted_result.max_drawdown,
-                profit_factor=persisted_result.profit_factor,
-                average_trade_duration=persisted_result.average_trade_duration,
-                start_date=persisted_result.start_date,
-                end_date=persisted_result.end_date,
-            )
-
-        # Generate synthetic data for demo
-        start_dt = datetime.combine(start_date, datetime.min.time())
-        end_dt = datetime.combine(end_date, datetime.max.time())
-
         if demo:
             price_data, gex_data = await _get_demo_backtest_series(
                 provider=active_provider,
@@ -305,6 +288,37 @@ async def backtest_strategy(
                 end_date=end_date,
             )
         else:
+            persisted_result = await get_historical_data_service().run_backtest(
+                provider=active_provider,
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date,
+                strategy=strategy,
+                entry_threshold=entry_threshold,
+                exit_threshold=exit_threshold,
+                stop_loss_pct=stop_loss_pct,
+                take_profit_pct=take_profit_pct,
+                prefer_replay=False,
+                allow_latest_replay_fallback=False,
+            )
+            if persisted_result is not None:
+                return BacktestResult(
+                    total_trades=persisted_result.total_trades,
+                    winning_trades=persisted_result.winning_trades,
+                    losing_trades=persisted_result.losing_trades,
+                    win_rate=persisted_result.win_rate,
+                    total_return=persisted_result.total_return,
+                    average_return=persisted_result.average_return,
+                    sharpe_ratio=persisted_result.sharpe_ratio,
+                    max_drawdown=persisted_result.max_drawdown,
+                    profit_factor=persisted_result.profit_factor,
+                    average_trade_duration=persisted_result.average_trade_duration,
+                    start_date=persisted_result.start_date,
+                    end_date=persisted_result.end_date,
+                )
+
+            start_dt = datetime.combine(start_date, datetime.min.time())
+            end_dt = datetime.combine(end_date, datetime.max.time())
             gex_data = generate_synthetic_gex_data(start_dt, end_dt)
             price_data = generate_synthetic_price_data(start_dt, end_dt)
 
@@ -672,14 +686,18 @@ async def run_vectorbt_backtest(
     Strategy: Enter long when net GEX < entry_threshold (short gamma),
     exit when net GEX > exit_threshold.
 
-    Demo mode uses requested-range deterministic demo data when the selected
-    range has no persisted history, rather than substituting a later replay session.
+    Demo mode always uses requested-range deterministic demo data anchored to
+    the latest same-provider snapshot when available, rather than substituting
+    a later replay session. Future dates are rejected against the current New
+    York market date.
     """
     from app.core.vectorbt_backtester import VectorBTBacktester
 
     # Validate
     if start_date > end_date:
         raise HTTPException(status_code=400, detail="start_date must be before end_date")
+
+    _reject_future_backtest_dates(start_date, end_date)
 
     if not demo and (end_date - start_date).days < 5:
         raise HTTPException(status_code=400, detail="Period must be at least 5 days")
@@ -694,41 +712,6 @@ async def run_vectorbt_backtest(
             default_provider=settings.data_provider,
         )
 
-        persisted_result = await get_historical_data_service().run_vectorbt_backtest(
-            provider=active_provider,
-            symbol=symbol,
-            start_date=start_date,
-            end_date=end_date,
-            entry_threshold=entry_threshold,
-            exit_threshold=exit_threshold,
-            initial_cash=initial_cash,
-            prefer_replay=demo,
-            allow_latest_replay_fallback=False,
-        )
-        if persisted_result is not None:
-            return {
-                "total_return": persisted_result.total_return,
-                "sharpe_ratio": persisted_result.sharpe_ratio,
-                "sortino_ratio": persisted_result.sortino_ratio,
-                "calmar_ratio": persisted_result.calmar_ratio,
-                "max_drawdown": persisted_result.max_drawdown,
-                "total_trades": persisted_result.total_trades,
-                "winning_trades": persisted_result.winning_trades,
-                "losing_trades": persisted_result.losing_trades,
-                "win_rate": persisted_result.win_rate,
-                "profit_factor": persisted_result.profit_factor,
-                "avg_trade_return": persisted_result.avg_trade_return,
-                "best_trade": persisted_result.best_trade,
-                "worst_trade": persisted_result.worst_trade,
-                "avg_trade_duration_minutes": persisted_result.avg_trade_duration_minutes,
-                "start_date": persisted_result.start_date.isoformat(),
-                "end_date": persisted_result.end_date.isoformat(),
-                "equity_curve": persisted_result.equity_curve,
-            }
-
-        start_dt = datetime.combine(start_date, datetime.min.time())
-        end_dt = datetime.combine(end_date, datetime.max.time())
-
         if demo:
             price_data, gex_data = await _get_demo_backtest_series(
                 provider=active_provider,
@@ -737,6 +720,40 @@ async def run_vectorbt_backtest(
                 end_date=end_date,
             )
         else:
+            persisted_result = await get_historical_data_service().run_vectorbt_backtest(
+                provider=active_provider,
+                symbol=symbol,
+                start_date=start_date,
+                end_date=end_date,
+                entry_threshold=entry_threshold,
+                exit_threshold=exit_threshold,
+                initial_cash=initial_cash,
+                prefer_replay=False,
+                allow_latest_replay_fallback=False,
+            )
+            if persisted_result is not None:
+                return {
+                    "total_return": persisted_result.total_return,
+                    "sharpe_ratio": persisted_result.sharpe_ratio,
+                    "sortino_ratio": persisted_result.sortino_ratio,
+                    "calmar_ratio": persisted_result.calmar_ratio,
+                    "max_drawdown": persisted_result.max_drawdown,
+                    "total_trades": persisted_result.total_trades,
+                    "winning_trades": persisted_result.winning_trades,
+                    "losing_trades": persisted_result.losing_trades,
+                    "win_rate": persisted_result.win_rate,
+                    "profit_factor": persisted_result.profit_factor,
+                    "avg_trade_return": persisted_result.avg_trade_return,
+                    "best_trade": persisted_result.best_trade,
+                    "worst_trade": persisted_result.worst_trade,
+                    "avg_trade_duration_minutes": persisted_result.avg_trade_duration_minutes,
+                    "start_date": persisted_result.start_date.isoformat(),
+                    "end_date": persisted_result.end_date.isoformat(),
+                    "equity_curve": persisted_result.equity_curve,
+                }
+
+            start_dt = datetime.combine(start_date, datetime.min.time())
+            end_dt = datetime.combine(end_date, datetime.max.time())
             gex_data = generate_synthetic_gex_data(start_dt, end_dt)
             price_data = generate_synthetic_price_data(start_dt, end_dt)
 

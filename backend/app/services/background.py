@@ -6,18 +6,17 @@ Handles periodic data fetching, cache warming, and scheduled tasks.
 import asyncio
 import logging
 from datetime import datetime
-from typing import Optional
 from zoneinfo import ZoneInfo
 
 from app.config import get_settings
 from app.core.advanced_analytics import enrich_snapshot_with_advanced_analytics
 from app.core.data_acquisition import is_market_open
-from app.core.provider_registry import ProviderRegistry, get_data_client
 from app.core.gex_calculator import GEXCalculator
-from app.core.snapshot_quality import annotate_snapshot_quality, is_snapshot_replay_eligible
+from app.core.provider_registry import ProviderRegistry, get_data_client
 from app.core.provider_timeouts import get_live_fetch_timeout_seconds
-from app.services.cache import get_cache
+from app.core.snapshot_quality import annotate_snapshot_quality, is_snapshot_replay_eligible
 from app.db.session import dispose_engine
+from app.services.cache import get_cache
 from app.services.historical_data import WATCHLIST_SYMBOLS, get_historical_data_service
 
 logger = logging.getLogger(__name__)
@@ -33,10 +32,10 @@ HISTORICAL_CAPTURE_TIMEOUT_SECONDS = 4
 
 # Task management
 _background_tasks: list[asyncio.Task] = []
-_shutdown_event: Optional[asyncio.Event] = None
+_shutdown_event: asyncio.Event | None = None
 
 # Module-level instances
-_gex_calculator: Optional[GEXCalculator] = None
+_gex_calculator: GEXCalculator | None = None
 
 
 def get_gex_calculator() -> GEXCalculator:
@@ -192,7 +191,7 @@ async def _capture_symbol_for_provider(
             data_client.get_options_chain_for_gex(underlying=symbol),
             timeout=max(capture_timeout_seconds, get_live_fetch_timeout_seconds(provider_name)),
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.warning(
             "Historical capture timed out for %s via %s after %.1fs",
             symbol,
@@ -304,7 +303,7 @@ async def _capture_provider_watchlist(
 async def capture_historical_watchlist_once(
     *,
     cache=None,
-    gex_calculator: Optional[GEXCalculator] = None,
+    gex_calculator: GEXCalculator | None = None,
     historical_data_service=None,
     capture_timeout_seconds: float = HISTORICAL_CAPTURE_TIMEOUT_SECONDS,
 ) -> None:
@@ -481,7 +480,7 @@ async def stop_background_tasks() -> None:
             task.cancel()
             try:
                 await asyncio.wait_for(task, timeout=5.0)
-            except (asyncio.CancelledError, asyncio.TimeoutError):
+            except (asyncio.CancelledError, TimeoutError):
                 pass
             except Exception as e:
                 logger.error(f"Error stopping task {task.get_name()}: {e}")
