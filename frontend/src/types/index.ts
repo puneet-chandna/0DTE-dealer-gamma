@@ -199,9 +199,7 @@ export const PROVIDER_FEATURES: Record<ProviderName, ProviderFeatureConfig> = {
     displayName: 'Tradier',
     supportsDashboard: true,
     supportsIvSurface: true,
-    supportsTechnicalIndicators: false,
-    technicalIndicatorsUnavailableReason:
-      'Technical indicators are currently unavailable for Tradier.',
+    supportsTechnicalIndicators: true,
   },
 };
 
