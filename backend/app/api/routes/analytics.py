@@ -132,8 +132,6 @@ def _reject_future_backtest_dates(start_date: date, end_date: date) -> None:
                 f"({market_date.isoformat()})."
             ),
         )
-
-
 @router.get("/gex-volatility", response_model=AnalyticsResult)
 async def analyze_gex_volatility(
     start_date: date = Query(..., description="Start date for analysis"),
@@ -224,8 +222,9 @@ async def backtest_strategy(
     - volatility_breakout: Enter long volatility when Net GEX < entry_threshold
 
     Demo mode always uses requested-range deterministic demo data anchored to
-    the latest same-provider snapshot when available. Future dates are rejected
-    against the current New York market date.
+    the latest same-provider snapshot when available, rather than substituting
+    a later replay session. Future dates are rejected against the current New
+    York market date.
     """
     # Validate strategy
     if strategy not in ["volatility_breakout"]:
@@ -688,8 +687,9 @@ async def run_vectorbt_backtest(
     exit when net GEX > exit_threshold.
 
     Demo mode always uses requested-range deterministic demo data anchored to
-    the latest same-provider snapshot when available. Future dates are rejected
-    against the current New York market date.
+    the latest same-provider snapshot when available, rather than substituting
+    a later replay session. Future dates are rejected against the current New
+    York market date.
     """
     from app.core.vectorbt_backtester import VectorBTBacktester
 
