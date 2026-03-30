@@ -5,20 +5,18 @@ Provides GEX-volatility analysis, backtesting, and summary statistics.
 
 import logging
 from datetime import date, datetime
-from typing import Optional
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-
 from fastapi import APIRouter, HTTPException, Query
 
 from app.config import get_settings
 from app.core import (
-    VolatilityAnalyzer,
-    TradingStrategy,
     ProviderRegistry,
-    get_data_client,
+    TradingStrategy,
+    VolatilityAnalyzer,
     get_current_trading_date,
+    get_data_client,
 )
 from app.core.analytics import (
     generate_synthetic_gex_data,
@@ -26,7 +24,7 @@ from app.core.analytics import (
 )
 from app.core.demo_data import get_demo_data_service
 from app.core.provider_registry import ProviderUnavailableError
-from app.models.schemas import AnalyticsResult, BacktestResult, SummaryStatistics, IVSurfaceResponse
+from app.models.schemas import AnalyticsResult, BacktestResult, IVSurfaceResponse, SummaryStatistics
 from app.services.cache import get_cache
 from app.services.historical_data import get_historical_data_service
 
@@ -38,7 +36,7 @@ router = APIRouter()
 ET = ZoneInfo("America/New_York")
 
 
-def _technical_indicator_payload_has_values(payload: Optional[dict]) -> bool:
+def _technical_indicator_payload_has_values(payload: dict | None) -> bool:
     """Return True when at least one requested indicator has a usable numeric value."""
     if payload is None:
         return False
@@ -206,7 +204,7 @@ async def analyze_gex_volatility(
 @router.get("/backtest", response_model=BacktestResult)
 async def backtest_strategy(
     symbol: str = Query("SPX", description="Underlying symbol (default: SPX)"),
-    provider: Optional[str] = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
+    provider: str | None = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
     strategy: str = Query("volatility_breakout", description="Strategy name"),
     start_date: date = Query(..., description="Backtest start date"),
     end_date: date = Query(..., description="Backtest end date"),
@@ -364,9 +362,9 @@ async def backtest_strategy(
 @router.get("/summary-statistics", response_model=SummaryStatistics)
 async def get_summary_stats(
     symbol: str = Query("SPX", description="Underlying symbol (default: SPX)"),
-    provider: Optional[str] = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
-    start_date: Optional[date] = Query(None, description="Start date"),
-    end_date: Optional[date] = Query(None, description="End date"),
+    provider: str | None = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
+    start_date: date | None = Query(None, description="Start date"),
+    end_date: date | None = Query(None, description="End date"),
     demo: bool = Query(False, description="Return deterministic demo data"),
 ) -> SummaryStatistics:
     """Get summary statistics of GEX over time period.
@@ -447,11 +445,11 @@ async def get_summary_stats(
 @router.get("/iv-surface", response_model=IVSurfaceResponse)
 async def get_iv_surface(
     symbol: str = Query("SPX", description="Underlying symbol (default: SPX)"),
-    provider: Optional[str] = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
+    provider: str | None = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
     demo: bool = Query(False, description="Return deterministic demo data"),
 ) -> IVSurfaceResponse:
     """Get Implied Volatility Surface data for 3D charting.
-    
+
     Creates a mock surface or true surface based on available options data.
     """
     from app.core.rate_provider import get_rate_provider
@@ -484,7 +482,7 @@ async def get_iv_surface(
 
         data_client = get_data_client(active_provider)
 
-        # In a real scenario, we'd fetch multiple expirations. 
+        # In a real scenario, we'd fetch multiple expirations.
         # For now, we'll fetch the nearest chain and generate a realistic surface from it.
         try:
             options_df, spot_price = await data_client.get_options_chain_for_gex(
@@ -560,7 +558,7 @@ async def get_iv_surface(
 @router.get("/technical-indicators")
 async def get_technical_indicators(
     symbol: str = Query("SPY", description="Symbol to analyze"),
-    provider: Optional[str] = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
+    provider: str | None = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
     period: str = Query("1mo", description="Data period (1d, 5d, 1mo, 3mo, 6mo, 1y)"),
     interval: str = Query("1d", description="Data interval (1m, 5m, 15m, 1h, 1d)"),
     indicators: str = Query("ATR,RSI,BBANDS", description="Comma-separated indicators"),
@@ -673,7 +671,7 @@ async def get_technical_indicators(
 @router.get("/vectorbt-backtest")
 async def run_vectorbt_backtest(
     symbol: str = Query("SPX", description="Underlying symbol (default: SPX)"),
-    provider: Optional[str] = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
+    provider: str | None = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
     start_date: date = Query(..., description="Backtest start date"),
     end_date: date = Query(..., description="Backtest end date"),
     entry_threshold: float = Query(-1e9, description="GEX entry threshold (dollars)"),

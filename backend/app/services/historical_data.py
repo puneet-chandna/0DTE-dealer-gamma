@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from datetime import date, datetime, time, timedelta
-from typing import Any, Iterable, Optional
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import pandas as pd
 from sqlalchemy import delete, func, select
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
@@ -56,10 +56,10 @@ PERIOD_TO_DAYS = {
     "1y": 365,
 }
 
-_historical_data_service: Optional["HistoricalDataService"] = None
+_historical_data_service: HistoricalDataService | None = None
 
 
-def get_historical_data_service() -> "HistoricalDataService":
+def get_historical_data_service() -> HistoricalDataService:
     """Return the shared historical data service."""
     global _historical_data_service
     if _historical_data_service is None:
@@ -73,7 +73,7 @@ class HistoricalDataService:
     def __init__(
         self,
         *,
-        session_factory: Optional[async_sessionmaker[AsyncSession]] = None,
+        session_factory: async_sessionmaker[AsyncSession] | None = None,
     ) -> None:
         self._session_factory = session_factory
 
@@ -86,7 +86,7 @@ class HistoricalDataService:
         provider: str,
         symbol: str,
         snapshot: GEXSnapshot | dict[str, Any],
-        options_df: Optional[pd.DataFrame],
+        options_df: pd.DataFrame | None,
         force_raw_capture: bool = False,
     ) -> bool:
         """Persist a derived GEX snapshot and optional raw options sidecar."""
@@ -203,7 +203,7 @@ class HistoricalDataService:
             )
             return False
 
-    async def finalize_stale_sessions(self, reference_time: Optional[datetime] = None) -> bool:
+    async def finalize_stale_sessions(self, reference_time: datetime | None = None) -> bool:
         """Mark completed sessions as replayable after the market has moved on."""
         normalized_reference = self._normalize_timestamp(reference_time or datetime.now(ET))
         current_et_date = normalized_reference.astimezone(ET).date()
@@ -293,7 +293,7 @@ class HistoricalDataService:
         provider: str,
         symbol: str,
         prefer_replay: bool = False,
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Return the latest stored IV surface for a provider/symbol."""
         provider_name = provider.strip().lower()
         underlying = symbol.strip().upper()
@@ -351,7 +351,7 @@ class HistoricalDataService:
         interval: str,
         indicators: list[str],
         prefer_replay: bool = False,
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """Compute technical indicators from persisted spot-price history."""
         latest_timestamp = await self.get_latest_timestamp(
             provider=provider,
@@ -555,7 +555,7 @@ class HistoricalDataService:
         provider: str,
         symbol: str,
         prefer_replay: bool = False,
-    ) -> Optional[datetime]:
+    ) -> datetime | None:
         """Return the most recent stored capture timestamp."""
         provider_name = provider.strip().lower()
         underlying = symbol.strip().upper()
@@ -589,7 +589,7 @@ class HistoricalDataService:
         symbol: str,
         prefer_replay: bool = False,
         replay_eligible_only: bool = False,
-    ) -> Optional[GEXSnapshot]:
+    ) -> GEXSnapshot | None:
         """Return the newest stored snapshot for a provider/symbol."""
         provider_name = provider.strip().lower()
         underlying = symbol.strip().upper()
@@ -659,7 +659,7 @@ class HistoricalDataService:
         explicit_eligibility = metrics.get("is_replay_eligible")
         if isinstance(explicit_eligibility, bool):
             return explicit_eligibility
-        if isinstance(explicit_eligibility, (int, float)):
+        if isinstance(explicit_eligibility, int | float):
             return bool(explicit_eligibility)
 
         quality_flags = metrics.get("quality_flags")
@@ -667,7 +667,7 @@ class HistoricalDataService:
             return False
 
         capture_quality = metrics.get("capture_quality")
-        if isinstance(capture_quality, (int, float)):
+        if isinstance(capture_quality, int | float):
             return float(capture_quality) > 0
 
         return is_snapshot_replay_eligible(cls._record_to_snapshot(record))
@@ -715,7 +715,7 @@ class HistoricalDataService:
         captured_at: datetime,
         spot_price: float,
         options_df: pd.DataFrame,
-    ) -> Optional[RawOptionsSnapshotRecord]:
+    ) -> RawOptionsSnapshotRecord | None:
         expiration_date = None
         if not options_df.empty and "expiration" in options_df.columns:
             expiration_series = pd.to_datetime(options_df["expiration"], errors="coerce")
@@ -848,7 +848,7 @@ class HistoricalDataService:
         provider: str,
         symbol: str,
         prefer_replay: bool,
-    ) -> Optional[RawOptionsSnapshotRecord]:
+    ) -> RawOptionsSnapshotRecord | None:
         if not prefer_replay:
             result = await session.execute(
                 select(RawOptionsSnapshotRecord)
@@ -909,7 +909,7 @@ class HistoricalDataService:
         return dict(snapshot)
 
     @staticmethod
-    def _normalize_options_df(options_df: Optional[pd.DataFrame]) -> pd.DataFrame:
+    def _normalize_options_df(options_df: pd.DataFrame | None) -> pd.DataFrame:
         if options_df is None:
             return pd.DataFrame()
         return options_df.copy()
@@ -933,8 +933,8 @@ class HistoricalDataService:
     def _calculate_completeness_ratio(
         *,
         trading_date: date,
-        first_captured_at: Optional[datetime],
-        last_captured_at: Optional[datetime],
+        first_captured_at: datetime | None,
+        last_captured_at: datetime | None,
     ) -> float:
         if first_captured_at is None or last_captured_at is None:
             return 0.0
@@ -956,7 +956,7 @@ class HistoricalDataService:
     def _determine_session_status(
         *,
         trading_date: date,
-        last_captured_at: Optional[datetime],
+        last_captured_at: datetime | None,
     ) -> str:
         if last_captured_at is None:
             return "in_progress"
@@ -1135,7 +1135,7 @@ class HistoricalDataService:
         )
 
     @staticmethod
-    def _get_resample_rule(interval: str) -> Optional[str]:
+    def _get_resample_rule(interval: str) -> str | None:
         return INTERVAL_RULES.get(interval, INTERVAL_RULES["1m"])
 
     @staticmethod
