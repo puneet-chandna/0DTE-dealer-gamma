@@ -143,7 +143,11 @@ class TestCharmVannaCalculator:
         """Empty DataFrame should return zero flows."""
         calc = CharmVannaCalculator()
         df = pd.DataFrame()
-        result = calc.calculate_all(df, spot_price=5800.0, T=np.array([]))
+        result = calc.calculate_all(
+            df,
+            spot_price=5800.0,
+            time_to_expiration=np.array([]),
+        )
 
         assert result["charm_flow"] == 0.0
         assert result["vanna_flow"] == 0.0
@@ -160,7 +164,11 @@ class TestCharmVannaCalculator:
         })
         T = np.array([0.003])  # ~1 hour
 
-        result = calc.calculate_all(df, spot_price=5800.0, T=T)
+        result = calc.calculate_all(
+            df,
+            spot_price=5800.0,
+            time_to_expiration=T,
+        )
 
         assert isinstance(result["charm_flow"], float)
         assert isinstance(result["vanna_flow"], float)
@@ -178,6 +186,10 @@ class TestCharmVannaCalculator:
         })
         T = np.array([0.003, 0.003, 0.003])
 
-        result = calc.calculate_all(df, spot_price=5800.0, T=T)
+        result = calc.calculate_all(
+            df,
+            spot_price=5800.0,
+            time_to_expiration=T,
+        )
 
         assert abs(result["net_hidden_flow"] - (result["charm_flow"] + result["vanna_flow"])) < 1e-6

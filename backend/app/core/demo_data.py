@@ -368,7 +368,7 @@ class DemoDataService:
         cv_result = self._charm_vanna.calculate_all(
             options_df=options_df,
             spot_price=snapshot.spot_price,
-            T=time_to_expiry,
+            time_to_expiration=time_to_expiry,
         )
         snapshot.advanced_analytics = AdvancedAnalytics(
             charm_vanna=CharmVannaSnapshot(

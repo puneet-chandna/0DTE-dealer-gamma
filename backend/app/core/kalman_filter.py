@@ -105,16 +105,16 @@ class GEXKalmanFilter:
 
         # Update step
         # Kalman gain: K = P / (P + R)
-        K = self._P / (self._P + self.R)
+        kalman_gain = self._P / (self._P + self.R)
 
         # Innovation (residual)
         innovation = measurement - self._x
 
         # Updated estimate
-        self._x = self._x + K * innovation
+        self._x = self._x + kalman_gain * innovation
 
         # Updated error covariance
-        self._P = (1 - K) * self._P
+        self._P = (1 - kalman_gain) * self._P
 
         self._update_count += 1
 

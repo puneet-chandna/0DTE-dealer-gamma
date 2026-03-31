@@ -121,19 +121,27 @@ class GEXCalculator:
         expiration = self._normalize_expiration_timestamps(
             expiration_values=df["expiration"],
         )
-        T = (
+        time_to_expiration = (
             (expiration - reference_timestamp).dt.total_seconds() / (365.25 * 24 * 3600)
         ).to_numpy(dtype=np.float64)
 
-        # Ensure T is finite and positive (filter out expired)
-        T = np.maximum(np.nan_to_num(T, nan=0.0), 0.0)
+        # Ensure time to expiration is finite and positive (filter out expired)
+        time_to_expiration = np.maximum(
+            np.nan_to_num(time_to_expiration, nan=0.0),
+            0.0,
+        )
 
         # Vectorized spot price
-        S = np.full_like(strikes, spot_price)
+        spot_vector = np.full_like(strikes, spot_price)
 
         # Calculate gamma for all contracts WITH dividend yield
         gammas = BlackScholesGreeks.gamma(
-            S, strikes, T, self.risk_free_rate, implied_vol, q=self.dividend_yield
+            spot_vector,
+            strikes,
+            time_to_expiration,
+            self.risk_free_rate,
+            implied_vol,
+            q=self.dividend_yield,
         )
 
         # Calculate GEX per contract on a 1% underlying move basis.
@@ -183,7 +191,9 @@ class GEXCalculator:
         # Calculate Charm & Vanna hidden flows
         try:
             cv_result = self._charm_vanna.calculate_all(
-                options_df=df, spot_price=spot_price, T=T,
+                options_df=df,
+                spot_price=spot_price,
+                time_to_expiration=time_to_expiration,
             )
             charm_vanna = CharmVannaSnapshot(
                 charm_flow=cv_result["charm_flow"],

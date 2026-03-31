@@ -95,8 +95,8 @@ async def health_check() -> dict:
 
     from app.services.cache import get_cache
 
-    ET = ZoneInfo("America/New_York")
-    now = datetime.now(ET)
+    eastern_time = ZoneInfo("America/New_York")
+    now = datetime.now(eastern_time)
 
     # Get cache instance and status
     try:

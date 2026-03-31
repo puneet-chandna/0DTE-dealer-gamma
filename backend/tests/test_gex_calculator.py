@@ -156,11 +156,14 @@ class TestGEXCalculator:
         ])
 
         result = gex_calculator.calculate_gex_from_chain(df, spot_price, timestamp)
-        T = np.array([(datetime(2024, 1, 15, 16, 0, 0, tzinfo=ET) - timestamp).total_seconds() / (365.25 * 24 * 3600)])
+        time_to_expiration = np.array([
+            (datetime(2024, 1, 15, 16, 0, 0, tzinfo=ET) - timestamp).total_seconds()
+            / (365.25 * 24 * 3600)
+        ])
         gamma = BlackScholesGreeks.gamma(
             np.array([spot_price], dtype=np.float64),
             np.array([strike], dtype=np.float64),
-            T,
+            time_to_expiration,
             gex_calculator.risk_free_rate,
             np.array([iv], dtype=np.float64),
             q=gex_calculator.dividend_yield,
