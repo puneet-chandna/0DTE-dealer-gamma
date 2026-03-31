@@ -4,16 +4,16 @@ Bug prevention tests as specified in the master plan.
 These tests ensure critical invariants are maintained.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from app.core.greeks import BlackScholesGreeks
+from app.core.constants import MAX_IV, MIN_IV, RISK_FREE_RATE, SPX_DIVIDEND_YIELD
 from app.core.gex_calculator import GEXCalculator
-from app.core.constants import SPX_DIVIDEND_YIELD, RISK_FREE_RATE, MIN_IV, MAX_IV
+from app.core.greeks import BlackScholesGreeks
 
 ET = ZoneInfo("America/New_York")
 
@@ -34,65 +34,103 @@ class TestNoNaNInGreeks:
 
     def test_gamma_no_nan_for_valid_inputs(self):
         """Gamma should never return NaN for valid inputs."""
-        S = np.full(100, 5700.0)
-        K = np.linspace(5500, 5900, 100)
-        T = np.full(100, 0.01)  # 1 day
+        spot_prices = np.full(100, 5700.0)
+        strikes = np.linspace(5500, 5900, 100)
+        time_to_expiration = np.full(100, 0.01)  # 1 day
         r = RISK_FREE_RATE
         q = SPX_DIVIDEND_YIELD
         sigma = np.full(100, 0.20)
 
-        gammas = BlackScholesGreeks.gamma(S, K, T, r, sigma, q=q)
+        gammas = BlackScholesGreeks.gamma(
+            spot_prices,
+            strikes,
+            time_to_expiration,
+            r,
+            sigma,
+            q=q,
+        )
 
         assert not np.any(np.isnan(gammas)), "Gamma contains NaN values"
 
     def test_delta_no_nan_for_calls(self):
         """Call delta should never return NaN."""
-        S = np.full(50, 5700.0)
-        K = np.linspace(5500, 5900, 50)
-        T = np.full(50, 0.01)
+        spot_prices = np.full(50, 5700.0)
+        strikes = np.linspace(5500, 5900, 50)
+        time_to_expiration = np.full(50, 0.01)
         r = RISK_FREE_RATE
         sigma = np.full(50, 0.20)
         option_type = np.full(50, "call")
 
-        deltas = BlackScholesGreeks.delta(S, K, T, r, sigma, option_type, q=SPX_DIVIDEND_YIELD)
+        deltas = BlackScholesGreeks.delta(
+            spot_prices,
+            strikes,
+            time_to_expiration,
+            r,
+            sigma,
+            option_type,
+            q=SPX_DIVIDEND_YIELD,
+        )
 
         assert not np.any(np.isnan(deltas)), "Delta contains NaN values"
 
     def test_delta_no_nan_for_puts(self):
         """Put delta should never return NaN."""
-        S = np.full(50, 5700.0)
-        K = np.linspace(5500, 5900, 50)
-        T = np.full(50, 0.01)
+        spot_prices = np.full(50, 5700.0)
+        strikes = np.linspace(5500, 5900, 50)
+        time_to_expiration = np.full(50, 0.01)
         r = RISK_FREE_RATE
         sigma = np.full(50, 0.20)
         option_type = np.full(50, "put")
 
-        deltas = BlackScholesGreeks.delta(S, K, T, r, sigma, option_type, q=SPX_DIVIDEND_YIELD)
+        deltas = BlackScholesGreeks.delta(
+            spot_prices,
+            strikes,
+            time_to_expiration,
+            r,
+            sigma,
+            option_type,
+            q=SPX_DIVIDEND_YIELD,
+        )
 
         assert not np.any(np.isnan(deltas)), "Delta contains NaN values"
 
     def test_vega_no_nan(self):
         """Vega should never return NaN for valid inputs."""
-        S = np.full(50, 5700.0)
-        K = np.linspace(5500, 5900, 50)
-        T = np.full(50, 0.05)  # 5 days
+        spot_prices = np.full(50, 5700.0)
+        strikes = np.linspace(5500, 5900, 50)
+        time_to_expiration = np.full(50, 0.05)  # 5 days
         r = RISK_FREE_RATE
         sigma = np.full(50, 0.20)
 
-        vegas = BlackScholesGreeks.vega(S, K, T, r, sigma, q=SPX_DIVIDEND_YIELD)
+        vegas = BlackScholesGreeks.vega(
+            spot_prices,
+            strikes,
+            time_to_expiration,
+            r,
+            sigma,
+            q=SPX_DIVIDEND_YIELD,
+        )
 
         assert not np.any(np.isnan(vegas)), "Vega contains NaN values"
 
     def test_theta_no_nan(self):
         """Theta should never return NaN for valid inputs."""
-        S = np.full(50, 5700.0)
-        K = np.linspace(5500, 5900, 50)
-        T = np.full(50, 0.05)
+        spot_prices = np.full(50, 5700.0)
+        strikes = np.linspace(5500, 5900, 50)
+        time_to_expiration = np.full(50, 0.05)
         r = RISK_FREE_RATE
         sigma = np.full(50, 0.20)
         option_type = np.full(50, "call")
 
-        thetas = BlackScholesGreeks.theta(S, K, T, r, sigma, option_type, q=SPX_DIVIDEND_YIELD)
+        thetas = BlackScholesGreeks.theta(
+            spot_prices,
+            strikes,
+            time_to_expiration,
+            r,
+            sigma,
+            option_type,
+            q=SPX_DIVIDEND_YIELD,
+        )
 
         assert not np.any(np.isnan(thetas)), "Theta contains NaN values"
 
@@ -136,7 +174,7 @@ class TestGEXSignConvention:
             {"strike": 5900.0, "type": "put", "open_interest": 1000, "implied_vol": 0.20, "expiration": expiration},
         ])
         result = gex_calculator.calculate_gex_from_chain(df, 5875.0, timestamp)
-        
+
         # Calls should contribute positive, puts negative
         assert result.total_call_gex > 0, f"Call GEX should be positive, got {result.total_call_gex}"
         assert result.total_put_gex < 0, f"Put GEX should be negative, got {result.total_put_gex}"
@@ -268,39 +306,60 @@ class TestEdgeCases:
 
     def test_t_equals_zero_returns_zero_gamma(self):
         """T=0 should return gamma=0, not error."""
-        S = np.array([5900.0])
-        K = np.array([5900.0])
-        T = np.array([0.0])
+        spot_prices = np.array([5900.0])
+        strikes = np.array([5900.0])
+        time_to_expiration = np.array([0.0])
         r = RISK_FREE_RATE
         sigma = np.array([0.20])
 
-        gamma = BlackScholesGreeks.gamma(S, K, T, r, sigma, q=SPX_DIVIDEND_YIELD)
+        gamma = BlackScholesGreeks.gamma(
+            spot_prices,
+            strikes,
+            time_to_expiration,
+            r,
+            sigma,
+            q=SPX_DIVIDEND_YIELD,
+        )
 
         assert gamma[0] == 0.0, "T=0 should yield gamma=0"
         assert not np.isnan(gamma[0]), "T=0 should not yield NaN"
 
     def test_sigma_equals_zero_returns_zero_gamma(self):
         """Sigma=0 should return gamma=0, not error."""
-        S = np.array([5900.0])
-        K = np.array([5900.0])
-        T = np.array([0.05])
+        spot_prices = np.array([5900.0])
+        strikes = np.array([5900.0])
+        time_to_expiration = np.array([0.05])
         r = RISK_FREE_RATE
         sigma = np.array([0.0])
 
-        gamma = BlackScholesGreeks.gamma(S, K, T, r, sigma, q=SPX_DIVIDEND_YIELD)
+        gamma = BlackScholesGreeks.gamma(
+            spot_prices,
+            strikes,
+            time_to_expiration,
+            r,
+            sigma,
+            q=SPX_DIVIDEND_YIELD,
+        )
 
         assert gamma[0] == 0.0, "sigma=0 should yield gamma=0"
         assert not np.isnan(gamma[0]), "sigma=0 should not yield NaN"
 
     def test_negative_t_returns_zero_gamma(self):
         """Negative T should return gamma=0, not error."""
-        S = np.array([5900.0])
-        K = np.array([5900.0])
-        T = np.array([-0.01])
+        spot_prices = np.array([5900.0])
+        strikes = np.array([5900.0])
+        time_to_expiration = np.array([-0.01])
         r = RISK_FREE_RATE
         sigma = np.array([0.20])
 
-        gamma = BlackScholesGreeks.gamma(S, K, T, r, sigma, q=SPX_DIVIDEND_YIELD)
+        gamma = BlackScholesGreeks.gamma(
+            spot_prices,
+            strikes,
+            time_to_expiration,
+            r,
+            sigma,
+            q=SPX_DIVIDEND_YIELD,
+        )
 
         assert gamma[0] == 0.0, "Negative T should yield gamma=0"
         assert not np.isnan(gamma[0]), "Negative T should not yield NaN"
@@ -308,14 +367,14 @@ class TestEdgeCases:
     def test_large_gex_values_no_overflow(self):
         """Large OI should not cause integer overflow."""
         calc = GEXCalculator(risk_free_rate=RISK_FREE_RATE, dividend_yield=SPX_DIVIDEND_YIELD)
-        
+
         timestamp = get_test_timestamp()
         expiration = get_test_expiration()
         df = pd.DataFrame([
             {"strike": 5900.0, "type": "call", "open_interest": 100000, "implied_vol": 0.20, "expiration": expiration},
         ])
         result = calc.calculate_gex_from_chain(df, 5900.0, timestamp)
-        
+
         assert np.isfinite(result.total_call_gex), "Large GEX should be finite"
         # With 100k OI, gamma ~0.001, the GEX should be significant
         assert abs(result.total_call_gex) > 1e6, f"Large GEX should be significant, got {result.total_call_gex}"

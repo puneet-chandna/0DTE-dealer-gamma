@@ -1,9 +1,9 @@
 """Tests for YFinance data provider."""
 
-import pytest
 from datetime import date
-from unittest.mock import AsyncMock, MagicMock, patch
+
 import pandas as pd
+import pytest
 
 from app.core.yfinance_provider import YFinanceClient
 
@@ -124,7 +124,7 @@ class TestYFinanceClientAsync:
 @pytest.mark.asyncio
 class TestYFinanceClientIntegration:
     """Integration tests that hit the real Yahoo Finance API.
-    
+
     These tests are marked with @pytest.mark.integration and are
     skipped by default. Run with: pytest -m integration
     """

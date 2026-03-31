@@ -9,13 +9,13 @@ feel institutional-grade.
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 
 from app.core.constants import (
-    KALMAN_PROCESS_NOISE,
     KALMAN_MEASUREMENT_NOISE,
+    KALMAN_PROCESS_NOISE,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,7 +41,7 @@ class GEXKalmanFilter:
         self,
         process_noise: float = KALMAN_PROCESS_NOISE,
         measurement_noise: float = KALMAN_MEASUREMENT_NOISE,
-        initial_estimate: Optional[float] = None,
+        initial_estimate: float | None = None,
         initial_error: float = 1.0,
     ):
         """
@@ -57,7 +57,7 @@ class GEXKalmanFilter:
         self.R = measurement_noise
 
         # State
-        self._x: Optional[float] = initial_estimate  # Current estimate
+        self._x: float | None = initial_estimate  # Current estimate
         self._P: float = initial_error                # Estimation error covariance
         self._initialized: bool = initial_estimate is not None
         self._update_count: int = 0
@@ -105,16 +105,16 @@ class GEXKalmanFilter:
 
         # Update step
         # Kalman gain: K = P / (P + R)
-        K = self._P / (self._P + self.R)
+        kalman_gain = self._P / (self._P + self.R)
 
         # Innovation (residual)
         innovation = measurement - self._x
 
         # Updated estimate
-        self._x = self._x + K * innovation
+        self._x = self._x + kalman_gain * innovation
 
         # Updated error covariance
-        self._P = (1 - K) * self._P
+        self._P = (1 - kalman_gain) * self._P
 
         self._update_count += 1
 
@@ -154,7 +154,7 @@ class GEXKalmanFilter:
         self._initialized = bool(state["initialized"])
         self._update_count = int(state["update_count"])
 
-    def reset(self, initial_estimate: Optional[float] = None) -> None:
+    def reset(self, initial_estimate: float | None = None) -> None:
         """Reset the filter state."""
         self._x = initial_estimate
         self._P = 1.0

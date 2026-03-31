@@ -1,10 +1,9 @@
 """0DTE GEX Backend - Pydantic Schemas for API Models."""
 
 from datetime import date, datetime
-from typing import Any, Dict, List, Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
-
 
 # ============================================================================
 # Request Models
@@ -35,7 +34,7 @@ class MarketStatusResponse(BaseModel):
     status: Literal["open", "pre_market", "after_hours", "closed_weekend"] = Field(
         ..., description="Detailed market status"
     )
-    next_open: Optional[str] = Field(None, description="When market opens next")
+    next_open: str | None = Field(None, description="When market opens next")
     current_time_et: str = Field(..., description="Current time in Eastern Time")
 
 
@@ -56,11 +55,11 @@ class OptionContract(BaseModel):
     mid: float
     open_interest: int
     volume: int
-    implied_vol: Optional[float] = None
-    delta: Optional[float] = None
-    gamma: Optional[float] = None
-    vega: Optional[float] = None
-    theta: Optional[float] = None
+    implied_vol: float | None = None
+    delta: float | None = None
+    gamma: float | None = None
+    vega: float | None = None
+    theta: float | None = None
 
     class Config:
         populate_by_name = True
@@ -73,9 +72,9 @@ class OptionsChainResponse(BaseModel):
     spot_price: float
     expiration_date: str
     contract_count: int
-    contracts: List[Dict[str, float | str | int]]
+    contracts: list[dict[str, float | str | int]]
     timestamp: str
-    provider: Optional[str] = None
+    provider: str | None = None
 
 
 class GEXSnapshot(BaseModel):
@@ -87,10 +86,10 @@ class GEXSnapshot(BaseModel):
     total_put_gex: float  # Positive (dealers long)
     net_gex: float  # Sum of above
     zero_gamma_level: float  # Price where net_gex = 0
-    gex_by_strike: Dict[float, float]  # Strike-level breakdown
+    gex_by_strike: dict[float, float]  # Strike-level breakdown
     dominant_strike: float  # Strike with max |GEX|
-    metrics: Dict[str, Any] = Field(default_factory=dict)
-    provider: Optional[str] = None
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    provider: str | None = None
     advanced_analytics: Optional["AdvancedAnalytics"] = None
 
 
@@ -106,8 +105,8 @@ class CharmVannaSnapshot(BaseModel):
     net_hidden_flow: float = Field(
         ..., description="Combined charm + vanna flow (dollars)"
     )
-    charm_by_strike: Dict[float, float] = Field(default_factory=dict)
-    vanna_by_strike: Dict[float, float] = Field(default_factory=dict)
+    charm_by_strike: dict[float, float] = Field(default_factory=dict)
+    vanna_by_strike: dict[float, float] = Field(default_factory=dict)
 
 
 class HawkesStateModel(BaseModel):
@@ -146,9 +145,9 @@ class HawkesStateModel(BaseModel):
 class AdvancedAnalytics(BaseModel):
     """Combined advanced analytics from all three engines."""
 
-    charm_vanna: Optional[CharmVannaSnapshot] = None
-    hawkes: Optional[HawkesStateModel] = None
-    smoothed_net_gex: Optional[float] = Field(
+    charm_vanna: CharmVannaSnapshot | None = None
+    hawkes: HawkesStateModel | None = None
+    smoothed_net_gex: float | None = Field(
         None, description="Kalman-filtered net GEX value"
     )
 
@@ -156,7 +155,7 @@ class AdvancedAnalytics(BaseModel):
 class GEXHistorical(BaseModel):
     """Historical GEX data for a date range."""
 
-    data: List[GEXSnapshot]
+    data: list[GEXSnapshot]
     start_date: datetime
     end_date: datetime
     count: int
@@ -165,8 +164,8 @@ class GEXHistorical(BaseModel):
 class GEXByStrike(BaseModel):
     """GEX breakdown by strike price."""
 
-    strikes: List[float]
-    gex_values: List[float]
+    strikes: list[float]
+    gex_values: list[float]
     spot_price: float
     zero_gamma_level: float
 
@@ -228,7 +227,7 @@ class WebSocketMessage(BaseModel):
     """WebSocket message format."""
 
     type: Literal["gex_update", "price_update", "alert"]
-    data: Dict[str, float | str | int]
+    data: dict[str, float | str | int]
     timestamp: datetime
 
 
@@ -244,7 +243,7 @@ class RiskFreeRateResponse(BaseModel):
     rate_pct: float = Field(..., description="Rate as percentage")
     source: str = Field(..., description="Data source (FRED or fallback)")
     symbol: str = Field(..., description="FRED symbol used")
-    fetched_at: Optional[str] = Field(None, description="When rate was fetched")
+    fetched_at: str | None = Field(None, description="When rate was fetched")
     is_fallback: bool = Field(..., description="Whether using fallback rate")
     cache_ttl_seconds: int = Field(..., description="Cache TTL in seconds")
 
@@ -254,11 +253,11 @@ class TechnicalIndicatorData(BaseModel):
 
     timestamp: str
     close: float
-    atr: Optional[float] = None
-    rsi: Optional[float] = None
-    bb_upper: Optional[float] = None
-    bb_mid: Optional[float] = None
-    bb_lower: Optional[float] = None
+    atr: float | None = None
+    rsi: float | None = None
+    bb_upper: float | None = None
+    bb_mid: float | None = None
+    bb_lower: float | None = None
 
 
 class TechnicalIndicatorResponse(BaseModel):
@@ -266,8 +265,8 @@ class TechnicalIndicatorResponse(BaseModel):
 
     symbol: str
     period: str
-    indicators: List[str]
-    data: List[TechnicalIndicatorData]
+    indicators: list[str]
+    data: list[TechnicalIndicatorData]
     count: int
 
 
@@ -289,8 +288,8 @@ class IVSurfaceResponse(BaseModel):
 
     symbol: str
     spot_price: float
-    surface: List[IVSurfaceData]
-    skew: List[Dict[str, float]]
+    surface: list[IVSurfaceData]
+    skew: list[dict[str, float]]
     count: int
 
 
@@ -313,4 +312,4 @@ class VectorBTBacktestResult(BaseModel):
     avg_trade_duration_minutes: float
     start_date: datetime
     end_date: datetime
-    equity_curve: List[float]
+    equity_curve: list[float]

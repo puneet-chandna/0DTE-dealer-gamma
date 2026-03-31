@@ -6,13 +6,13 @@ to reduce API calls and improve response times.
 
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 
 from app.core.constants import (
-    GEX_CACHE_TTL,
-    SPOT_CACHE_TTL,
-    OPTIONS_CHAIN_CACHE_TTL,
     ANALYTICS_CACHE_TTL,
+    GEX_CACHE_TTL,
+    OPTIONS_CHAIN_CACHE_TTL,
+    SPOT_CACHE_TTL,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,7 +38,7 @@ class GEXCache:
     def __init__(self) -> None:
         """Initialize empty cache with TTL configuration."""
         self._cache: dict[str, tuple[datetime, Any]] = {}
-        self._last_spot_price: Optional[float] = None
+        self._last_spot_price: float | None = None
         self._last_spot_prices: dict[str, float] = {}
 
         # TTL configuration by key prefix
@@ -69,7 +69,7 @@ class GEXCache:
                 return ttl
         return self._default_ttl
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         """Get value from cache if not stale.
 
         Args:
@@ -92,7 +92,7 @@ class GEXCache:
 
         return data
 
-    def get_if_fresh(self, key: str) -> Optional[Any]:
+    def get_if_fresh(self, key: str) -> Any | None:
         """Get value only if it's within TTL (not stale).
 
         Args:
@@ -175,7 +175,7 @@ class GEXCache:
         return len(keys_to_remove)
 
     @staticmethod
-    def _normalize_symbol(symbol: Optional[str]) -> str:
+    def _normalize_symbol(symbol: str | None) -> str:
         """Normalize cache symbol identifiers."""
         normalized = (symbol or "SPX").strip().upper()
         return normalized or "SPX"
@@ -186,7 +186,7 @@ class GEXCache:
         new_spot: float,
         threshold_pct: float = 0.01,
         *,
-        symbol: Optional[str] = None,
+        symbol: str | None = None,
     ) -> bool:
         """Invalidate GEX-related caches if spot price moves significantly.
 
@@ -225,7 +225,7 @@ class GEXCache:
 
         return False
 
-    def update_spot_price(self, spot_price: float, *, symbol: Optional[str] = None) -> bool:
+    def update_spot_price(self, spot_price: float, *, symbol: str | None = None) -> bool:
         """Update spot price and check for cache invalidation.
 
         Args:
@@ -279,7 +279,7 @@ class GEXCache:
         Returns:
             Dictionary with cache metrics.
         """
-        now = datetime.now()
+        datetime.now()
         fresh_count = sum(
             1 for key in self._cache if not self.is_stale(key)
         )
@@ -295,7 +295,7 @@ class GEXCache:
 
 
 # Global cache instance
-_cache_instance: Optional[GEXCache] = None
+_cache_instance: GEXCache | None = None
 
 
 def get_cache() -> GEXCache:

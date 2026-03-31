@@ -5,26 +5,22 @@ helpers. Polygon-specific tests removed (Polygon client retired).
 """
 
 import asyncio
-from datetime import datetime, date, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
-from zoneinfo import ZoneInfo
+from datetime import date, datetime
 
-import pandas as pd
 import pytest
 
-from app.core.data_acquisition import (
-    RateLimiter,
-    is_market_open,
-    get_market_status,
-    get_current_trading_date,
-    ET,
-)
 from app.core.constants import (
-    MARKET_OPEN_HOUR,
-    MARKET_OPEN_MINUTE,
     MARKET_CLOSE_HOUR,
     MARKET_CLOSE_MINUTE,
-    STRIKE_RANGE_PERCENT,
+    MARKET_OPEN_HOUR,
+    MARKET_OPEN_MINUTE,
+)
+from app.core.data_acquisition import (
+    ET,
+    RateLimiter,
+    get_current_trading_date,
+    get_market_status,
+    is_market_open,
 )
 
 

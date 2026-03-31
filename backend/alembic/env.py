@@ -5,15 +5,15 @@ from __future__ import annotations
 import asyncio
 from logging.config import fileConfig
 
-from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from app.db.base import Base
-from app.db.session import get_database_url
+from alembic import context
 
 # Import ORM models so metadata is populated.
 from app.db import models  # noqa: F401
+from app.db.base import Base
+from app.db.session import get_database_url
 
 config = context.config
 

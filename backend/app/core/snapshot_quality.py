@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional
+from typing import Any
 
 import pandas as pd
 
@@ -60,8 +61,8 @@ class SnapshotQualityReport:
 def evaluate_snapshot_quality(
     snapshot_like: Any,
     *,
-    options_df: Optional[pd.DataFrame] = None,
-    provider: Optional[str] = None,
+    options_df: pd.DataFrame | None = None,
+    provider: str | None = None,
 ) -> SnapshotQualityReport:
     """Evaluate whether a snapshot is safe to reuse for replay/fallback."""
     snapshot = _coerce_snapshot_payload(snapshot_like)
@@ -134,8 +135,8 @@ def evaluate_snapshot_quality(
 def annotate_snapshot_quality(
     snapshot_like: Any,
     *,
-    options_df: Optional[pd.DataFrame] = None,
-    provider: Optional[str] = None,
+    options_df: pd.DataFrame | None = None,
+    provider: str | None = None,
 ):
     """Merge snapshot quality metadata into a snapshot model or payload dict."""
     quality = evaluate_snapshot_quality(
@@ -155,11 +156,11 @@ def annotate_snapshot_quality(
         merged_quality_flags = list(dict.fromkeys([*existing_quality_flags, *merged_quality_flags]))
 
     capture_quality = quality.capture_quality
-    if isinstance(existing_capture_quality, (int, float)):
+    if isinstance(existing_capture_quality, int | float):
         capture_quality = min(float(existing_capture_quality), capture_quality)
 
     meaningful_strike_count = quality.meaningful_strike_count
-    if isinstance(existing_meaningful_strikes, (int, float)):
+    if isinstance(existing_meaningful_strikes, int | float):
         meaningful_strike_count = max(int(existing_meaningful_strikes), meaningful_strike_count)
 
     is_replay_eligible = quality.is_replay_eligible and not merged_quality_flags
@@ -206,11 +207,11 @@ def is_snapshot_replay_eligible(snapshot_like: Any) -> bool:
         return False
 
     capture_quality = metrics.get("capture_quality")
-    if isinstance(capture_quality, (int, float)):
+    if isinstance(capture_quality, int | float):
         return float(capture_quality) > 0
 
     call_put_ratio = metrics.get("call_put_ratio")
-    if isinstance(call_put_ratio, (int, float)):
+    if isinstance(call_put_ratio, int | float):
         meaningful_strike_count = _count_meaningful_strikes(payload.get("gex_by_strike") or {})
         if (
             meaningful_strike_count < 5
@@ -257,7 +258,7 @@ def _count_meaningful_strikes(gex_by_strike: Mapping[Any, Any]) -> int:
     return sum(
         1
         for value in gex_by_strike.values()
-        if isinstance(value, (int, float)) and abs(float(value)) >= MEANINGFUL_GEX_ABS_THRESHOLD
+        if isinstance(value, int | float) and abs(float(value)) >= MEANINGFUL_GEX_ABS_THRESHOLD
     )
 
 
@@ -291,7 +292,7 @@ def _prepare_near_spot_gex_by_strike(
 
 def _is_provider_gex_outlier(
     *,
-    provider: Optional[str],
+    provider: str | None,
     net_gex: float,
     total_call_abs: float,
     total_put_abs: float,
@@ -374,10 +375,10 @@ def _coerce_metrics(metrics_like: Any) -> dict[str, Any]:
     return {}
 
 
-def _coerce_optional_bool(value: Any) -> Optional[bool]:
+def _coerce_optional_bool(value: Any) -> bool | None:
     if isinstance(value, bool):
         return value
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return bool(value)
     if isinstance(value, str):
         normalized = value.strip().lower()
@@ -405,7 +406,7 @@ def _get_column_series(
     return pd.Series([default] * len(frame), index=frame.index)
 
 
-def _normalize_provider_name(provider_like: Any) -> Optional[str]:
+def _normalize_provider_name(provider_like: Any) -> str | None:
     if not isinstance(provider_like, str):
         return None
     normalized = provider_like.strip().lower()

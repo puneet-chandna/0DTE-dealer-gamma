@@ -4,7 +4,6 @@ Comprehensive tests for the GEXCache class covering TTL, invalidation,
 and cache statistics.
 """
 
-import time
 from datetime import datetime, timedelta
 from unittest.mock import patch
 

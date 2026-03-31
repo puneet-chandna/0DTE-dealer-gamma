@@ -16,7 +16,6 @@ from app.core.advanced_analytics import reset_advanced_analytics_state
 from app.main import app
 from app.models.schemas import GEXSnapshot
 
-
 client = TestClient(app)
 ET = ZoneInfo("America/New_York")
 
@@ -79,10 +78,10 @@ class TestWebSocketEndpoints:
             gex_data = data["data"]
 
             # Check numeric types
-            assert isinstance(gex_data["net_gex"], (int, float))
-            assert isinstance(gex_data["net_gex_billions"], (int, float))
-            assert isinstance(gex_data["zero_gamma_level"], (int, float))
-            assert isinstance(gex_data["spot_price"], (int, float))
+            assert isinstance(gex_data["net_gex"], int | float)
+            assert isinstance(gex_data["net_gex_billions"], int | float)
+            assert isinstance(gex_data["zero_gamma_level"], int | float)
+            assert isinstance(gex_data["spot_price"], int | float)
 
             assert math.isfinite(gex_data["net_gex"])
             assert math.isfinite(gex_data["zero_gamma_level"])
@@ -496,7 +495,7 @@ class TestGEXUpdateHelper:
                 with patch("app.api.websocket.get_gex_calculator", return_value=mock_calculator):
                     with patch(
                         "app.api.websocket.annotate_snapshot_quality",
-                        side_effect=lambda snapshot, options_df: snapshot,
+                        side_effect=lambda snapshot, **_: snapshot,
                     ):
                         payload = await _get_gex_update(
                             Settings(data_provider="yfinance"),
@@ -580,7 +579,7 @@ class TestGEXUpdateHelper:
                 with patch("app.api.websocket.get_gex_calculator", return_value=mock_calculator):
                     with patch(
                         "app.api.websocket.annotate_snapshot_quality",
-                        side_effect=lambda snapshot, options_df: snapshot,
+                        side_effect=lambda snapshot, **_: snapshot,
                     ):
                         await _get_gex_update(Settings(data_provider="yfinance"), symbol="SPX")
                         mock_client.get_options_chain_for_gex.return_value = (second_df, 6030.0)

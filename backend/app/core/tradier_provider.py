@@ -9,7 +9,6 @@ Official docs: https://docs.tradier.com/reference
 import asyncio
 import logging
 from datetime import date, datetime
-from typing import Optional
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -204,7 +203,7 @@ class TradierClient(DataProvider):
     async def get_options_chain_snapshot(
         self,
         underlying: str = "SPX",
-        expiration_date: Optional[date] = None,
+        expiration_date: date | None = None,
     ) -> pd.DataFrame:
         """Fetch the options chain with Greeks for a given expiration.
 
@@ -319,7 +318,7 @@ class TradierClient(DataProvider):
     def filter_0dte_contracts(
         self,
         df: pd.DataFrame,
-        target_date: Optional[date] = None,
+        target_date: date | None = None,
     ) -> pd.DataFrame:
         """Keep only contracts expiring on *target_date* (0DTE)."""
         if df.empty:

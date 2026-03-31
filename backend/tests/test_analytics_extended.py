@@ -4,18 +4,15 @@ Tests IV-surface, technical-indicators, vectorbt-backtest endpoints
 including parameter validation, error handling, and response schemas.
 """
 
-import json
 import sys
-from datetime import date, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pandas as pd
-import pytest
 from fastapi.testclient import TestClient
 
+from app.core.provider_registry import ProviderUnavailableError
 from app.main import app
 from app.models.schemas import GEXSnapshot
-from app.core.provider_registry import ProviderUnavailableError
 
 client = TestClient(app)
 
@@ -99,10 +96,10 @@ class TestIVSurfaceEndpoint:
         mock_df["implied_vol"] = mock_df["impliedVolatility"]
         mock_df["open_interest"] = mock_df["openInterest"]
 
-        with patch("app.core.yfinance_provider.YFinanceClient") as MockClient:
+        with patch("app.core.yfinance_provider.YFinanceClient") as mock_client_cls:
             instance = AsyncMock()
             instance.get_options_chain_for_gex = AsyncMock(return_value=(mock_df, 585.0))
-            MockClient.return_value = instance
+            mock_client_cls.return_value = instance
 
             resp = client.get("/api/analytics/iv-surface")
             # 200 (success), 503 (no data), or 404 (empty chain) are all valid
@@ -110,13 +107,13 @@ class TestIVSurfaceEndpoint:
 
     def test_invalid_symbol_returns_error(self):
         """Invalid symbol should gracefully return an error (not crash the server)."""
-        with patch("app.core.yfinance_provider.YFinanceClient") as MockClient:
+        with patch("app.core.yfinance_provider.YFinanceClient") as mock_client_cls:
             instance = AsyncMock()
             # Return empty DF to simulate no data for invalid symbol
             instance.get_options_chain_for_gex = AsyncMock(
                 return_value=(pd.DataFrame(), 0.0)
             )
-            MockClient.return_value = instance
+            mock_client_cls.return_value = instance
 
             resp = client.get("/api/analytics/iv-surface?symbol=XXXXINVALID")
             # 404 (empty chain) is the expected outcome with a mock that returns empty
@@ -361,14 +358,16 @@ class TestTechnicalIndicatorsEndpoint:
             def history(self, *args, **kwargs):
                 return market_history
 
-        class _FakeYFinance:
-            def Ticker(self, symbol):
-                assert symbol == "SPY"
-                return _FakeTicker()
+        def _build_fake_ticker(symbol):
+            assert symbol == "SPY"
+            return _FakeTicker()
+
+        fake_yfinance = MagicMock()
+        fake_yfinance.Ticker.side_effect = _build_fake_ticker
 
         with patch("app.api.routes.analytics.get_historical_data_service", return_value=history_service):
             with patch("app.api.routes.analytics.get_demo_data_service", return_value=_FailingDemoService()):
-                with patch.dict(sys.modules, {"yfinance": _FakeYFinance()}):
+                with patch.dict(sys.modules, {"yfinance": fake_yfinance}):
                     resp = client.get(
                         "/api/analytics/technical-indicators",
                         params={
@@ -381,6 +380,7 @@ class TestTechnicalIndicatorsEndpoint:
                     )
 
         assert resp.status_code == 200
+        fake_yfinance.Ticker.assert_called_once_with("SPY")
         body = resp.json()
         assert body["count"] == 25
         assert any(point["atr"] is not None for point in body["data"])
@@ -448,7 +448,7 @@ class TestVectorbtBacktestEndpoint:
         if resp.status_code == 200:
             curve = resp.json()["equity_curve"]
             assert isinstance(curve, list)
-            assert all(isinstance(v, (int, float)) for v in curve)
+            assert all(isinstance(v, int | float) for v in curve)
 
     def test_end_date_before_start_date_handled(self):
         """Should return error or 503 when date range is invalid."""

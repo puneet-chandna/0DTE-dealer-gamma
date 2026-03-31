@@ -7,19 +7,18 @@ import asyncio
 import logging
 import math
 from datetime import datetime
-from typing import List, Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.config import Settings, get_settings
 from app.core.advanced_analytics import enrich_snapshot_with_advanced_analytics
 from app.core.data_acquisition import is_market_open
 from app.core.demo_data import get_demo_data_service
-from app.core.snapshot_quality import annotate_snapshot_quality, is_snapshot_replay_eligible
-from app.core.provider_registry import ProviderRegistry, get_data_client
 from app.core.gex_calculator import GEXCalculator
+from app.core.provider_registry import ProviderRegistry, get_data_client
 from app.core.provider_timeouts import get_live_fetch_timeout_seconds
+from app.core.snapshot_quality import annotate_snapshot_quality, is_snapshot_replay_eligible
 from app.services.cache import get_cache
 from app.services.historical_data import get_historical_data_service
 
@@ -39,7 +38,7 @@ class ConnectionManager:
     """Manage WebSocket connections for real-time GEX streaming."""
 
     def __init__(self) -> None:
-        self.active_connections: List[WebSocket] = []
+        self.active_connections: list[WebSocket] = []
         self._lock = asyncio.Lock()
 
     async def connect(self, websocket: WebSocket) -> None:
@@ -85,7 +84,7 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 # Module-level instances
-_gex_calculator: Optional[GEXCalculator] = None
+_gex_calculator: GEXCalculator | None = None
 
 
 def get_gex_calculator() -> GEXCalculator:
@@ -176,7 +175,7 @@ def _is_reasonable_gex_payload(payload: dict) -> bool:
     zero_gamma_level = payload.get("zero_gamma_level")
 
     numeric_fields = (net_gex, spot_price, zero_gamma_level)
-    if not all(isinstance(value, (int, float)) and math.isfinite(value) for value in numeric_fields):
+    if not all(isinstance(value, int | float) and math.isfinite(value) for value in numeric_fields):
         return False
 
     if not 100 <= spot_price <= 10_000:
@@ -207,7 +206,7 @@ def _get_cached_snapshot(
     *,
     cache,
     cache_key: str,
-    legacy_cache_key: Optional[str],
+    legacy_cache_key: str | None,
     provider: str,
     fresh_only: bool,
 ):
@@ -262,7 +261,7 @@ async def _get_latest_persisted_ws_payload(
     symbol: str,
     provider: str,
     is_stale: bool,
-) -> Optional[dict]:
+) -> dict | None:
     """Build a websocket payload from the latest persisted snapshot."""
     snapshot = await get_historical_data_service().get_latest_snapshot(
         provider=provider,
@@ -282,7 +281,7 @@ async def _get_gex_update(
     settings: Settings,
     demo: bool = False,
     symbol: str = "SPX",
-    provider: Optional[str] = None,
+    provider: str | None = None,
 ) -> dict:
     """Get current GEX data for WebSocket broadcast.
 
@@ -529,7 +528,7 @@ async def websocket_gex_stream(websocket: WebSocket) -> None:
                         websocket.receive_text(),
                         timeout=WS_UPDATE_INTERVAL,
                     )
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     # Normal timeout - no client message received
                     pass
 

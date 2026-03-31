@@ -8,7 +8,6 @@ the hardcoded default if the network call fails.
 import logging
 import threading
 from datetime import datetime, timedelta
-from typing import Optional
 
 import pandas_datareader.data as web  # noqa: E402 — requires setuptools on Python 3.13+
 
@@ -32,8 +31,8 @@ class RiskFreeRateProvider:
     """
 
     def __init__(self, cache_ttl_seconds: int = RATE_CACHE_TTL) -> None:
-        self._cached_rate: Optional[float] = None
-        self._last_fetched: Optional[datetime] = None
+        self._cached_rate: float | None = None
+        self._last_fetched: datetime | None = None
         self._cache_ttl = timedelta(seconds=cache_ttl_seconds)
         self._is_fallback: bool = True
         self._source: str = "default"
@@ -129,7 +128,7 @@ class RiskFreeRateProvider:
 
 
 # Module-level singleton
-_provider: Optional[RiskFreeRateProvider] = None
+_provider: RiskFreeRateProvider | None = None
 
 
 def get_rate_provider() -> RiskFreeRateProvider:

@@ -12,9 +12,8 @@ from numpy.typing import NDArray
 from scipy.stats import norm
 
 from app.core.constants import (
-    MIN_IV,
     MAX_IV,
-    RISK_FREE_RATE,
+    MIN_IV,
     SPX_DIVIDEND_YIELD,
 )
 

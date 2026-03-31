@@ -212,14 +212,14 @@ class TestGEXCalculatorCallPutSigns:
         expiration_timestamp = pd.DatetimeIndex(
             [pd.Timestamp(expiration).tz_localize(ET)]
         )
-        T = (
+        time_to_expiration = (
             (expiration_timestamp - pd.Timestamp(timestamp)).total_seconds()
             / (365.25 * 24 * 3600)
         ).to_numpy()
         gamma = BlackScholesGreeks.gamma(
             pd.Series([spot_price], dtype=float).to_numpy(),
             pd.Series([strike], dtype=float).to_numpy(),
-            T,
+            time_to_expiration,
             self.calc.risk_free_rate,
             pd.Series([iv], dtype=float).to_numpy(),
             q=self.calc.dividend_yield,

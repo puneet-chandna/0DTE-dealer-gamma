@@ -1,8 +1,8 @@
 """0DTE GEX Backend - FastAPI Application Entry Point."""
 
 import logging
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -91,17 +91,16 @@ async def health_check() -> dict:
     - Cache status
     """
     from datetime import datetime
-
     from zoneinfo import ZoneInfo
 
     from app.services.cache import get_cache
 
-    ET = ZoneInfo("America/New_York")
-    now = datetime.now(ET)
+    eastern_time = ZoneInfo("America/New_York")
+    now = datetime.now(eastern_time)
 
     # Get cache instance and status
     try:
-        cache = get_cache()
+        get_cache()
         cache_status = "healthy"
     except Exception:
         cache_status = "not_initialized"

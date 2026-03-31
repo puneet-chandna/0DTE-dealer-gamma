@@ -1,7 +1,6 @@
 """Tests for the Kalman Filter."""
 
 import numpy as np
-import pytest
 
 from app.core.kalman_filter import GEXKalmanFilter
 

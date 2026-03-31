@@ -10,25 +10,22 @@ GEX Formula: GEX_i = OI_i × Γ_i × 100 × S² × 0.01
 import logging
 import re
 from datetime import date, datetime, time
-from typing import Dict, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
+from app.core.charm_vanna_calculator import CharmVannaCalculator
 from app.core.constants import (
     CONTRACT_MULTIPLIER,
-    MIN_IV,
     MAX_IV,
+    MIN_IV,
     RISK_FREE_RATE,
     SPX_DIVIDEND_YIELD,
-    SHORT_GAMMA_THRESHOLD,
-    LONG_GAMMA_THRESHOLD,
 )
 from app.core.greeks import BlackScholesGreeks
-from app.models.schemas import GEXSnapshot, CharmVannaSnapshot, AdvancedAnalytics
-from app.core.charm_vanna_calculator import CharmVannaCalculator
+from app.models.schemas import AdvancedAnalytics, CharmVannaSnapshot, GEXSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -124,19 +121,27 @@ class GEXCalculator:
         expiration = self._normalize_expiration_timestamps(
             expiration_values=df["expiration"],
         )
-        T = (
+        time_to_expiration = (
             (expiration - reference_timestamp).dt.total_seconds() / (365.25 * 24 * 3600)
         ).to_numpy(dtype=np.float64)
 
-        # Ensure T is finite and positive (filter out expired)
-        T = np.maximum(np.nan_to_num(T, nan=0.0), 0.0)
+        # Ensure time to expiration is finite and positive (filter out expired)
+        time_to_expiration = np.maximum(
+            np.nan_to_num(time_to_expiration, nan=0.0),
+            0.0,
+        )
 
         # Vectorized spot price
-        S = np.full_like(strikes, spot_price)
+        spot_vector = np.full_like(strikes, spot_price)
 
         # Calculate gamma for all contracts WITH dividend yield
         gammas = BlackScholesGreeks.gamma(
-            S, strikes, T, self.risk_free_rate, implied_vol, q=self.dividend_yield
+            spot_vector,
+            strikes,
+            time_to_expiration,
+            self.risk_free_rate,
+            implied_vol,
+            q=self.dividend_yield,
         )
 
         # Calculate GEX per contract on a 1% underlying move basis.
@@ -186,7 +191,9 @@ class GEXCalculator:
         # Calculate Charm & Vanna hidden flows
         try:
             cv_result = self._charm_vanna.calculate_all(
-                options_df=df, spot_price=spot_price, T=T,
+                options_df=df,
+                spot_price=spot_price,
+                time_to_expiration=time_to_expiration,
             )
             charm_vanna = CharmVannaSnapshot(
                 charm_flow=cv_result["charm_flow"],
@@ -313,13 +320,13 @@ class GEXCalculator:
         self,
         strikes: NDArray[np.float64],
         gex_values: NDArray[np.float64],
-    ) -> Dict[float, float]:
+    ) -> dict[float, float]:
         """Aggregate GEX values by strike price."""
         if len(strikes) == 0:
             return {}
 
         unique_strikes = np.unique(strikes)
-        gex_by_strike: Dict[float, float] = {}
+        gex_by_strike: dict[float, float] = {}
 
         for strike in unique_strikes:
             mask = strikes == strike
@@ -329,9 +336,9 @@ class GEXCalculator:
 
     def _find_zero_gamma_level(
         self,
-        gex_by_strike: Dict[float, float],
+        gex_by_strike: dict[float, float],
         spot_price: float,
-    ) -> Tuple[float, bool, Optional[str]]:
+    ) -> tuple[float, bool, str | None]:
         """
         Find the Zero Gamma Level using linear interpolation.
 
@@ -398,10 +405,10 @@ class GEXCalculator:
         total_put_gex: float,
         spot_price: float,
         zero_gamma_level: float,
-        gex_by_strike: Dict[float, float],
+        gex_by_strike: dict[float, float],
         zero_gamma_crossing_found: bool,
-        zero_gamma_relation: Optional[str],
-    ) -> Dict[str, float | bool | str]:
+        zero_gamma_relation: str | None,
+    ) -> dict[str, float | bool | str]:
         """Calculate additional GEX metrics."""
         # Safe division for ratios
         if total_put_gex != 0:
@@ -434,7 +441,7 @@ class GEXCalculator:
         self,
         net_gex: float,
         threshold_billions: float = 1.0,
-    ) -> Tuple[str, str, str]:
+    ) -> tuple[str, str, str]:
         """
         Determine market regime based on net GEX.
 
@@ -463,10 +470,10 @@ class GEXCalculator:
 
     def calculate_gex_contribution(
         self,
-        gex_by_strike: Dict[float, float],
+        gex_by_strike: dict[float, float],
         spot_price: float,
         n_top: int = 5,
-    ) -> Dict[str, list]:
+    ) -> dict[str, list]:
         """
         Get the top contributing strikes to GEX.
 

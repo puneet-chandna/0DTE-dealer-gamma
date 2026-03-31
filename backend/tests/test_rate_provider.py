@@ -9,8 +9,8 @@ from unittest.mock import patch
 
 import pytest
 
-from app.core.rate_provider import RiskFreeRateProvider
 from app.core.constants import DEFAULT_RISK_FREE_RATE, FRED_RATE_SYMBOL
+from app.core.rate_provider import RiskFreeRateProvider
 
 
 class TestRiskFreeRateProviderInit:

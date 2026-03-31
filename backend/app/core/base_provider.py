@@ -7,7 +7,6 @@ in a standardised DataFrame format that feeds the GEX calculator.
 
 from abc import ABC, abstractmethod
 from datetime import date
-from typing import Optional
 
 import pandas as pd
 
@@ -55,7 +54,7 @@ class DataProvider(ABC):
     async def get_options_chain_snapshot(
         self,
         underlying: str = "SPX",
-        expiration_date: Optional[date] = None,
+        expiration_date: date | None = None,
     ) -> pd.DataFrame:
         """Fetch the options chain for a given underlying and expiration.
 

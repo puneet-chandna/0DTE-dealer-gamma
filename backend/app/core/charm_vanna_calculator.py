@@ -8,19 +8,16 @@ These are the invisible structural forces that move the market.
 """
 
 import logging
-from typing import Dict, Tuple
 
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
 from app.core.constants import (
+    CHARM_TIME_ADVANCE_MINUTES,
     CONTRACT_MULTIPLIER,
-    MIN_IV,
-    MAX_IV,
     RISK_FREE_RATE,
     SPX_DIVIDEND_YIELD,
-    CHARM_TIME_ADVANCE_MINUTES,
     VANNA_IV_BUMP,
 )
 from app.core.greeks import BlackScholesGreeks
@@ -62,9 +59,9 @@ class CharmVannaCalculator:
         option_types: NDArray[np.str_],
         open_interest: NDArray[np.float64],
         implied_vol: NDArray[np.float64],
-        T: NDArray[np.float64],
+        time_to_expiration: NDArray[np.float64],
         spot_price: float,
-    ) -> Tuple[float, Dict[float, float]]:
+    ) -> tuple[float, dict[float, float]]:
         """
         Calculate expected dealer hedging flow from Charm (time decay).
 
@@ -76,12 +73,17 @@ class CharmVannaCalculator:
         if len(strikes) == 0:
             return 0.0, {}
 
-        S = np.full_like(strikes, spot_price)
+        spot_vector = np.full_like(strikes, spot_price)
 
         # Calculate Charm for all contracts
         charms = BlackScholesGreeks.charm(
-            S, strikes, T, self.risk_free_rate, implied_vol,
-            option_types, q=self.dividend_yield,
+            spot_vector,
+            strikes,
+            time_to_expiration,
+            self.risk_free_rate,
+            implied_vol,
+            option_types,
+            q=self.dividend_yield,
         )
 
         # Charm flow: OI × Charm × 100 (contract multiplier)
@@ -106,9 +108,9 @@ class CharmVannaCalculator:
         option_types: NDArray[np.str_],
         open_interest: NDArray[np.float64],
         implied_vol: NDArray[np.float64],
-        T: NDArray[np.float64],
+        time_to_expiration: NDArray[np.float64],
         spot_price: float,
-    ) -> Tuple[float, Dict[float, float]]:
+    ) -> tuple[float, dict[float, float]]:
         """
         Calculate expected dealer hedging flow from Vanna (IV change).
 
@@ -122,11 +124,15 @@ class CharmVannaCalculator:
         if len(strikes) == 0:
             return 0.0, {}
 
-        S = np.full_like(strikes, spot_price)
+        spot_vector = np.full_like(strikes, spot_price)
 
         # Calculate Vanna for all contracts
         vannas = BlackScholesGreeks.vanna(
-            S, strikes, T, self.risk_free_rate, implied_vol,
+            spot_vector,
+            strikes,
+            time_to_expiration,
+            self.risk_free_rate,
+            implied_vol,
             q=self.dividend_yield,
         )
 
@@ -148,7 +154,7 @@ class CharmVannaCalculator:
         self,
         options_df: pd.DataFrame,
         spot_price: float,
-        T: NDArray[np.float64],
+        time_to_expiration: NDArray[np.float64],
     ) -> dict:
         """
         Calculate both Charm and Vanna flows from an options DataFrame.
@@ -156,7 +162,8 @@ class CharmVannaCalculator:
         Args:
             options_df: DataFrame with columns: strike, type, open_interest, implied_vol
             spot_price: Current underlying price
-            T: Time to expiration array (in years), aligned with options_df rows
+            time_to_expiration: Time to expiration array (in years), aligned with
+                options_df rows
 
         Returns:
             Dictionary with charm_flow, vanna_flow, net_hidden_flow, and per-strike breakdowns.
@@ -176,11 +183,21 @@ class CharmVannaCalculator:
         implied_vol = options_df["implied_vol"].values.astype(np.float64)
 
         charm_flow, charm_by_strike = self.calculate_charm_flow(
-            strikes, option_types, open_interest, implied_vol, T, spot_price,
+            strikes,
+            option_types,
+            open_interest,
+            implied_vol,
+            time_to_expiration,
+            spot_price,
         )
 
         vanna_flow, vanna_by_strike = self.calculate_vanna_flow(
-            strikes, option_types, open_interest, implied_vol, T, spot_price,
+            strikes,
+            option_types,
+            open_interest,
+            implied_vol,
+            time_to_expiration,
+            spot_price,
         )
 
         net_hidden_flow = charm_flow + vanna_flow
@@ -202,12 +219,12 @@ class CharmVannaCalculator:
     def _aggregate_by_strike(
         strikes: NDArray[np.float64],
         values: NDArray[np.float64],
-    ) -> Dict[float, float]:
+    ) -> dict[float, float]:
         """Aggregate values by strike price."""
         if len(strikes) == 0:
             return {}
         unique_strikes = np.unique(strikes)
-        result: Dict[float, float] = {}
+        result: dict[float, float] = {}
         for strike in unique_strikes:
             mask = strikes == strike
             result[float(strike)] = float(np.sum(values[mask]))
