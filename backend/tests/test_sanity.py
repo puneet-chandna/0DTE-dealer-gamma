@@ -98,35 +98,35 @@ class TestNoNaNInGreeks:
 
 
 class TestGEXSignConvention:
-    """Verify call GEX is negative, put GEX is positive (dealer perspective)."""
+    """Verify call GEX is positive and put GEX is negative (baseline market gamma view)."""
 
     @pytest.fixture
     def gex_calculator(self):
         """Create GEX calculator instance."""
         return GEXCalculator(risk_free_rate=RISK_FREE_RATE, dividend_yield=SPX_DIVIDEND_YIELD)
 
-    def test_call_gex_is_negative(self, gex_calculator):
-        """Call GEX should be negative (dealers short calls)."""
+    def test_call_gex_is_positive(self, gex_calculator):
+        """Call GEX should be positive under the standard baseline convention."""
         timestamp = get_test_timestamp()
         expiration = get_test_expiration()
         df = pd.DataFrame([
             {"strike": 5900.0, "type": "call", "open_interest": 1000, "implied_vol": 0.20, "expiration": expiration},
         ])
         result = gex_calculator.calculate_gex_from_chain(df, 5900.0, timestamp)
-        assert result.total_call_gex < 0, f"Call GEX should be negative, got {result.total_call_gex}"
+        assert result.total_call_gex > 0, f"Call GEX should be positive, got {result.total_call_gex}"
 
-    def test_put_gex_is_positive(self, gex_calculator):
-        """Put GEX should be positive (dealers long puts)."""
+    def test_put_gex_is_negative(self, gex_calculator):
+        """Put GEX should be negative under the standard baseline convention."""
         timestamp = get_test_timestamp()
         expiration = get_test_expiration()
         df = pd.DataFrame([
             {"strike": 5900.0, "type": "put", "open_interest": 1000, "implied_vol": 0.20, "expiration": expiration},
         ])
         result = gex_calculator.calculate_gex_from_chain(df, 5900.0, timestamp)
-        assert result.total_put_gex > 0, f"Put GEX should be positive, got {result.total_put_gex}"
+        assert result.total_put_gex < 0, f"Put GEX should be negative, got {result.total_put_gex}"
 
     def test_mixed_chain_sign_convention(self, gex_calculator):
-        """In a mixed chain, calls negative and puts positive."""
+        """In a mixed chain, calls should be positive and puts negative."""
         timestamp = get_test_timestamp()
         expiration = get_test_expiration()
         df = pd.DataFrame([
@@ -137,9 +137,9 @@ class TestGEXSignConvention:
         ])
         result = gex_calculator.calculate_gex_from_chain(df, 5875.0, timestamp)
         
-        # Calls should contribute negative, puts positive
-        assert result.total_call_gex < 0, f"Call GEX should be negative, got {result.total_call_gex}"
-        assert result.total_put_gex > 0, f"Put GEX should be positive, got {result.total_put_gex}"
+        # Calls should contribute positive, puts negative
+        assert result.total_call_gex > 0, f"Call GEX should be positive, got {result.total_call_gex}"
+        assert result.total_put_gex < 0, f"Put GEX should be negative, got {result.total_put_gex}"
 
 
 class TestZeroGammaBetweenStrikes:

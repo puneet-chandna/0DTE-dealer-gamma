@@ -26,7 +26,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useDashboardData, useIntradayTimeSeries } from '@/hooks/useDashboardData';
 import { useGEXByStrikes, queryKeys } from '@/hooks/useGEXData';
 import { getAppDataMode } from '@/lib/appMode';
-import { hasZeroGammaCrossing } from '@/lib/utils';
+import { formatMarketTimestamp, hasZeroGammaCrossing } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
 import { DashboardHeader, Sidebar, MetricsPanel } from '@/components/dashboard';
 import {
@@ -39,7 +39,17 @@ import {
   StaleDataBanner,
 } from '@/components/ui';
 import { ChartErrorBoundary, GEXBarChart, TimeSeriesChart } from '@/components/charts';
-import type { GEXChartDataPoint, TimeSeriesDataPoint } from '@/types';
+import type { GEXChartDataPoint, SnapshotMetricValue, TimeSeriesDataPoint } from '@/types';
+
+function isTruthyMetric(metric: SnapshotMetricValue | undefined): boolean {
+  if (typeof metric === 'boolean') return metric;
+  if (typeof metric === 'number') return Number.isFinite(metric) && metric !== 0;
+  if (typeof metric === 'string') {
+    const normalized = metric.trim().toLowerCase();
+    return ['true', '1', 'yes', 'on'].includes(normalized);
+  }
+  return false;
+}
 
 export default function DashboardPage() {
   const queryClient = useQueryClient();
@@ -76,6 +86,18 @@ export default function DashboardPage() {
   const lastUpdate = lastUpdateTime
     ? format(new Date(lastUpdateTime), 'h:mm:ss a')
     : undefined;
+  const captureTimestampLabel = useMemo(() => {
+    if (!gexData?.timestamp) return undefined;
+
+    const formattedTimestamp = formatMarketTimestamp(gexData.timestamp);
+    if (!formattedTimestamp) return undefined;
+
+    const isReplayCapture = isTruthyMetric(gexData.metrics?.is_replay_data);
+    const isPersistedFallback = isTruthyMetric(gexData.metrics?.is_persisted_fallback);
+    if (isReplayCapture) return `Replay capture: ${formattedTimestamp}`;
+    if (isPersistedFallback) return `Stored capture: ${formattedTimestamp}`;
+    return undefined;
+  }, [gexData?.metrics, gexData?.timestamp]);
 
   // Transform strikes data for bar chart
   const barChartData: GEXChartDataPoint[] = useMemo(() => {
@@ -128,6 +150,7 @@ export default function DashboardPage() {
         retryCount={retryCount}
         isLoading={isLoading}
         lastUpdate={lastUpdate}
+        captureTimestampLabel={captureTimestampLabel}
         onRefresh={handleRefresh}
       />
 

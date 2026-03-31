@@ -1,15 +1,17 @@
 """0DTE GEX Backend - GEX Calculator Engine.
 
-CRITICAL: Dealer positioning assumptions:
-- Dealers are SHORT calls (customers buy calls) → Negative GEX
-- Dealers are LONG puts (customers buy puts) → Positive GEX
+Trader-facing baseline convention:
+- Calls contribute positive GEX
+- Puts contribute negative GEX
 
-GEX Formula: GEX_i = OI_i × Γ_i × 100 × S²
+GEX Formula: GEX_i = OI_i × Γ_i × 100 × S² × 0.01
 """
 
 import logging
-from datetime import datetime
+import re
+from datetime import date, datetime, time
 from typing import Dict, Optional, Tuple
+from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
@@ -30,18 +32,21 @@ from app.core.charm_vanna_calculator import CharmVannaCalculator
 
 logger = logging.getLogger(__name__)
 
+ET = ZoneInfo("America/New_York")
+ONE_PERCENT_MOVE = 0.01
+
 
 class GEXCalculator:
     """
     Calculate Dealer Gamma Exposure from options chain data.
 
-    GEX Formula: GEX_i = OI_i × Γ_i × 100 × S²
+    GEX Formula: GEX_i = OI_i × Γ_i × 100 × S² × 0.01
 
-    Dealer Positioning Assumptions:
-    - Dealers are SHORT calls (customers buy calls) → Negative GEX
-    - Dealers are LONG puts (customers buy puts) → Positive GEX
+    Trader-facing baseline convention:
+    - Calls contribute positive GEX
+    - Puts contribute negative GEX
 
-    Net GEX = Σ(GEX_puts) + Σ(GEX_calls)  [calls are already negative]
+    Net GEX = Σ(GEX_calls) + Σ(GEX_puts)
     """
 
     def __init__(
@@ -113,15 +118,18 @@ class GEXCalculator:
         open_interest = df["open_interest"].values.astype(np.float64)
         implied_vol = df["implied_vol"].values.astype(np.float64)
 
+        reference_timestamp = self._normalize_reference_timestamp(timestamp)
+
         # Calculate time to expiration in years
         expiration = self._normalize_expiration_timestamps(
             expiration_values=df["expiration"],
-            timestamp=timestamp,
         )
-        T = ((expiration - timestamp).dt.total_seconds() / (365.25 * 24 * 3600)).values
+        T = (
+            (expiration - reference_timestamp).dt.total_seconds() / (365.25 * 24 * 3600)
+        ).to_numpy(dtype=np.float64)
 
-        # Ensure T is positive (filter out expired)
-        T = np.maximum(T, 0)
+        # Ensure T is finite and positive (filter out expired)
+        T = np.maximum(np.nan_to_num(T, nan=0.0), 0.0)
 
         # Vectorized spot price
         S = np.full_like(strikes, spot_price)
@@ -131,12 +139,18 @@ class GEXCalculator:
             S, strikes, T, self.risk_free_rate, implied_vol, q=self.dividend_yield
         )
 
-        # Calculate GEX per contract: OI × Γ × 100 × S²
-        gex_raw = open_interest * gammas * CONTRACT_MULTIPLIER * (spot_price**2)
+        # Calculate GEX per contract on a 1% underlying move basis.
+        gex_raw = (
+            open_interest
+            * gammas
+            * CONTRACT_MULTIPLIER
+            * (spot_price**2)
+            * ONE_PERCENT_MOVE
+        )
 
-        # Apply dealer positioning: calls negative, puts positive
+        # Apply the standard baseline sign convention: calls positive, puts negative.
         is_call = option_types == "call"
-        gex_adjusted = np.where(is_call, -gex_raw, gex_raw)
+        gex_adjusted = np.where(is_call, gex_raw, -gex_raw)
 
         # Aggregate by strike
         gex_by_strike = self._aggregate_by_strike(strikes, gex_adjusted)
@@ -202,25 +216,48 @@ class GEXCalculator:
     def _normalize_expiration_timestamps(
         self,
         expiration_values: pd.Series,
-        timestamp: datetime,
     ) -> pd.Series:
-        """Normalize expirations so date-only 0DTE values expire at the close."""
-        expiration = pd.to_datetime(expiration_values)
-        expiration_strings = expiration_values.astype(str).str.strip()
-        date_only_mask = expiration_strings.str.fullmatch(r"\d{4}-\d{2}-\d{2}")
+        """Normalize expirations into ET market time.
 
-        if date_only_mask.any():
-            expiration.loc[date_only_mask] = (
-                expiration.loc[date_only_mask] + pd.Timedelta(hours=16)
-            )
+        Date-only expirations are treated as 4:00 PM ET on that session date so
+        replay/backfill of stored 0DTE snapshots does not collapse to zero when
+        `captured_at` is stored in UTC.
+        """
+        normalized_values = [
+            self._normalize_expiration_value(raw_value)
+            for raw_value in expiration_values.tolist()
+        ]
+        return pd.Series(normalized_values, index=expiration_values.index)
 
-        if timestamp.tzinfo is not None:
-            if expiration.dt.tz is None:
-                expiration = expiration.dt.tz_localize(timestamp.tzinfo)
-            else:
-                expiration = expiration.dt.tz_convert(timestamp.tzinfo)
+    def _normalize_reference_timestamp(self, timestamp: datetime) -> pd.Timestamp:
+        """Normalize the pricing timestamp into ET for option expiry math."""
+        reference = pd.Timestamp(timestamp)
+        if reference.tzinfo is None:
+            return reference.tz_localize(ET)
+        return reference.tz_convert(ET)
 
-        return expiration
+    def _normalize_expiration_value(self, raw_value: object) -> pd.Timestamp:
+        """Normalize one expiration value into ET market time."""
+        if raw_value is None or pd.isna(raw_value):
+            return pd.NaT
+
+        if isinstance(raw_value, date) and not isinstance(raw_value, datetime):
+            return pd.Timestamp(datetime.combine(raw_value, time(16, 0), tzinfo=ET))
+
+        if isinstance(raw_value, str):
+            raw_string = raw_value.strip()
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw_string):
+                expiration_date = date.fromisoformat(raw_string)
+                return pd.Timestamp(datetime.combine(expiration_date, time(16, 0), tzinfo=ET))
+            parsed = pd.Timestamp(raw_string)
+        else:
+            parsed = pd.Timestamp(raw_value)
+
+        if pd.isna(parsed):
+            return pd.NaT
+        if parsed.tzinfo is None:
+            return parsed.tz_localize(ET)
+        return parsed.tz_convert(ET)
 
     def _filter_valid_contracts(self, df: pd.DataFrame) -> pd.DataFrame:
         """

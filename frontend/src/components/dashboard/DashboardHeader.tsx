@@ -38,6 +38,7 @@ interface DashboardHeaderProps {
   retryCount?: number;
   isLoading?: boolean;
   lastUpdate?: string;
+  captureTimestampLabel?: string;
   onRefresh?: () => void;
 }
 
@@ -47,6 +48,7 @@ function DashboardHeaderComponent({
   retryCount = 0,
   isLoading = false,
   lastUpdate,
+  captureTimestampLabel,
   onRefresh,
 }: DashboardHeaderProps) {
   const pathname = usePathname();
@@ -139,10 +141,19 @@ function DashboardHeaderComponent({
             retryCount={retryCount}
           />
 
-          {lastUpdate && (
-            <span className="text-xs text-zinc-500">
-              Updated: {lastUpdate}
-            </span>
+          {(lastUpdate || captureTimestampLabel) && (
+            <div className="flex flex-col items-start gap-0.5 text-xs">
+              {lastUpdate && (
+                <span className="text-zinc-500">
+                  Updated: {lastUpdate}
+                </span>
+              )}
+              {captureTimestampLabel && (
+                <span className="text-zinc-400">
+                  {captureTimestampLabel}
+                </span>
+              )}
+            </div>
           )}
         </div>
 

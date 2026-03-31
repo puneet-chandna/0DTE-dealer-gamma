@@ -87,4 +87,14 @@ describe('DashboardHeader', () => {
     expect(screen.getByText(/connecting/i)).toBeInTheDocument();
     expect(screen.queryByText(/^connected$/i)).not.toBeInTheDocument();
   });
+
+  it('shows a replay capture timestamp when one is provided', () => {
+    render(
+      <DashboardHeader
+        captureTimestampLabel="Replay capture: Mar 27, 2026 3:34 PM ET"
+      />
+    );
+
+    expect(screen.getByText(/replay capture: mar 27, 2026 3:34 pm et/i)).toBeInTheDocument();
+  });
 });

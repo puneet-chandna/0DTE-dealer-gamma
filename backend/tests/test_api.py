@@ -276,7 +276,7 @@ class TestGEXEndpoints:
             with patch("app.api.routes.gex.get_gex_calculator", return_value=mock_calculator):
                 with patch(
                     "app.api.routes.gex.annotate_snapshot_quality",
-                    side_effect=lambda snapshot, options_df: snapshot,
+                    side_effect=lambda snapshot, options_df, provider=None: snapshot,
                 ):
                     payload = await gex_routes._get_live_gex_snapshot("SPX", "tradier")
 
@@ -352,7 +352,7 @@ class TestGEXEndpoints:
             with patch("app.api.routes.gex.get_gex_calculator", return_value=mock_calculator):
                 with patch(
                     "app.api.routes.gex.annotate_snapshot_quality",
-                    side_effect=lambda snapshot, options_df: snapshot,
+                    side_effect=lambda snapshot, options_df, provider=None: snapshot,
                 ):
                     await gex_routes._get_live_gex_snapshot("SPX", "yfinance")
                     payload = await gex_routes._get_live_gex_snapshot("SPX", "yfinance")

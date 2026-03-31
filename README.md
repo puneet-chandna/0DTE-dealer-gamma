@@ -253,9 +253,15 @@ For each option contract `i`, the raw (magnitude) gamma exposure is:
 raw_gex_i = OI_i × Γ_i × 100 × S²
 ```
 
-Then the project applies the sign convention by option type:
-- Calls contribute **negative** GEX
-- Puts contribute **positive** GEX
+The trader-facing Net GEX values in this project are normalized to a 1% underlying
+move and signed by option type:
+
+```txt
+gex_i = raw_gex_i × 0.01
+```
+
+- Calls contribute **positive** GEX
+- Puts contribute **negative** GEX
 
 | Symbol | Description                               |
 | ------ | ----------------------------------------- |
@@ -263,15 +269,16 @@ Then the project applies the sign convention by option type:
 | Γ      | Black-Scholes Gamma (with dividend yield) |
 | 100    | Contract multiplier                       |
 | S      | Spot price                                |
+| 0.01   | Convert to dollar gamma per 1% move       |
 
 ### Dealer Positioning
 
-| Customer Action | Dealer Position | GEX Sign     |
-| --------------- | --------------- | ------------ |
-| Buy Calls       | Short Calls     | **Negative** |
-| Buy Puts        | Sell Puts       | **Positive** |
+| Option Type | GEX Sign     |
+| ----------- | ------------ |
+| Calls       | **Positive** |
+| Puts        | **Negative** |
 
-**Net GEX = Σ(signed Put GEX) + Σ(signed Call GEX)** (calls are already signed negative).
+**Net GEX = Σ(Call GEX) + Σ(Put GEX)**.
 
 ### Market Regimes
 

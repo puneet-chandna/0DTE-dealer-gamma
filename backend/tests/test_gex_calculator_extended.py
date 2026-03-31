@@ -12,7 +12,9 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import pytest
 
+from app.core.constants import CONTRACT_MULTIPLIER
 from app.core.gex_calculator import GEXCalculator
+from app.core.greeks import BlackScholesGreeks
 
 ET = ZoneInfo("America/New_York")
 
@@ -162,23 +164,66 @@ class TestGEXCalculatorGexByStrike:
 
 
 class TestGEXCalculatorCallPutSigns:
-    """Test dealer positioning (calls negative, puts positive)."""
+    """Test trader-facing baseline signs (calls positive, puts negative)."""
 
     def setup_method(self):
         self.calc = GEXCalculator()
 
-    def test_calls_only_gives_negative_total_call_gex(self):
-        """Calls-only DataFrame should give a negative total_call_gex."""
+    def test_calls_only_gives_positive_total_call_gex(self):
+        """Calls-only DataFrame should give a positive total_call_gex."""
         df = _make_df(call_oi=5000, put_oi=0).query("type == 'call'")
         snap = self.calc.calculate_gex_from_chain(
             options_df=df, spot_price=5900.0, timestamp=datetime.now(ET)
         )
-        assert snap.total_call_gex <= 0
+        assert snap.total_call_gex >= 0
 
-    def test_puts_only_gives_positive_total_put_gex(self):
-        """Puts-only DataFrame should give a positive total_put_gex."""
+    def test_puts_only_gives_negative_total_put_gex(self):
+        """Puts-only DataFrame should give a negative total_put_gex."""
         df = _make_df(call_oi=0, put_oi=5000).query("type == 'put'")
         snap = self.calc.calculate_gex_from_chain(
             options_df=df, spot_price=5900.0, timestamp=datetime.now(ET)
         )
-        assert snap.total_put_gex >= 0
+        assert snap.total_put_gex <= 0
+
+    def test_gex_values_are_scaled_to_per_one_percent_move(self):
+        """The calculator should apply the 1% move normalization to notional gamma."""
+        timestamp = datetime(2026, 3, 24, 12, 0, 0, tzinfo=ET)
+        expiration = "2026-03-24T16:00:00"
+        spot_price = 5900.0
+        strike = 5900.0
+        iv = 0.20
+        open_interest = 1000
+
+        df = pd.DataFrame(
+            [
+                {
+                    "type": "call",
+                    "strike": strike,
+                    "open_interest": open_interest,
+                    "implied_vol": iv,
+                    "expiration": expiration,
+                }
+            ]
+        )
+
+        snap = self.calc.calculate_gex_from_chain(
+            options_df=df, spot_price=spot_price, timestamp=timestamp
+        )
+        expiration_timestamp = pd.DatetimeIndex(
+            [pd.Timestamp(expiration).tz_localize(ET)]
+        )
+        T = (
+            (expiration_timestamp - pd.Timestamp(timestamp)).total_seconds()
+            / (365.25 * 24 * 3600)
+        ).to_numpy()
+        gamma = BlackScholesGreeks.gamma(
+            pd.Series([spot_price], dtype=float).to_numpy(),
+            pd.Series([strike], dtype=float).to_numpy(),
+            T,
+            self.calc.risk_free_rate,
+            pd.Series([iv], dtype=float).to_numpy(),
+            q=self.calc.dividend_yield,
+        )[0]
+        raw_notional = open_interest * gamma * CONTRACT_MULTIPLIER * (spot_price ** 2)
+
+        assert snap.total_call_gex == pytest.approx(raw_notional * 0.01, rel=1e-6)

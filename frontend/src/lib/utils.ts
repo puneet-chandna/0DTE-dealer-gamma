@@ -51,6 +51,26 @@ export function formatCurrency(value: number, decimals: number = 2): string {
   }).format(value);
 }
 
+export function formatMarketTimestamp(timestamp: string): string | null {
+  const parsed = new Date(timestamp);
+  if (Number.isNaN(parsed.getTime())) return null;
+
+  const dateLabel = new Intl.DateTimeFormat('en-US', {
+    timeZone: MARKET_TIME_ZONE,
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(parsed);
+  const timeLabel = new Intl.DateTimeFormat('en-US', {
+    timeZone: MARKET_TIME_ZONE,
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  }).format(parsed);
+
+  return `${dateLabel} ${timeLabel} ET`;
+}
+
 function readZeroGammaRelation(snapshot?: Pick<GEXSnapshot, 'metrics'> | null) {
   const relation = snapshot?.metrics?.zero_gamma_relation;
   return relation === 'below_range' || relation === 'above_range' ? relation : null;

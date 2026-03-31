@@ -16,11 +16,35 @@ NEAR_SPOT_WINDOW_PCT = 0.015
 EXTREME_GEX_IMBALANCE_RATIO = 100.0
 MIN_WEAK_SIDE_NEAR_SPOT_CONTRACTS = 8
 CORRUPTED_SIDE_THRESHOLD = 0.4
+PROVIDER_GEX_OUTLIER_FLAG = "provider_gex_outlier"
 
 INSUFFICIENT_MEANINGFUL_STRIKES_FLAG = "insufficient_meaningful_strikes"
 EXTREME_IMBALANCE_FLAG = "extreme_call_put_imbalance"
 CALL_IV_CORRUPTED_FLAG = "call_iv_corrupted"
 PUT_IV_CORRUPTED_FLAG = "put_iv_corrupted"
+
+PROVIDER_REPLAY_SANITY_RULES: dict[str, dict[str, float]] = {
+    "yfinance": {
+        "hard_max_abs_net_gex": 250_000_000_000.0,
+        "hard_max_gross_gex": 300_000_000_000.0,
+        "max_abs_net_gex": 75_000_000_000.0,
+        "max_gross_gex": 90_000_000_000.0,
+        "max_near_spot_dominant_share": 0.75,
+        "max_call_put_imbalance_ratio": 20.0,
+        "min_near_spot_strikes": 1.0,
+        "min_near_spot_contracts": 4.0,
+    },
+    "tradier": {
+        "hard_max_abs_net_gex": 200_000_000_000.0,
+        "hard_max_gross_gex": 250_000_000_000.0,
+        "max_abs_net_gex": 120_000_000_000.0,
+        "max_gross_gex": 150_000_000_000.0,
+        "max_near_spot_dominant_share": 0.9,
+        "max_call_put_imbalance_ratio": 35.0,
+        "min_near_spot_strikes": 1.0,
+        "min_near_spot_contracts": 2.0,
+    },
+}
 
 
 @dataclass(frozen=True)
@@ -37,6 +61,7 @@ def evaluate_snapshot_quality(
     snapshot_like: Any,
     *,
     options_df: Optional[pd.DataFrame] = None,
+    provider: Optional[str] = None,
 ) -> SnapshotQualityReport:
     """Evaluate whether a snapshot is safe to reuse for replay/fallback."""
     snapshot = _coerce_snapshot_payload(snapshot_like)
@@ -48,9 +73,11 @@ def evaluate_snapshot_quality(
         quality_flags.append(INSUFFICIENT_MEANINGFUL_STRIKES_FLAG)
 
     spot_price = _coerce_float(snapshot.get("spot_price"))
+    net_gex = _coerce_float(snapshot.get("net_gex"))
     total_call_abs = abs(_coerce_float(snapshot.get("total_call_gex")))
     total_put_abs = abs(_coerce_float(snapshot.get("total_put_gex")))
     imbalance_ratio = _get_gex_imbalance_ratio(total_call_abs, total_put_abs)
+    near_spot_rows = pd.DataFrame(columns=["type", "strike", "open_interest", "implied_vol"])
 
     if options_df is not None and not options_df.empty and spot_price > 0:
         near_spot_rows = _prepare_near_spot_contract_rows(options_df, spot_price=spot_price)
@@ -79,6 +106,19 @@ def evaluate_snapshot_quality(
             if corrupted_share >= CORRUPTED_SIDE_THRESHOLD:
                 quality_flags.append(flag)
 
+    normalized_provider = _normalize_provider_name(provider or snapshot.get("provider"))
+    near_spot_gex = _prepare_near_spot_gex_by_strike(gex_by_strike or {}, spot_price=spot_price)
+    if _is_provider_gex_outlier(
+        provider=normalized_provider,
+        net_gex=net_gex,
+        total_call_abs=total_call_abs,
+        total_put_abs=total_put_abs,
+        imbalance_ratio=imbalance_ratio,
+        near_spot_gex=near_spot_gex,
+        near_spot_contract_count=len(near_spot_rows),
+    ):
+        quality_flags.append(PROVIDER_GEX_OUTLIER_FLAG)
+
     quality_flags = list(dict.fromkeys(quality_flags))
     is_replay_eligible = not quality_flags
     capture_quality = 1.0 if is_replay_eligible else max(0.0, 1.0 - 0.34 * len(quality_flags))
@@ -95,9 +135,14 @@ def annotate_snapshot_quality(
     snapshot_like: Any,
     *,
     options_df: Optional[pd.DataFrame] = None,
+    provider: Optional[str] = None,
 ):
     """Merge snapshot quality metadata into a snapshot model or payload dict."""
-    quality = evaluate_snapshot_quality(snapshot_like, options_df=options_df)
+    quality = evaluate_snapshot_quality(
+        snapshot_like,
+        options_df=options_df,
+        provider=provider,
+    )
     payload = _coerce_snapshot_payload(snapshot_like)
     existing_metrics = _coerce_metrics(payload.get("metrics"))
     existing_quality_flags = existing_metrics.get("quality_flags")
@@ -222,6 +267,81 @@ def _get_gex_imbalance_ratio(total_call_abs: float, total_put_abs: float) -> flo
     return stronger_side / max(weaker_side, 1.0)
 
 
+def _prepare_near_spot_gex_by_strike(
+    gex_by_strike: Mapping[Any, Any],
+    *,
+    spot_price: float,
+) -> dict[float, float]:
+    """Filter a strike map to the near-spot window used for replay screening."""
+    if spot_price <= 0:
+        return {}
+
+    distance_limit = abs(spot_price) * NEAR_SPOT_WINDOW_PCT
+    near_spot_gex: dict[float, float] = {}
+    for raw_strike, raw_value in gex_by_strike.items():
+        try:
+            strike = float(raw_strike)
+            gex_value = float(raw_value)
+        except (TypeError, ValueError):
+            continue
+        if abs(strike - spot_price) <= distance_limit:
+            near_spot_gex[strike] = gex_value
+    return near_spot_gex
+
+
+def _is_provider_gex_outlier(
+    *,
+    provider: Optional[str],
+    net_gex: float,
+    total_call_abs: float,
+    total_put_abs: float,
+    imbalance_ratio: float,
+    near_spot_gex: Mapping[float, float],
+    near_spot_contract_count: int,
+) -> bool:
+    """Apply provider-aware replay guards for implausible outlier structures."""
+    if provider is None:
+        return False
+
+    rule = PROVIDER_REPLAY_SANITY_RULES.get(provider)
+    if rule is None:
+        return False
+
+    gross_gex = total_call_abs + total_put_abs
+    if (
+        abs(net_gex) >= rule["hard_max_abs_net_gex"]
+        or gross_gex >= rule["hard_max_gross_gex"]
+    ):
+        return True
+
+    if not near_spot_gex:
+        return False
+
+    near_spot_abs_values = [abs(value) for value in near_spot_gex.values()]
+    if not near_spot_abs_values:
+        return False
+
+    dominant_share = max(near_spot_abs_values) / max(sum(near_spot_abs_values), 1.0)
+    near_spot_strike_count = sum(
+        1 for value in near_spot_abs_values if value >= MEANINGFUL_GEX_ABS_THRESHOLD
+    )
+    contract_count_ok = True
+    min_near_spot_contracts = int(rule["min_near_spot_contracts"])
+    if near_spot_contract_count > 0:
+        contract_count_ok = near_spot_contract_count >= min_near_spot_contracts
+    magnitude_outlier = (
+        abs(net_gex) >= rule["max_abs_net_gex"]
+        or gross_gex >= rule["max_gross_gex"]
+    )
+    structural_outlier = (
+        dominant_share >= rule["max_near_spot_dominant_share"]
+        and imbalance_ratio >= rule["max_call_put_imbalance_ratio"]
+        and near_spot_strike_count >= int(rule["min_near_spot_strikes"])
+        and contract_count_ok
+    )
+    return magnitude_outlier and structural_outlier
+
+
 def _coerce_snapshot_payload(snapshot_like: Any) -> dict[str, Any]:
     if isinstance(snapshot_like, Mapping):
         return dict(snapshot_like)
@@ -283,3 +403,10 @@ def _get_column_series(
     if column in frame.columns:
         return frame[column]
     return pd.Series([default] * len(frame), index=frame.index)
+
+
+def _normalize_provider_name(provider_like: Any) -> Optional[str]:
+    if not isinstance(provider_like, str):
+        return None
+    normalized = provider_like.strip().lower()
+    return normalized or None

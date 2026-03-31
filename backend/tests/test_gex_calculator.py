@@ -7,7 +7,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from app.core.constants import CONTRACT_MULTIPLIER
 from app.core.gex_calculator import GEXCalculator
+from app.core.greeks import BlackScholesGreeks
 from app.core.constants import SPX_DIVIDEND_YIELD, RISK_FREE_RATE
 
 
@@ -64,13 +66,12 @@ class TestGEXCalculator:
         assert len(result.gex_by_strike) == 3  # 3 unique strikes
 
         # Verify GEX signs
-        # Call GEX should be negative (dealers short)
-        assert result.total_call_gex < 0
-        # Put GEX should be positive (dealers long)
-        assert result.total_put_gex > 0
+        # Calls should contribute positive gamma, puts negative
+        assert result.total_call_gex > 0
+        assert result.total_put_gex < 0
 
     def test_call_gex_negative_put_gex_positive(self, gex_calculator):
-        """Verify dealer positioning: calls negative, puts positive."""
+        """Verify baseline GEX convention: calls positive, puts negative."""
         # Simple chain with 1 call and 1 put
         timestamp = datetime(2024, 1, 15, 12, 0, 0, tzinfo=ET)
         df = pd.DataFrame([
@@ -80,8 +81,8 @@ class TestGEXCalculator:
 
         result = gex_calculator.calculate_gex_from_chain(df, 5750.0, timestamp)
 
-        assert result.total_call_gex < 0, "Call GEX should be negative"
-        assert result.total_put_gex > 0, "Put GEX should be positive"
+        assert result.total_call_gex > 0, "Call GEX should be positive"
+        assert result.total_put_gex < 0, "Put GEX should be negative"
 
     def test_empty_dataframe_returns_zero_gex(self, gex_calculator):
         """Empty options chain should return zero GEX."""
@@ -107,7 +108,7 @@ class TestGEXCalculator:
 
         # Only put should contribute
         assert result.total_call_gex == 0.0
-        assert result.total_put_gex > 0
+        assert result.total_put_gex < 0
 
     def test_filter_invalid_iv(self, gex_calculator):
         """Contracts with invalid IV should be filtered out."""
@@ -134,8 +135,42 @@ class TestGEXCalculator:
 
         result = gex_calculator.calculate_gex_from_chain(df, 5750.0, timestamp)
 
-        assert result.total_call_gex < 0
-        assert result.total_put_gex > 0
+        assert result.total_call_gex > 0
+        assert result.total_put_gex < 0
+
+    def test_gex_normalizes_to_per_one_percent_move(self, gex_calculator):
+        """Contract GEX should be scaled to a 1% underlying move, not raw S^2 notional."""
+        timestamp = datetime(2024, 1, 15, 12, 0, 0, tzinfo=ET)
+        expiration = "2024-01-15T16:00:00"
+        spot_price = 5750.0
+        strike = 5750.0
+        iv = 0.20
+        open_interest = 1000
+
+        df = pd.DataFrame([
+            {
+                "strike": strike,
+                "type": "call",
+                "open_interest": open_interest,
+                "implied_vol": iv,
+                "expiration": expiration,
+            }
+        ])
+
+        result = gex_calculator.calculate_gex_from_chain(df, spot_price, timestamp)
+        T = np.array([(datetime(2024, 1, 15, 16, 0, 0, tzinfo=ET) - timestamp).total_seconds() / (365.25 * 24 * 3600)])
+        gamma = BlackScholesGreeks.gamma(
+            np.array([spot_price], dtype=np.float64),
+            np.array([strike], dtype=np.float64),
+            T,
+            gex_calculator.risk_free_rate,
+            np.array([iv], dtype=np.float64),
+            q=gex_calculator.dividend_yield,
+        )[0]
+        old_raw_notional = open_interest * gamma * CONTRACT_MULTIPLIER * (spot_price ** 2)
+        expected = old_raw_notional * 0.01
+
+        assert result.total_call_gex == pytest.approx(expected, rel=1e-6)
 
     def test_zero_gamma_level_calculation(self, gex_calculator):
         """Test zero gamma level is between strikes."""
@@ -151,8 +186,8 @@ class TestGEXCalculator:
         # Zero gamma level should be between the strikes
         assert 5700.0 <= result.zero_gamma_level <= 5750.0
 
-    def test_zero_gamma_marks_below_range_when_no_crossing_exists(self, gex_calculator):
-        """Purely positive cumulative GEX should be marked as below-range."""
+    def test_zero_gamma_marks_above_range_when_no_crossing_exists(self, gex_calculator):
+        """Purely negative cumulative GEX should be marked as above-range."""
         timestamp = datetime(2024, 1, 15, 12, 0, 0, tzinfo=ET)
         df = pd.DataFrame([
             {"strike": 5700.0, "type": "put", "open_interest": 1000, "implied_vol": 0.20, "expiration": "2024-01-15T16:00:00"},
@@ -162,9 +197,9 @@ class TestGEXCalculator:
 
         result = gex_calculator.calculate_gex_from_chain(df, 5750.0, timestamp)
 
-        assert result.zero_gamma_level == 5700.0
+        assert result.zero_gamma_level == 5800.0
         assert result.metrics["zero_gamma_crossing_found"] is False
-        assert result.metrics["zero_gamma_relation"] == "below_range"
+        assert result.metrics["zero_gamma_relation"] == "above_range"
 
     def test_zero_gamma_treats_near_zero_cumulative_value_as_exact_crossing(self, gex_calculator):
         """Floating-point residue near zero should still count as an in-range crossing."""

@@ -9,12 +9,13 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from app.core.analytics import TradingStrategy, VolatilityAnalyzer
-from app.core.snapshot_quality import is_snapshot_replay_eligible
+from app.core.gex_calculator import GEXCalculator
+from app.core.snapshot_quality import annotate_snapshot_quality, is_snapshot_replay_eligible
 from app.core.technical_indicators import TechnicalIndicatorEngine
 from app.core.vectorbt_backtester import VectorBTBacktester
 from app.db.models import (
@@ -30,12 +31,20 @@ from app.models.schemas import GEXSnapshot
 logger = logging.getLogger(__name__)
 
 ET = ZoneInfo("America/New_York")
+UTC = ZoneInfo("UTC")
 SESSION_OPEN = time(9, 30)
 SESSION_CLOSE = time(16, 0)
 REPLAY_COMPLETE_AFTER = time(15, 55)
 RAW_SNAPSHOT_INTERVAL_SECONDS = 60
 RETENTION_DAYS = 30
 WATCHLIST_SYMBOLS = ("SPX", "SPY", "QQQ", "IWM")
+LATEST_RECORD_SCAN_BATCH_SIZE = 250
+HARD_INVALID_QUALITY_FLAGS = frozenset(
+    {
+        "raw_snapshot_rebuild_failed",
+        "raw_snapshot_unusable",
+    }
+)
 
 INTERVAL_RULES = {
     "5s": None,
@@ -150,6 +159,9 @@ class HistoricalDataService:
                     )
                     raw_persisted = raw_record is not None
                     if raw_record is not None:
+                        updated_metrics = dict(gex_snapshot.metrics or {})
+                        updated_metrics["has_raw_snapshot"] = True
+                        gex_snapshot.metrics = updated_metrics
                         iv_points = self._build_iv_surface_points(
                             raw_snapshot_id=raw_record.id,
                             provider=provider_name,
@@ -239,6 +251,88 @@ class HistoricalDataService:
             logger.warning("Historical session finalization failed: %s", exc)
             return False
 
+    async def rebuild_gex_snapshots_from_raw(
+        self,
+        *,
+        provider: str | None = None,
+        symbol: str | None = None,
+    ) -> int:
+        """Recompute derived GEX snapshots from persisted raw option chains."""
+        provider_name = provider.strip().lower() if provider is not None else None
+        underlying = symbol.strip().upper() if symbol is not None else None
+        calculator = GEXCalculator()
+        rebuilt_count = 0
+
+        try:
+            async with self._get_session_factory()() as session:
+                query = (
+                    select(RawOptionsSnapshotRecord)
+                    .options(selectinload(RawOptionsSnapshotRecord.market_session))
+                    .order_by(RawOptionsSnapshotRecord.captured_at.asc())
+                )
+                if provider_name is not None:
+                    query = query.where(RawOptionsSnapshotRecord.provider == provider_name)
+                if underlying is not None:
+                    query = query.where(RawOptionsSnapshotRecord.symbol == underlying)
+
+                raw_records = (await session.execute(query)).scalars().all()
+                for raw_record in raw_records:
+                    try:
+                        options_df = self._deserialize_options_payload(raw_record)
+                        if options_df.empty:
+                            await self._mark_snapshot_rebuild_failure(
+                                session=session,
+                                raw_record=raw_record,
+                                quality_flags=["raw_snapshot_unusable"],
+                            )
+                            continue
+
+                        rebuilt_snapshot = calculator.calculate_gex_from_chain(
+                            options_df=options_df,
+                            spot_price=float(raw_record.spot_price),
+                            timestamp=self._normalize_rebuild_timestamp(raw_record),
+                        )
+                        rebuilt_snapshot = annotate_snapshot_quality(
+                            rebuilt_snapshot,
+                            options_df=options_df,
+                            provider=raw_record.provider,
+                        )
+                        await self._upsert_rebuilt_snapshot(
+                            session=session,
+                            raw_record=raw_record,
+                            snapshot=rebuilt_snapshot,
+                        )
+                        rebuilt_count += 1
+                    except Exception as exc:  # pragma: no cover - defensive logging path
+                        logger.warning(
+                            "Failed to rebuild snapshot from raw payload for %s/%s at %s: %s",
+                            raw_record.provider,
+                            raw_record.symbol,
+                            raw_record.captured_at,
+                            exc,
+                        )
+                        await self._mark_snapshot_rebuild_failure(
+                            session=session,
+                            raw_record=raw_record,
+                            quality_flags=["raw_snapshot_rebuild_failed"],
+                        )
+
+                await self._refresh_snapshot_quality_annotations(
+                    session=session,
+                    provider=provider_name,
+                    symbol=underlying,
+                )
+                await session.commit()
+            return rebuilt_count
+        except Exception as exc:
+            logger.warning(
+                "Raw snapshot rebuild failed for provider=%s symbol=%s: %s",
+                provider_name or "*",
+                underlying or "*",
+                exc,
+            )
+            return 0
+
     async def get_historical_snapshots(
         self,
         *,
@@ -256,11 +350,14 @@ class HistoricalDataService:
             start_date=start_date,
             end_date=end_date,
         )
+        records = self._filter_historically_usable_records(records)
         if prefer_replay:
             records = self._filter_replay_eligible_records(records)
         if not records and prefer_replay:
             records = self._filter_replay_eligible_records(
-                await self._load_latest_replay_snapshot_records(provider=provider, symbol=symbol)
+                self._filter_historically_usable_records(
+                    await self._load_latest_replay_snapshot_records(provider=provider, symbol=symbol)
+                )
             )
 
         return self._records_to_snapshots(records, interval=interval)
@@ -425,11 +522,14 @@ class HistoricalDataService:
             start_date=start_date,
             end_date=end_date,
         )
+        records = self._filter_historically_usable_records(records)
         if prefer_replay:
             records = self._filter_replay_eligible_records(records)
         if not records and prefer_replay and allow_latest_replay_fallback:
             records = self._filter_replay_eligible_records(
-                await self._load_latest_replay_snapshot_records(provider=provider, symbol=symbol)
+                self._filter_historically_usable_records(
+                    await self._load_latest_replay_snapshot_records(provider=provider, symbol=symbol)
+                )
             )
         if not records:
             return pd.DataFrame(), pd.DataFrame()
@@ -564,20 +664,36 @@ class HistoricalDataService:
             async with self._get_session_factory()() as session:
                 if prefer_replay:
                     records = self._filter_replay_eligible_records(
-                        await self._load_latest_replay_snapshot_records(
-                            provider=provider_name,
-                            symbol=underlying,
+                        self._filter_historically_usable_records(
+                            await self._load_latest_replay_snapshot_records(
+                                provider=provider_name,
+                                symbol=underlying,
+                            )
                         )
                     )
                     return records[-1].captured_at if records else None
 
-                result = await session.execute(
-                    select(func.max(GEXSnapshotRecord.captured_at)).where(
-                        GEXSnapshotRecord.provider == provider_name,
-                        GEXSnapshotRecord.symbol == underlying,
+                batch_size = max(1, LATEST_RECORD_SCAN_BATCH_SIZE)
+                offset = 0
+                while True:
+                    result = await session.execute(
+                        select(GEXSnapshotRecord)
+                        .where(
+                            GEXSnapshotRecord.provider == provider_name,
+                            GEXSnapshotRecord.symbol == underlying,
+                        )
+                        .order_by(GEXSnapshotRecord.captured_at.desc())
+                        .limit(batch_size)
+                        .offset(offset)
                     )
-                )
-                return result.scalar_one_or_none()
+                    candidates = result.scalars().all()
+                    for candidate in candidates:
+                        if self._record_is_historically_usable(candidate):
+                            return candidate.captured_at
+                    if len(candidates) < batch_size:
+                        break
+                    offset += batch_size
+                return None
         except Exception as exc:
             logger.warning("Latest timestamp lookup failed for %s/%s: %s", provider_name, underlying, exc)
             return None
@@ -597,9 +713,11 @@ class HistoricalDataService:
         try:
             if prefer_replay:
                 replay_records = self._filter_replay_eligible_records(
-                    await self._load_latest_replay_snapshot_records(
-                        provider=provider_name,
-                        symbol=underlying,
+                    self._filter_historically_usable_records(
+                        await self._load_latest_replay_snapshot_records(
+                            provider=provider_name,
+                            symbol=underlying,
+                        )
                     )
                 )
                 if not replay_records:
@@ -616,12 +734,11 @@ class HistoricalDataService:
                             GEXSnapshotRecord.symbol == underlying,
                         )
                         .order_by(GEXSnapshotRecord.captured_at.desc())
-                        .limit(1)
                     )
-                    latest_record = result.scalar_one_or_none()
-                    if latest_record is None:
-                        return None
-                    return self._record_to_snapshot(latest_record)
+                    for candidate in result.scalars():
+                        if self._record_is_historically_usable(candidate):
+                            return self._record_to_snapshot(candidate)
+                    return None
 
                 result = await session.execute(
                     select(GEXSnapshotRecord)
@@ -653,6 +770,13 @@ class HistoricalDataService:
         return [record for record in records if cls._record_is_replay_eligible(record)]
 
     @classmethod
+    def _filter_historically_usable_records(
+        cls,
+        records: list[GEXSnapshotRecord],
+    ) -> list[GEXSnapshotRecord]:
+        return [record for record in records if cls._record_is_historically_usable(record)]
+
+    @classmethod
     def _record_is_replay_eligible(cls, record: GEXSnapshotRecord) -> bool:
         metrics = dict(record.metrics or {})
 
@@ -671,6 +795,29 @@ class HistoricalDataService:
             return float(capture_quality) > 0
 
         return is_snapshot_replay_eligible(cls._record_to_snapshot(record))
+
+    @staticmethod
+    def _record_is_historically_usable(record: GEXSnapshotRecord) -> bool:
+        metrics = dict(record.metrics or {})
+        quality_flags = metrics.get("quality_flags")
+        if isinstance(quality_flags, list):
+            if any(flag in HARD_INVALID_QUALITY_FLAGS for flag in quality_flags):
+                return False
+            if (
+                "provider_gex_outlier" in quality_flags
+                and not HistoricalDataService._metrics_have_raw_snapshot(metrics)
+            ):
+                return False
+        return True
+
+    @staticmethod
+    def _metrics_have_raw_snapshot(metrics: dict[str, Any]) -> bool:
+        raw_snapshot_flag = metrics.get("has_raw_snapshot")
+        if isinstance(raw_snapshot_flag, bool):
+            return raw_snapshot_flag
+        if isinstance(raw_snapshot_flag, int | float):
+            return bool(raw_snapshot_flag)
+        return False
 
     async def _get_or_create_market_session(
         self,
@@ -801,6 +948,28 @@ class HistoricalDataService:
             )
             return []
 
+    async def _refresh_snapshot_quality_annotations(
+        self,
+        *,
+        session: AsyncSession,
+        provider: str | None,
+        symbol: str | None,
+    ) -> None:
+        """Re-score stored derived snapshots using the latest replay eligibility rules."""
+        query = select(GEXSnapshotRecord).options(selectinload(GEXSnapshotRecord.strike_points))
+        if provider is not None:
+            query = query.where(GEXSnapshotRecord.provider == provider)
+        if symbol is not None:
+            query = query.where(GEXSnapshotRecord.symbol == symbol)
+
+        snapshot_records = (await session.execute(query)).scalars().all()
+        for snapshot_record in snapshot_records:
+            annotated_snapshot = annotate_snapshot_quality(
+                self._record_to_snapshot(snapshot_record),
+                provider=snapshot_record.provider,
+            )
+            snapshot_record.metrics = dict(annotated_snapshot.metrics or {})
+
     async def _load_latest_replay_snapshot_records(
         self,
         *,
@@ -813,30 +982,23 @@ class HistoricalDataService:
 
         try:
             async with self._get_session_factory()() as session:
-                session_result = await session.execute(
-                    select(MarketSessionRecord)
-                    .where(
-                        MarketSessionRecord.provider == provider_name,
-                        MarketSessionRecord.symbol == underlying,
-                    )
-                    .order_by(
-                        (MarketSessionRecord.status == "complete").desc(),
-                        MarketSessionRecord.trading_date.desc(),
-                        MarketSessionRecord.last_captured_at.desc(),
-                    )
-                    .limit(1)
+                candidate_sessions = await self._load_replay_candidate_sessions(
+                    session=session,
+                    provider=provider_name,
+                    symbol=underlying,
                 )
-                latest_session = session_result.scalar_one_or_none()
-                if latest_session is None:
-                    return []
-
-                records_result = await session.execute(
-                    select(GEXSnapshotRecord)
-                    .options(selectinload(GEXSnapshotRecord.strike_points))
-                    .where(GEXSnapshotRecord.session_id == latest_session.id)
-                    .order_by(GEXSnapshotRecord.captured_at.asc())
-                )
-                return records_result.scalars().all()
+                for market_session in candidate_sessions:
+                    ordered_records = sorted(
+                        market_session.gex_snapshots,
+                        key=lambda record: self._normalize_timestamp(record.captured_at),
+                    )
+                    usable_records = self._filter_historically_usable_records(ordered_records)
+                    if not usable_records:
+                        continue
+                    eligible_records = self._filter_replay_eligible_records(usable_records)
+                    if eligible_records:
+                        return eligible_records
+                return []
         except Exception as exc:
             logger.warning("Replay lookup failed for %s/%s: %s", provider_name, underlying, exc)
             return []
@@ -862,8 +1024,48 @@ class HistoricalDataService:
             return result.scalar_one_or_none()
 
         await self.finalize_stale_sessions()
+        candidate_sessions = await self._load_replay_candidate_sessions(
+            session=session,
+            provider=provider,
+            symbol=symbol,
+        )
+        for market_session in candidate_sessions:
+            ordered_records = sorted(
+                market_session.gex_snapshots,
+                key=lambda record: self._normalize_timestamp(record.captured_at),
+            )
+            usable_records = self._filter_historically_usable_records(ordered_records)
+            if not usable_records:
+                continue
+            if not self._filter_replay_eligible_records(usable_records):
+                continue
+
+            raw_result = await session.execute(
+                select(RawOptionsSnapshotRecord)
+                .where(RawOptionsSnapshotRecord.session_id == market_session.id)
+                .order_by(RawOptionsSnapshotRecord.captured_at.desc())
+                .limit(1)
+            )
+            latest_raw = raw_result.scalar_one_or_none()
+            if latest_raw is not None:
+                return latest_raw
+        return None
+
+    async def _load_replay_candidate_sessions(
+        self,
+        *,
+        session: AsyncSession,
+        provider: str,
+        symbol: str,
+    ) -> list[MarketSessionRecord]:
+        """Load replay candidate sessions ordered newest-first with snapshots eager-loaded."""
         session_result = await session.execute(
             select(MarketSessionRecord)
+            .options(
+                selectinload(MarketSessionRecord.gex_snapshots).selectinload(
+                    GEXSnapshotRecord.strike_points
+                )
+            )
             .where(
                 MarketSessionRecord.provider == provider,
                 MarketSessionRecord.symbol == symbol,
@@ -873,19 +1075,8 @@ class HistoricalDataService:
                 MarketSessionRecord.trading_date.desc(),
                 MarketSessionRecord.last_captured_at.desc(),
             )
-            .limit(1)
         )
-        latest_session = session_result.scalar_one_or_none()
-        if latest_session is None:
-            return None
-
-        raw_result = await session.execute(
-            select(RawOptionsSnapshotRecord)
-            .where(RawOptionsSnapshotRecord.session_id == latest_session.id)
-            .order_by(RawOptionsSnapshotRecord.captured_at.desc())
-            .limit(1)
-        )
-        return raw_result.scalar_one_or_none()
+        return list(session_result.scalars().unique())
 
     async def _apply_retention(self, session: AsyncSession, *, reference_date: date) -> None:
         cutoff = reference_date - timedelta(days=RETENTION_DAYS)
@@ -915,6 +1106,18 @@ class HistoricalDataService:
         return options_df.copy()
 
     @staticmethod
+    def _deserialize_options_payload(raw_record: RawOptionsSnapshotRecord) -> pd.DataFrame:
+        payload = list(raw_record.payload or [])
+        if not payload:
+            columns = raw_record.source_metadata.get("columns") if raw_record.source_metadata else None
+            return pd.DataFrame(columns=columns or [])
+
+        options_df = pd.DataFrame(payload)
+        if "expiration" not in options_df.columns and raw_record.expiration_date is not None:
+            options_df["expiration"] = raw_record.expiration_date.isoformat()
+        return options_df
+
+    @staticmethod
     def _normalize_timestamp(timestamp: Any) -> datetime:
         if isinstance(timestamp, str):
             normalized = datetime.fromisoformat(timestamp)
@@ -928,6 +1131,162 @@ class HistoricalDataService:
         if normalized.tzinfo is None:
             return normalized.replace(tzinfo=ET)
         return normalized.astimezone(ET)
+
+    async def _upsert_rebuilt_snapshot(
+        self,
+        *,
+        session: AsyncSession,
+        raw_record: RawOptionsSnapshotRecord,
+        snapshot: GEXSnapshot,
+    ) -> None:
+        """Overwrite the derived snapshot for one raw capture with corrected values."""
+        snapshot_record = await self._find_snapshot_record_for_raw(
+            session=session,
+            raw_record=raw_record,
+        )
+
+        if snapshot_record is None:
+            snapshot_metrics = dict(snapshot.metrics or {})
+            snapshot_metrics["has_raw_snapshot"] = True
+            snapshot_metrics["is_raw_rebuilt"] = True
+            snapshot_record = GEXSnapshotRecord(
+                session_id=raw_record.session_id,
+                provider=raw_record.provider,
+                symbol=raw_record.symbol,
+                captured_at=raw_record.captured_at,
+                spot_price=float(snapshot.spot_price),
+                total_call_gex=float(snapshot.total_call_gex),
+                total_put_gex=float(snapshot.total_put_gex),
+                net_gex=float(snapshot.net_gex),
+                zero_gamma_level=float(snapshot.zero_gamma_level),
+                dominant_strike=float(snapshot.dominant_strike),
+                metrics=snapshot_metrics,
+            )
+            session.add(snapshot_record)
+            await session.flush()
+        else:
+            snapshot_record.session_id = raw_record.session_id
+            snapshot_record.spot_price = float(snapshot.spot_price)
+            snapshot_record.total_call_gex = float(snapshot.total_call_gex)
+            snapshot_record.total_put_gex = float(snapshot.total_put_gex)
+            snapshot_record.net_gex = float(snapshot.net_gex)
+            snapshot_record.zero_gamma_level = float(snapshot.zero_gamma_level)
+            snapshot_record.dominant_strike = float(snapshot.dominant_strike)
+            snapshot_metrics = dict(snapshot.metrics or {})
+            snapshot_metrics["has_raw_snapshot"] = True
+            snapshot_metrics["is_raw_rebuilt"] = True
+            snapshot_record.metrics = snapshot_metrics
+            await session.execute(
+                delete(GEXByStrikePointRecord).where(
+                    GEXByStrikePointRecord.snapshot_id == snapshot_record.id
+                )
+            )
+
+        strike_points = [
+            GEXByStrikePointRecord(
+                snapshot_id=snapshot_record.id,
+                strike=float(strike),
+                gex_value=float(value),
+            )
+            for strike, value in sorted(snapshot.gex_by_strike.items())
+        ]
+        session.add_all(strike_points)
+
+    async def _mark_snapshot_rebuild_failure(
+        self,
+        *,
+        session: AsyncSession,
+        raw_record: RawOptionsSnapshotRecord,
+        quality_flags: list[str],
+    ) -> None:
+        """Mark a derived snapshot ineligible when a raw rebuild cannot be trusted."""
+        snapshot_record = await self._find_snapshot_record_for_raw(
+            session=session,
+            raw_record=raw_record,
+        )
+        if snapshot_record is None:
+            return
+
+        existing_metrics = dict(snapshot_record.metrics or {})
+        existing_flags = existing_metrics.get("quality_flags")
+        merged_flags = quality_flags
+        if isinstance(existing_flags, list):
+            merged_flags = list(dict.fromkeys([*existing_flags, *quality_flags]))
+        snapshot_record.metrics = {
+            **existing_metrics,
+            "has_raw_snapshot": True,
+            "capture_quality": 0.0,
+            "quality_flags": merged_flags,
+            "is_replay_eligible": False,
+        }
+
+    async def _find_snapshot_record_for_raw(
+        self,
+        *,
+        session: AsyncSession,
+        raw_record: RawOptionsSnapshotRecord,
+    ) -> GEXSnapshotRecord | None:
+        """Find the derived snapshot matching one raw record, tolerant of tz storage differences."""
+        result = await session.execute(
+            select(GEXSnapshotRecord).where(
+                GEXSnapshotRecord.session_id == raw_record.session_id,
+                GEXSnapshotRecord.provider == raw_record.provider,
+                GEXSnapshotRecord.symbol == raw_record.symbol,
+            )
+        )
+        candidates = result.scalars().all()
+        normalized_captured_at = self._normalize_rebuild_timestamp(raw_record)
+        trading_date = self._get_raw_record_trading_date(raw_record)
+        for candidate in candidates:
+            if self._normalize_timestamp_for_session(candidate.captured_at, trading_date) == normalized_captured_at:
+                return candidate
+        return None
+
+    @staticmethod
+    def _get_raw_record_trading_date(raw_record: RawOptionsSnapshotRecord) -> date | None:
+        market_session = getattr(raw_record, "market_session", None)
+        if market_session is not None:
+            return market_session.trading_date
+        return None
+
+    @classmethod
+    def _normalize_rebuild_timestamp(cls, raw_record: RawOptionsSnapshotRecord) -> datetime:
+        """Infer the intended capture time for raw records that may have lost tz info."""
+        return cls._normalize_timestamp_for_session(
+            raw_record.captured_at,
+            cls._get_raw_record_trading_date(raw_record),
+        )
+
+    @classmethod
+    def _normalize_timestamp_for_session(
+        cls,
+        timestamp: Any,
+        trading_date: date | None,
+    ) -> datetime:
+        """Interpret tz-naive persisted timestamps in the most plausible market-session timezone."""
+        if isinstance(timestamp, str):
+            parsed_timestamp = datetime.fromisoformat(timestamp)
+        elif isinstance(timestamp, pd.Timestamp):
+            parsed_timestamp = timestamp.to_pydatetime()
+        elif isinstance(timestamp, datetime):
+            parsed_timestamp = timestamp
+        else:
+            return cls._normalize_timestamp(timestamp)
+
+        if parsed_timestamp.tzinfo is not None or trading_date is None:
+            return cls._normalize_timestamp(parsed_timestamp)
+
+        as_et = parsed_timestamp.replace(tzinfo=ET)
+        session_open = datetime.combine(trading_date, SESSION_OPEN, tzinfo=ET)
+        session_close = datetime.combine(trading_date, SESSION_CLOSE, tzinfo=ET)
+        if session_open <= as_et <= session_close:
+            return as_et
+
+        as_utc = parsed_timestamp.replace(tzinfo=UTC).astimezone(ET)
+        if session_open <= as_utc <= session_close:
+            return as_utc
+
+        return as_et
 
     @staticmethod
     def _calculate_completeness_ratio(

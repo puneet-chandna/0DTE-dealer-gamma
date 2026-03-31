@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+import app.services.historical_data as historical_data_module
 from app.db.base import Base
 from app.db.models import (
     GEXByStrikePointRecord,
@@ -34,12 +35,14 @@ def _build_snapshot(
     *,
     spot_price: float = 5905.0,
     net_gex: float = -1.35e9,
+    total_call_gex: float = -2.15e9,
+    total_put_gex: float = 8.0e8,
 ) -> GEXSnapshot:
     return GEXSnapshot(
         timestamp=captured_at,
         spot_price=spot_price,
-        total_call_gex=-2.15e9,
-        total_put_gex=8.0e8,
+        total_call_gex=total_call_gex,
+        total_put_gex=total_put_gex,
         net_gex=net_gex,
         zero_gamma_level=5912.5,
         gex_by_strike={
@@ -89,6 +92,62 @@ def _build_options_df() -> pd.DataFrame:
                 "open_interest": 980,
                 "volume": 280,
                 "implied_vol": 0.205,
+            },
+        ]
+    )
+
+
+def _build_concentrated_yfinance_options_df() -> pd.DataFrame:
+    expiration = "2026-03-27"
+    return pd.DataFrame(
+        [
+            {
+                "symbol": "SPY260327C00635000",
+                "strike": 6350.0,
+                "expiration": expiration,
+                "type": "call",
+                "bid": 21.5,
+                "ask": 21.8,
+                "mid": 21.65,
+                "open_interest": 827,
+                "volume": 82056,
+                "implied_vol": 0.060434,
+            },
+            {
+                "symbol": "SPY260327P00635000",
+                "strike": 6350.0,
+                "expiration": expiration,
+                "type": "put",
+                "bid": 19.7,
+                "ask": 20.1,
+                "mid": 19.9,
+                "open_interest": 29402,
+                "volume": 387675,
+                "implied_vol": 0.088388,
+            },
+            {
+                "symbol": "SPY260327C00640000",
+                "strike": 6400.0,
+                "expiration": expiration,
+                "type": "call",
+                "bid": 4.5,
+                "ask": 4.7,
+                "mid": 4.6,
+                "open_interest": 1577,
+                "volume": 483427,
+                "implied_vol": 0.097665,
+            },
+            {
+                "symbol": "SPY260327P00640000",
+                "strike": 6400.0,
+                "expiration": expiration,
+                "type": "put",
+                "bid": 49.8,
+                "ask": 50.3,
+                "mid": 50.05,
+                "open_interest": 51100,
+                "volume": 468138,
+                "implied_vol": 0.160897,
             },
         ]
     )
@@ -248,6 +307,130 @@ async def test_current_route_falls_back_to_latest_persisted_snapshot_when_live_f
 
 
 @pytest.mark.asyncio
+async def test_backfill_from_raw_overwrites_legacy_yfinance_snapshot_and_marks_it_ineligible(history_service):
+    service, session_factory = history_service
+    captured_at = datetime(2026, 3, 27, 15, 34, 43, tzinfo=ET)
+
+    await service.persist_capture(
+        provider="yfinance",
+        symbol="SPX",
+        snapshot=_build_snapshot(captured_at, spot_price=6351.8, net_gex=1.1625236653103598e13),
+        options_df=_build_concentrated_yfinance_options_df(),
+        force_raw_capture=True,
+    )
+
+    async with session_factory() as session:
+        snapshot_record = (
+            await session.execute(select(GEXSnapshotRecord).where(GEXSnapshotRecord.provider == "yfinance"))
+        ).scalar_one()
+        snapshot_record.total_call_gex = -3.992868594729168e11
+        snapshot_record.total_put_gex = 1.2024523512576514e13
+        snapshot_record.net_gex = 1.1625236653103598e13
+        snapshot_record.metrics = {"capture_quality": 1.0, "is_replay_eligible": 1.0}
+        await session.commit()
+
+    rebuilt = await service.rebuild_gex_snapshots_from_raw(provider="yfinance", symbol="SPX")
+    latest = await service.get_latest_snapshot(
+        provider="yfinance",
+        symbol="SPX",
+        replay_eligible_only=False,
+    )
+
+    assert rebuilt == 1
+    assert latest is not None
+    assert latest.net_gex < 0
+    assert abs(latest.net_gex) < 2.0e11
+    assert latest.metrics["is_replay_eligible"] is False
+    assert "provider_gex_outlier" in latest.metrics["quality_flags"]
+
+
+@pytest.mark.asyncio
+async def test_backfill_from_raw_uses_market_close_for_date_only_expiration_with_utc_capture(
+    history_service,
+):
+    service, session_factory = history_service
+    captured_at_utc = datetime(2026, 3, 27, 19, 34, 43, tzinfo=ZoneInfo("UTC"))
+
+    async with session_factory() as session:
+        market_session = MarketSessionRecord(
+            provider="yfinance",
+            symbol="SPX",
+            trading_date=date(2026, 3, 27),
+            status="complete",
+            completeness_ratio=1.0,
+            snapshot_count=1,
+            raw_snapshot_count=1,
+            first_captured_at=captured_at_utc,
+            last_captured_at=captured_at_utc,
+            capture_metadata={},
+        )
+        session.add(market_session)
+        await session.flush()
+
+        session.add(
+            GEXSnapshotRecord(
+                session_id=market_session.id,
+                provider="yfinance",
+                symbol="SPX",
+                captured_at=captured_at_utc,
+                spot_price=6351.8,
+                total_call_gex=0.0,
+                total_put_gex=0.0,
+                net_gex=0.0,
+                zero_gamma_level=6351.8,
+                dominant_strike=6350.0,
+                metrics={"capture_quality": 0.0, "is_replay_eligible": 0.0},
+            )
+        )
+        session.add(
+            RawOptionsSnapshotRecord(
+                session_id=market_session.id,
+                provider="yfinance",
+                symbol="SPX",
+                captured_at=captured_at_utc,
+                spot_price=6351.8,
+                expiration_date=date(2026, 3, 27),
+                contract_count=2,
+                payload=[
+                    {
+                        "symbol": "SPY260327C00635000",
+                        "strike": 6350.0,
+                        "expiration": "2026-03-27",
+                        "type": "call",
+                        "bid": 21.5,
+                        "ask": 21.8,
+                        "mid": 21.65,
+                        "open_interest": 827,
+                        "volume": 82056,
+                        "implied_vol": 0.060434,
+                    },
+                    {
+                        "symbol": "SPY260327P00635000",
+                        "strike": 6350.0,
+                        "expiration": "2026-03-27",
+                        "type": "put",
+                        "bid": 19.7,
+                        "ask": 20.1,
+                        "mid": 19.9,
+                        "open_interest": 29402,
+                        "volume": 387675,
+                        "implied_vol": 0.088388,
+                    },
+                ],
+                source_metadata={"storage_format": "normalized_options_chain", "columns": []},
+            )
+        )
+        await session.commit()
+
+    rebuilt = await service.rebuild_gex_snapshots_from_raw(provider="yfinance", symbol="SPX")
+    latest = await service.get_latest_snapshot(provider="yfinance", symbol="SPX")
+
+    assert rebuilt == 1
+    assert latest is not None
+    assert latest.net_gex != 0.0
+
+
+@pytest.mark.asyncio
 async def test_demo_historical_prefers_latest_replay_session_before_synthetic(history_service):
     service, session_factory = history_service
     captured_at = datetime(2026, 3, 20, 15, 58, 0, tzinfo=ET)
@@ -296,6 +479,402 @@ async def test_demo_historical_prefers_latest_replay_session_before_synthetic(hi
     assert body["count"] == 1
     assert body["data"][0]["spot_price"] == 5911.0
     assert body["data"][0]["metrics"]["capture_quality"] == 0.99
+
+
+@pytest.mark.asyncio
+async def test_prefer_replay_skips_newest_ineligible_session_and_uses_latest_good_anchor(
+    history_service,
+):
+    service, _ = history_service
+    older_capture = datetime(2026, 3, 26, 15, 58, 0, tzinfo=ET)
+    newer_capture = datetime(2026, 3, 27, 15, 58, 0, tzinfo=ET)
+
+    await service.persist_capture(
+        provider="yfinance",
+        symbol="SPX",
+        snapshot=_with_metrics(
+            _build_snapshot(older_capture, spot_price=5911.0, net_gex=-7.5e8),
+            is_replay_eligible=True,
+            capture_quality=0.99,
+        ),
+        options_df=_build_options_df(),
+        force_raw_capture=True,
+    )
+    await service.persist_capture(
+        provider="yfinance",
+        symbol="SPX",
+        snapshot=_with_metrics(
+            _build_snapshot(newer_capture, spot_price=6351.8, net_gex=-1.15e11),
+            is_replay_eligible=False,
+            capture_quality=0.66,
+            quality_flags=["provider_gex_outlier"],
+        ),
+        options_df=_build_concentrated_yfinance_options_df(),
+        force_raw_capture=True,
+    )
+
+    replay_snapshot = await service.get_latest_snapshot(
+        provider="yfinance",
+        symbol="SPX",
+        prefer_replay=True,
+    )
+
+    assert replay_snapshot is not None
+    assert HistoricalDataService._normalize_timestamp(replay_snapshot.timestamp) == older_capture
+    assert replay_snapshot.spot_price == 5911.0
+    assert replay_snapshot.metrics["is_replay_eligible"] is True
+
+
+@pytest.mark.asyncio
+async def test_prefer_replay_skips_explicitly_eligible_but_hard_invalid_session(history_service):
+    service, session_factory = history_service
+    older_capture = datetime(2026, 3, 26, 15, 58, 0, tzinfo=ET)
+    newer_capture = datetime(2026, 3, 27, 15, 58, 0, tzinfo=ET)
+
+    await service.persist_capture(
+        provider="yfinance",
+        symbol="SPX",
+        snapshot=_with_metrics(
+            _build_snapshot(older_capture, spot_price=5911.0, net_gex=-7.5e8),
+            is_replay_eligible=True,
+            capture_quality=0.99,
+        ),
+        options_df=_build_options_df(),
+        force_raw_capture=True,
+    )
+    await service.persist_capture(
+        provider="yfinance",
+        symbol="SPX",
+        snapshot=_with_metrics(
+            _build_snapshot(
+                newer_capture,
+                spot_price=6351.8,
+                net_gex=6.6e12,
+                total_call_gex=-1.11e11,
+                total_put_gex=6.71e12,
+            ),
+            is_replay_eligible=True,
+            capture_quality=0.66,
+            quality_flags=["provider_gex_outlier"],
+        ),
+        options_df=_build_options_df(),
+        force_raw_capture=True,
+    )
+
+    async with session_factory() as session:
+        sessions = (await session.execute(select(MarketSessionRecord))).scalars().all()
+        for market_session in sessions:
+            market_session.status = "complete"
+
+        latest_record = (
+            await session.execute(
+                select(GEXSnapshotRecord).where(
+                    GEXSnapshotRecord.provider == "yfinance",
+                    GEXSnapshotRecord.symbol == "SPX",
+                    GEXSnapshotRecord.captured_at == newer_capture,
+                )
+            )
+        ).scalar_one()
+        latest_record.metrics = {
+            **dict(latest_record.metrics or {}),
+            "quality_flags": ["provider_gex_outlier"],
+            "has_raw_snapshot": False,
+            "is_replay_eligible": True,
+        }
+        await session.commit()
+
+    replay_snapshot = await service.get_latest_snapshot(
+        provider="yfinance",
+        symbol="SPX",
+        prefer_replay=True,
+    )
+
+    assert replay_snapshot is not None
+    assert HistoricalDataService._normalize_timestamp(replay_snapshot.timestamp) == older_capture
+    assert replay_snapshot.spot_price == 5911.0
+
+
+@pytest.mark.asyncio
+async def test_iv_surface_prefer_replay_skips_explicitly_eligible_but_hard_invalid_session(
+    history_service,
+):
+    service, session_factory = history_service
+    older_capture = datetime(2026, 3, 26, 15, 58, 0, tzinfo=ET)
+    newer_capture = datetime(2026, 3, 27, 15, 58, 0, tzinfo=ET)
+
+    await service.persist_capture(
+        provider="yfinance",
+        symbol="SPX",
+        snapshot=_with_metrics(
+            _build_snapshot(older_capture, spot_price=5911.0, net_gex=-7.5e8),
+            is_replay_eligible=True,
+            capture_quality=0.99,
+        ),
+        options_df=_build_options_df(),
+        force_raw_capture=True,
+    )
+    await service.persist_capture(
+        provider="yfinance",
+        symbol="SPX",
+        snapshot=_with_metrics(
+            _build_snapshot(
+                newer_capture,
+                spot_price=6351.8,
+                net_gex=6.6e12,
+                total_call_gex=-1.11e11,
+                total_put_gex=6.71e12,
+            ),
+            is_replay_eligible=True,
+            capture_quality=0.66,
+            quality_flags=["provider_gex_outlier"],
+        ),
+        options_df=_build_options_df(),
+        force_raw_capture=True,
+    )
+
+    async with session_factory() as session:
+        sessions = (await session.execute(select(MarketSessionRecord))).scalars().all()
+        for market_session in sessions:
+            market_session.status = "complete"
+
+        latest_record = (
+            await session.execute(
+                select(GEXSnapshotRecord).where(
+                    GEXSnapshotRecord.provider == "yfinance",
+                    GEXSnapshotRecord.symbol == "SPX",
+                    GEXSnapshotRecord.captured_at == newer_capture,
+                )
+            )
+        ).scalar_one()
+        latest_record.metrics = {
+            **dict(latest_record.metrics or {}),
+            "quality_flags": ["provider_gex_outlier"],
+            "has_raw_snapshot": False,
+            "is_replay_eligible": True,
+        }
+        await session.commit()
+
+    surface = await service.get_iv_surface(
+        provider="yfinance",
+        symbol="SPX",
+        prefer_replay=True,
+    )
+
+    assert surface is not None
+    assert surface["spot_price"] == 5911.0
+
+
+@pytest.mark.asyncio
+async def test_latest_snapshot_skips_hard_invalid_outlier_rows_for_persisted_reads(history_service):
+    service, session_factory = history_service
+    earlier_capture = datetime(2026, 3, 27, 15, 42, 0, tzinfo=ET)
+    later_capture = datetime(2026, 3, 27, 15, 43, 0, tzinfo=ET)
+
+    await service.persist_capture(
+        provider="tradier",
+        symbol="SPX",
+        snapshot=_with_metrics(
+            _build_snapshot(earlier_capture, spot_price=6365.8, net_gex=-2.8e10),
+            quality_flags=["insufficient_meaningful_strikes"],
+            is_replay_eligible=False,
+        ),
+        options_df=None,
+        force_raw_capture=False,
+    )
+    await service.persist_capture(
+        provider="tradier",
+        symbol="SPX",
+        snapshot=_with_metrics(
+            _build_snapshot(
+                later_capture,
+                spot_price=6366.4,
+                net_gex=2.7683e12,
+                total_call_gex=-7.68e10,
+                total_put_gex=2.8451e12,
+            ),
+            quality_flags=["provider_gex_outlier"],
+            is_replay_eligible=False,
+        ),
+        options_df=None,
+        force_raw_capture=False,
+    )
+
+    async with session_factory() as session:
+        latest_record = (
+            await session.execute(
+                select(GEXSnapshotRecord)
+                .where(
+                    GEXSnapshotRecord.provider == "tradier",
+                    GEXSnapshotRecord.symbol == "SPX",
+                    GEXSnapshotRecord.captured_at == later_capture,
+                )
+            )
+        ).scalar_one()
+        latest_record.metrics = {
+            **dict(latest_record.metrics or {}),
+            "quality_flags": ["provider_gex_outlier"],
+            "has_raw_snapshot": False,
+            "is_replay_eligible": False,
+        }
+        await session.commit()
+
+    latest = await service.get_latest_snapshot(provider="tradier", symbol="SPX")
+
+    assert latest is not None
+    assert HistoricalDataService._normalize_timestamp(latest.timestamp) == earlier_capture
+    assert latest.net_gex == -2.8e10
+    assert "provider_gex_outlier" not in latest.metrics["quality_flags"]
+
+
+@pytest.mark.asyncio
+async def test_latest_timestamp_scans_limited_batches_until_it_finds_usable_record(
+    history_service,
+    monkeypatch,
+):
+    service, session_factory = history_service
+    earlier_capture = datetime(2026, 3, 27, 15, 42, 0, tzinfo=ET)
+    later_capture = datetime(2026, 3, 27, 15, 43, 0, tzinfo=ET)
+
+    monkeypatch.setattr(historical_data_module, "LATEST_RECORD_SCAN_BATCH_SIZE", 1)
+
+    await service.persist_capture(
+        provider="tradier",
+        symbol="SPX",
+        snapshot=_with_metrics(
+            _build_snapshot(earlier_capture, spot_price=6365.8, net_gex=-2.8e10),
+            quality_flags=["insufficient_meaningful_strikes"],
+            is_replay_eligible=False,
+        ),
+        options_df=None,
+        force_raw_capture=False,
+    )
+    await service.persist_capture(
+        provider="tradier",
+        symbol="SPX",
+        snapshot=_with_metrics(
+            _build_snapshot(
+                later_capture,
+                spot_price=6366.4,
+                net_gex=2.7683e12,
+                total_call_gex=-7.68e10,
+                total_put_gex=2.8451e12,
+            ),
+            quality_flags=["provider_gex_outlier"],
+            is_replay_eligible=False,
+        ),
+        options_df=None,
+        force_raw_capture=False,
+    )
+
+    async with session_factory() as session:
+        latest_record = (
+            await session.execute(
+                select(GEXSnapshotRecord)
+                .where(
+                    GEXSnapshotRecord.provider == "tradier",
+                    GEXSnapshotRecord.symbol == "SPX",
+                    GEXSnapshotRecord.captured_at == later_capture,
+                )
+            )
+        ).scalar_one()
+        latest_record.metrics = {
+            **dict(latest_record.metrics or {}),
+            "quality_flags": ["provider_gex_outlier"],
+            "has_raw_snapshot": False,
+            "is_replay_eligible": False,
+        }
+        await session.commit()
+
+    latest_timestamp = await service.get_latest_timestamp(provider="tradier", symbol="SPX")
+
+    assert latest_timestamp is not None
+    assert HistoricalDataService._normalize_timestamp(latest_timestamp) == earlier_capture
+
+
+@pytest.mark.asyncio
+async def test_historical_snapshots_exclude_hard_invalid_outlier_rows_from_non_replay_reads(
+    history_service,
+):
+    service, session_factory = history_service
+    base_capture = datetime(2026, 3, 27, 15, 40, 0, tzinfo=ET)
+
+    await service.persist_capture(
+        provider="yfinance",
+        symbol="SPX",
+        snapshot=_with_metrics(
+            _build_snapshot(base_capture, spot_price=6349.0, net_gex=-4.9e10),
+            quality_flags=["insufficient_meaningful_strikes", "put_iv_corrupted"],
+            is_replay_eligible=False,
+        ),
+        options_df=None,
+        force_raw_capture=False,
+    )
+    await service.persist_capture(
+        provider="yfinance",
+        symbol="SPX",
+        snapshot=_with_metrics(
+            _build_snapshot(
+                base_capture.replace(minute=41),
+                spot_price=6345.0,
+                net_gex=6.59404e12,
+                total_call_gex=-1.11e11,
+                total_put_gex=6.70504e12,
+            ),
+            quality_flags=[
+                "insufficient_meaningful_strikes",
+                "put_iv_corrupted",
+                "provider_gex_outlier",
+            ],
+            is_replay_eligible=False,
+        ),
+        options_df=None,
+        force_raw_capture=False,
+    )
+    await service.persist_capture(
+        provider="yfinance",
+        symbol="SPX",
+        snapshot=_with_metrics(
+            _build_snapshot(base_capture.replace(minute=42), spot_price=6341.2, net_gex=-6.5e10),
+            quality_flags=["insufficient_meaningful_strikes", "put_iv_corrupted"],
+            is_replay_eligible=False,
+        ),
+        options_df=None,
+        force_raw_capture=False,
+    )
+
+    async with session_factory() as session:
+        outlier_record = (
+            await session.execute(
+                select(GEXSnapshotRecord)
+                .where(
+                    GEXSnapshotRecord.provider == "yfinance",
+                    GEXSnapshotRecord.symbol == "SPX",
+                    GEXSnapshotRecord.captured_at == base_capture.replace(minute=41),
+                )
+            )
+        ).scalar_one()
+        outlier_record.metrics = {
+            **dict(outlier_record.metrics or {}),
+            "quality_flags": [
+                "insufficient_meaningful_strikes",
+                "put_iv_corrupted",
+                "provider_gex_outlier",
+            ],
+            "has_raw_snapshot": False,
+            "is_replay_eligible": False,
+        }
+        await session.commit()
+
+    snapshots = await service.get_historical_snapshots(
+        provider="yfinance",
+        symbol="SPX",
+        start_date=date(2026, 3, 27),
+        end_date=date(2026, 3, 27),
+        interval="5s",
+    )
+
+    assert [snapshot.spot_price for snapshot in snapshots] == [6349.0, 6341.2]
+    assert all("provider_gex_outlier" not in snapshot.metrics["quality_flags"] for snapshot in snapshots)
 
 
 @pytest.mark.asyncio

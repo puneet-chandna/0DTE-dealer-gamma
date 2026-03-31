@@ -88,7 +88,11 @@ async def _get_live_gex_snapshot(
         spot_price=spot_price,
         timestamp=datetime.now(ET),
     )
-    snapshot = annotate_snapshot_quality(snapshot, options_df=options_df)
+    snapshot = annotate_snapshot_quality(
+        snapshot,
+        options_df=options_df,
+        provider=data_client.provider_name,
+    )
     snapshot = enrich_snapshot_with_advanced_analytics(
         snapshot,
         options_df=options_df,
