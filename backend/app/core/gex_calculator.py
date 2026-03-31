@@ -10,25 +10,22 @@ GEX Formula: GEX_i = OI_i × Γ_i × 100 × S² × 0.01
 import logging
 import re
 from datetime import date, datetime, time
-from typing import Dict, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
+from app.core.charm_vanna_calculator import CharmVannaCalculator
 from app.core.constants import (
     CONTRACT_MULTIPLIER,
-    MIN_IV,
     MAX_IV,
+    MIN_IV,
     RISK_FREE_RATE,
     SPX_DIVIDEND_YIELD,
-    SHORT_GAMMA_THRESHOLD,
-    LONG_GAMMA_THRESHOLD,
 )
 from app.core.greeks import BlackScholesGreeks
-from app.models.schemas import GEXSnapshot, CharmVannaSnapshot, AdvancedAnalytics
-from app.core.charm_vanna_calculator import CharmVannaCalculator
+from app.models.schemas import AdvancedAnalytics, CharmVannaSnapshot, GEXSnapshot
 
 logger = logging.getLogger(__name__)
 
@@ -313,13 +310,13 @@ class GEXCalculator:
         self,
         strikes: NDArray[np.float64],
         gex_values: NDArray[np.float64],
-    ) -> Dict[float, float]:
+    ) -> dict[float, float]:
         """Aggregate GEX values by strike price."""
         if len(strikes) == 0:
             return {}
 
         unique_strikes = np.unique(strikes)
-        gex_by_strike: Dict[float, float] = {}
+        gex_by_strike: dict[float, float] = {}
 
         for strike in unique_strikes:
             mask = strikes == strike
@@ -329,9 +326,9 @@ class GEXCalculator:
 
     def _find_zero_gamma_level(
         self,
-        gex_by_strike: Dict[float, float],
+        gex_by_strike: dict[float, float],
         spot_price: float,
-    ) -> Tuple[float, bool, Optional[str]]:
+    ) -> tuple[float, bool, str | None]:
         """
         Find the Zero Gamma Level using linear interpolation.
 
@@ -398,10 +395,10 @@ class GEXCalculator:
         total_put_gex: float,
         spot_price: float,
         zero_gamma_level: float,
-        gex_by_strike: Dict[float, float],
+        gex_by_strike: dict[float, float],
         zero_gamma_crossing_found: bool,
-        zero_gamma_relation: Optional[str],
-    ) -> Dict[str, float | bool | str]:
+        zero_gamma_relation: str | None,
+    ) -> dict[str, float | bool | str]:
         """Calculate additional GEX metrics."""
         # Safe division for ratios
         if total_put_gex != 0:
@@ -434,7 +431,7 @@ class GEXCalculator:
         self,
         net_gex: float,
         threshold_billions: float = 1.0,
-    ) -> Tuple[str, str, str]:
+    ) -> tuple[str, str, str]:
         """
         Determine market regime based on net GEX.
 
@@ -463,10 +460,10 @@ class GEXCalculator:
 
     def calculate_gex_contribution(
         self,
-        gex_by_strike: Dict[float, float],
+        gex_by_strike: dict[float, float],
         spot_price: float,
         n_top: int = 5,
-    ) -> Dict[str, list]:
+    ) -> dict[str, list]:
         """
         Get the top contributing strikes to GEX.
 

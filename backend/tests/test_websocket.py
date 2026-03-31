@@ -16,7 +16,6 @@ from app.core.advanced_analytics import reset_advanced_analytics_state
 from app.main import app
 from app.models.schemas import GEXSnapshot
 
-
 client = TestClient(app)
 ET = ZoneInfo("America/New_York")
 
@@ -79,10 +78,10 @@ class TestWebSocketEndpoints:
             gex_data = data["data"]
 
             # Check numeric types
-            assert isinstance(gex_data["net_gex"], (int, float))
-            assert isinstance(gex_data["net_gex_billions"], (int, float))
-            assert isinstance(gex_data["zero_gamma_level"], (int, float))
-            assert isinstance(gex_data["spot_price"], (int, float))
+            assert isinstance(gex_data["net_gex"], int | float)
+            assert isinstance(gex_data["net_gex_billions"], int | float)
+            assert isinstance(gex_data["zero_gamma_level"], int | float)
+            assert isinstance(gex_data["spot_price"], int | float)
 
             assert math.isfinite(gex_data["net_gex"])
             assert math.isfinite(gex_data["zero_gamma_level"])

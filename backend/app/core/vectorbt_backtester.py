@@ -7,7 +7,6 @@ using vectorbt's vectorized portfolio simulation.
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
 
 import numpy as np
 import pandas as pd
@@ -108,7 +107,7 @@ class VectorBTBacktester:
 
         # Extract metrics
         stats = pf.stats()
-        trades = pf.trades.records_readable if len(pf.trades.records) > 0 else None
+        pf.trades.records_readable if len(pf.trades.records) > 0 else None
 
         total_trades = int(stats.get("Total Trades", 0))
         winning_trades = int(stats.get("Win Rate [%]", 0) / 100 * total_trades) if total_trades > 0 else 0

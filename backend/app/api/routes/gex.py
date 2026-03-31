@@ -6,34 +6,29 @@ Provides real-time GEX data, strike breakdowns, and market regime detection.
 import asyncio
 import logging
 from datetime import date, datetime
-from typing import Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 
-from app.config import Settings, get_settings
-from app.core.analytics import generate_synthetic_gex_data
+from app.config import get_settings
 from app.core import (
     GEXCalculator,
     ProviderRegistry,
     get_data_client,
-    get_current_trading_date,
-    is_market_open,
 )
 from app.core.advanced_analytics import enrich_snapshot_with_advanced_analytics
 from app.core.demo_data import get_demo_data_service
+from app.core.provider_timeouts import get_live_fetch_timeout_seconds
+from app.core.rate_provider import get_rate_provider
 from app.core.snapshot_quality import annotate_snapshot_quality, is_snapshot_replay_eligible
 from app.models.schemas import (
     GEXByStrike,
     GEXHistorical,
     GEXSnapshot,
     RegimeData,
-    MarketStatusResponse,
 )
 from app.services.cache import get_cache
 from app.services.historical_data import get_historical_data_service
-from app.core.rate_provider import get_rate_provider
-from app.core.provider_timeouts import get_live_fetch_timeout_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +37,7 @@ router = APIRouter()
 # Eastern Time timezone
 ET = ZoneInfo("America/New_York")
 # Module-level instances (lazy initialization)
-_gex_calculator: Optional[GEXCalculator] = None
+_gex_calculator: GEXCalculator | None = None
 
 
 def get_gex_calculator() -> GEXCalculator:
@@ -54,11 +49,11 @@ def get_gex_calculator() -> GEXCalculator:
 
 
 async def _get_live_gex_snapshot(
-    symbol: str, 
-    provider: Optional[str] = None
+    symbol: str,
+    provider: str | None = None
 ) -> dict:
     """Fetch live data and calculate GEX snapshot.
-    
+
     Args:
         symbol: The underlying symbol (e.g. "SPX").
         provider: Optional data provider name (e.g. "yfinance", "tradier").
@@ -109,7 +104,7 @@ async def _get_live_gex_snapshot(
 async def _get_replay_snapshot(
     symbol: str,
     provider: str,
-) -> Optional[GEXSnapshot]:
+) -> GEXSnapshot | None:
     """Return the latest stored snapshot for replay/demo mode when available."""
     today_et = datetime.now(ET).date()
     snapshots = await get_historical_data_service().get_historical_snapshots(
@@ -130,7 +125,7 @@ async def _get_latest_persisted_snapshot(
     symbol: str,
     provider: str,
     prefer_replay: bool = False,
-) -> Optional[GEXSnapshot]:
+) -> GEXSnapshot | None:
     """Return the latest persisted snapshot when the live path is unavailable."""
     return await get_historical_data_service().get_latest_snapshot(
         provider=provider,
@@ -144,7 +139,7 @@ async def _get_demo_anchor_snapshot(
     *,
     symbol: str,
     provider: str,
-) -> Optional[GEXSnapshot]:
+) -> GEXSnapshot | None:
     """Return the latest persisted snapshot to shape synthetic demo data."""
     return await _get_latest_persisted_snapshot(
         symbol=symbol,
@@ -169,7 +164,7 @@ def _snapshot_is_mock(snapshot_payload: dict) -> bool:
     return bool(metrics.get("is_mock_data") == 1.0 or provider.startswith("mock"))
 
 
-def _coerce_snapshot_payload(snapshot_like, *, provider: Optional[str] = None) -> dict:
+def _coerce_snapshot_payload(snapshot_like, *, provider: str | None = None) -> dict:
     if hasattr(snapshot_like, "model_dump"):
         payload = snapshot_like.model_dump()
     else:
@@ -183,10 +178,10 @@ def _get_cached_snapshot_payload(
     *,
     cache,
     cache_key: str,
-    legacy_key: Optional[str],
+    legacy_key: str | None,
     provider: str,
     fresh_only: bool,
-) -> Optional[dict]:
+) -> dict | None:
     getter = cache.get_if_fresh if fresh_only else cache.get
     freshness_label = "fresh" if fresh_only else "stale"
 
@@ -237,7 +232,7 @@ async def _resolve_best_snapshot_payload(
         logger.debug("Serving current GEX from cache for %s (%s)", symbol, active_provider)
         return fresh_snapshot
 
-    live_error: Optional[Exception] = None
+    live_error: Exception | None = None
     try:
         live_snapshot = await asyncio.wait_for(
             _get_live_gex_snapshot(symbol, active_provider),
@@ -338,7 +333,7 @@ def _generate_mock_gex_snapshot(spot_price: float = 5950.0) -> GEXSnapshot:
 @router.get("/current", response_model=GEXSnapshot)
 async def get_current_gex(
     symbol: str = Query("SPX", description="Underlying symbol (default: SPX)"),
-    provider: Optional[str] = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
+    provider: str | None = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
     demo: bool = Query(False, description="Return deterministic demo data"),
 ):
     """
@@ -392,7 +387,7 @@ async def get_current_gex(
 @router.get("/historical", response_model=GEXHistorical)
 async def get_historical_gex(
     symbol: str = Query("SPX", description="Underlying symbol (default: SPX)"),
-    provider: Optional[str] = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
+    provider: str | None = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
     start_date: date = Query(..., description="Start date (YYYY-MM-DD)"),
     end_date: date = Query(..., description="End date (YYYY-MM-DD)"),
     interval: str = Query("1h", description="Data interval: 5s, 1m, 5m, 15m, 1h, 1d, 1wk"),
@@ -466,7 +461,7 @@ async def get_historical_gex(
 @router.get("/strikes", response_model=GEXByStrike)
 async def get_gex_by_strikes(
     symbol: str = Query("SPX", description="Underlying symbol (default: SPX)"),
-    provider: Optional[str] = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
+    provider: str | None = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
     demo: bool = Query(False, description="Return deterministic demo data"),
 ):
     """Get GEX values separated by strike price."""
@@ -531,7 +526,7 @@ async def get_gex_by_strikes(
 @router.get("/regime", response_model=RegimeData)
 async def get_market_regime(
     symbol: str = Query("SPX", description="Underlying symbol (default: SPX)"),
-    provider: Optional[str] = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
+    provider: str | None = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
     demo: bool = Query(False, description="Return deterministic demo data"),
 ):
     """Get current market regime based on GEX positioning."""
@@ -563,7 +558,7 @@ async def get_market_regime(
         )
 
     cache = get_cache()
-    
+
     settings = get_settings()
     active_provider = ProviderRegistry.resolve_provider_name(
         provider,

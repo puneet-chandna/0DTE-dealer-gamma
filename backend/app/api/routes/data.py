@@ -5,17 +5,15 @@ Provides access to options chain data, spot prices, and market status.
 
 import logging
 from datetime import date, datetime
-from typing import List, Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query
 
-from app.config import Settings, get_settings
 from app.core import (
-    is_market_open,
-    get_market_status,
     ProviderRegistry,
     get_data_client,
+    get_market_status,
+    is_market_open,
 )
 from app.models.schemas import MarketStatusResponse, OptionsChainResponse
 from app.services.cache import get_cache
@@ -52,11 +50,11 @@ async def get_providers():
     """
     try:
         providers = ProviderRegistry.list_providers()
-        
+
         # Get active default
         from app.config import get_settings
         settings = get_settings()
-        
+
         return {
             "providers": providers,
             "active_default": settings.data_provider
@@ -69,18 +67,18 @@ async def get_providers():
 @router.get("/options-chain", response_model=OptionsChainResponse, tags=["Data"])
 async def get_options_chain(
     symbol: str = Query("SPX", description="Underlying symbol (default: SPX)"),
-    expiration: Optional[str] = Query(None, description="Expiration date (YYYY-MM-DD), default is next trading day"),
-    provider: Optional[str] = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
+    expiration: str | None = Query(None, description="Expiration date (YYYY-MM-DD), default is next trading day"),
+    provider: str | None = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
 ):
     """
     Fetch the complete options chain for a given symbol and expiration date.
-    
+
     Returns standard GEX dataset including bid/ask, volume, open interest, and implied volatility.
     """
     try:
         # Use provider registry
         client = get_data_client(provider)
-        expiration_date: Optional[date] = None
+        expiration_date: date | None = None
         if expiration:
             try:
                 expiration_date = date.fromisoformat(expiration)
@@ -89,11 +87,11 @@ async def get_options_chain(
                     status_code=400,
                     detail="expiration must be in YYYY-MM-DD format",
                 ) from e
-        
+
         # Determine actual symbol to request (YFinance needs SPY substitution, Tradier doesn't)
         # Note: the provider abstracts this detail now, but if we need to log it:
         request_symbol = getattr(client, "_get_ticker_symbol", lambda s: s)(symbol)
-        
+
         logger.info(f"Fetching complete options chain for {symbol} ({request_symbol}) exp={expiration} via {client.provider_name}")
 
         # Check cache
@@ -183,7 +181,7 @@ async def get_options_chain(
 @router.get("/spot-price", tags=["Data"])
 async def get_spot_price(
     symbol: str = Query("SPX", description="Symbol to get price for (default: SPX)"),
-    provider: Optional[str] = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
+    provider: str | None = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
 ) -> dict:
     """Get current spot price.
 
@@ -193,7 +191,7 @@ async def get_spot_price(
     try:
         # Use provider registry
         client = get_data_client(provider)
-        
+
         # Check cache (short TTL for spot price)
         cache = get_cache()
         cache_key = f"spot:{symbol}:{client.provider_name}"

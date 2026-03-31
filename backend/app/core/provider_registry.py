@@ -6,7 +6,7 @@ overhead.
 """
 
 import logging
-from typing import ClassVar, Optional
+from typing import ClassVar
 
 from app.config import get_settings
 from app.core.base_provider import DataProvider
@@ -39,16 +39,16 @@ class ProviderRegistry:
         logger.debug(f"Registered data provider: {name}")
 
     @staticmethod
-    def _normalize_provider_name(name: Optional[str]) -> str:
+    def _normalize_provider_name(name: str | None) -> str:
         """Normalize provider identifiers from config or request input."""
         return (name or "").strip().lower()
 
     @classmethod
     def resolve_provider_name(
         cls,
-        name: Optional[str] = None,
+        name: str | None = None,
         *,
-        default_provider: Optional[str] = None,
+        default_provider: str | None = None,
     ) -> str:
         """Resolve a provider name against the registry.
 
@@ -83,8 +83,8 @@ class ProviderRegistry:
     def get_provider_availability(
         cls,
         name: str,
-        provider_cls: Optional[type[DataProvider]] = None,
-    ) -> tuple[bool, Optional[str]]:
+        provider_cls: type[DataProvider] | None = None,
+    ) -> tuple[bool, str | None]:
         """Return runtime availability metadata for a provider."""
         name = cls._normalize_provider_name(name)
         provider_cls = provider_cls or cls._registry.get(name)
@@ -131,7 +131,7 @@ class ProviderRegistry:
         return caps
 
     @classmethod
-    def get_provider(cls, name: Optional[str] = None) -> DataProvider:
+    def get_provider(cls, name: str | None = None) -> DataProvider:
         """Return a configured instance of the named data provider.
 
         If *name* is omitted, falls back to ``settings.data_provider``.
@@ -190,6 +190,6 @@ ProviderRegistry.register(YFinanceClient)
 ProviderRegistry.register(TradierClient)
 
 
-def get_data_client(provider: Optional[str] = None) -> DataProvider:
+def get_data_client(provider: str | None = None) -> DataProvider:
     """Convenience dependency function for FastAPI routes."""
     return ProviderRegistry.get_provider(provider)

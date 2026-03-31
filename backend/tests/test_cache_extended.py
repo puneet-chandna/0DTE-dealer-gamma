@@ -4,7 +4,6 @@ Tests edge cases: TTL, spot-price-based invalidation, reset,
 and singleton contract.
 """
 
-import time
 from unittest.mock import MagicMock
 
 import pytest

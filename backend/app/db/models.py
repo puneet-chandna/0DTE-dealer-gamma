@@ -3,9 +3,20 @@
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any, Optional
+from typing import Any
 
-from sqlalchemy import JSON, Date, DateTime, Float, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -41,15 +52,15 @@ class MarketSessionRecord(Base):
     completeness_ratio: Mapped[float] = mapped_column(Float, default=0.0, nullable=False)
     snapshot_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     raw_snapshot_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
-    first_captured_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
-    last_captured_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    first_captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     capture_metadata: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict, nullable=False)
 
-    gex_snapshots: Mapped[list["GEXSnapshotRecord"]] = relationship(
+    gex_snapshots: Mapped[list[GEXSnapshotRecord]] = relationship(
         back_populates="market_session",
         cascade="all, delete-orphan",
     )
-    raw_options_snapshots: Mapped[list["RawOptionsSnapshotRecord"]] = relationship(
+    raw_options_snapshots: Mapped[list[RawOptionsSnapshotRecord]] = relationship(
         back_populates="market_session",
         cascade="all, delete-orphan",
     )
@@ -88,7 +99,7 @@ class GEXSnapshotRecord(Base):
     metrics: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict, nullable=False)
 
     market_session: Mapped[MarketSessionRecord] = relationship(back_populates="gex_snapshots")
-    strike_points: Mapped[list["GEXByStrikePointRecord"]] = relationship(
+    strike_points: Mapped[list[GEXByStrikePointRecord]] = relationship(
         back_populates="snapshot",
         cascade="all, delete-orphan",
         order_by="GEXByStrikePointRecord.strike",
@@ -136,13 +147,13 @@ class RawOptionsSnapshotRecord(Base):
     symbol: Mapped[str] = mapped_column(String(16), nullable=False)
     captured_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     spot_price: Mapped[float] = mapped_column(Float, nullable=False)
-    expiration_date: Mapped[Optional[date]] = mapped_column(Date)
+    expiration_date: Mapped[date | None] = mapped_column(Date)
     contract_count: Mapped[int] = mapped_column(Integer, nullable=False)
     payload: Mapped[list[dict[str, Any]]] = mapped_column(JSONType, default=list, nullable=False)
     source_metadata: Mapped[dict[str, Any]] = mapped_column(JSONType, default=dict, nullable=False)
 
     market_session: Mapped[MarketSessionRecord] = relationship(back_populates="raw_options_snapshots")
-    iv_surface_points: Mapped[list["IVSurfacePointRecord"]] = relationship(
+    iv_surface_points: Mapped[list[IVSurfacePointRecord]] = relationship(
         back_populates="raw_snapshot",
         cascade="all, delete-orphan",
         order_by="IVSurfacePointRecord.strike",

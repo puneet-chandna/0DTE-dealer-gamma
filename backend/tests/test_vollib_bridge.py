@@ -1,10 +1,8 @@
 """Tests for the py_vollib bridge — Greeks cross-validation and IV surface."""
 
-import numpy as np
-import pytest
 
-from app.core.vollib_bridge import VolLibBridge
 from app.core.constants import SPX_DIVIDEND_YIELD
+from app.core.vollib_bridge import VolLibBridge
 
 
 class TestGreeksCrossValidation:

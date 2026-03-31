@@ -7,21 +7,16 @@ filtering helpers. Data fetching is handled by YFinanceClient.
 import asyncio
 import logging
 from collections import deque
-from datetime import datetime, date, timedelta
+from datetime import date, datetime, timedelta
 from time import time
-from typing import Optional, Dict, Any
+from typing import Any
 from zoneinfo import ZoneInfo
 
-import pandas as pd
-
 from app.core.constants import (
-    MARKET_OPEN_HOUR,
-    MARKET_OPEN_MINUTE,
     MARKET_CLOSE_HOUR,
     MARKET_CLOSE_MINUTE,
-    STRIKE_RANGE_PERCENT,
-    MIN_IV,
-    MAX_IV,
+    MARKET_OPEN_HOUR,
+    MARKET_OPEN_MINUTE,
 )
 
 logger = logging.getLogger(__name__)
@@ -81,7 +76,7 @@ class RateLimiter:
         return max(0, self.calls_per_minute - recent_calls)
 
 
-def is_market_open(now: Optional[datetime] = None) -> bool:
+def is_market_open(now: datetime | None = None) -> bool:
     """
     Check if US equity market is currently open.
 
@@ -119,7 +114,7 @@ def is_market_open(now: Optional[datetime] = None) -> bool:
     return market_open <= now <= market_close
 
 
-def get_market_status(now: Optional[datetime] = None) -> Dict[str, Any]:
+def get_market_status(now: datetime | None = None) -> dict[str, Any]:
     """
     Get detailed market status for UI display.
 
@@ -172,7 +167,7 @@ def get_market_status(now: Optional[datetime] = None) -> Dict[str, Any]:
     }
 
 
-def get_current_trading_date(now: Optional[datetime] = None) -> date:
+def get_current_trading_date(now: datetime | None = None) -> date:
     """
     Get the current trading date.
 

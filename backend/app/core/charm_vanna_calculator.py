@@ -8,19 +8,16 @@ These are the invisible structural forces that move the market.
 """
 
 import logging
-from typing import Dict, Tuple
 
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 
 from app.core.constants import (
+    CHARM_TIME_ADVANCE_MINUTES,
     CONTRACT_MULTIPLIER,
-    MIN_IV,
-    MAX_IV,
     RISK_FREE_RATE,
     SPX_DIVIDEND_YIELD,
-    CHARM_TIME_ADVANCE_MINUTES,
     VANNA_IV_BUMP,
 )
 from app.core.greeks import BlackScholesGreeks
@@ -64,7 +61,7 @@ class CharmVannaCalculator:
         implied_vol: NDArray[np.float64],
         T: NDArray[np.float64],
         spot_price: float,
-    ) -> Tuple[float, Dict[float, float]]:
+    ) -> tuple[float, dict[float, float]]:
         """
         Calculate expected dealer hedging flow from Charm (time decay).
 
@@ -108,7 +105,7 @@ class CharmVannaCalculator:
         implied_vol: NDArray[np.float64],
         T: NDArray[np.float64],
         spot_price: float,
-    ) -> Tuple[float, Dict[float, float]]:
+    ) -> tuple[float, dict[float, float]]:
         """
         Calculate expected dealer hedging flow from Vanna (IV change).
 
@@ -202,12 +199,12 @@ class CharmVannaCalculator:
     def _aggregate_by_strike(
         strikes: NDArray[np.float64],
         values: NDArray[np.float64],
-    ) -> Dict[float, float]:
+    ) -> dict[float, float]:
         """Aggregate values by strike price."""
         if len(strikes) == 0:
             return {}
         unique_strikes = np.unique(strikes)
-        result: Dict[float, float] = {}
+        result: dict[float, float] = {}
         for strike in unique_strikes:
             mask = strikes == strike
             result[float(strike)] = float(np.sum(values[mask]))

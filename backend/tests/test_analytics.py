@@ -12,12 +12,11 @@ import pandas as pd
 import pytest
 
 from app.core.analytics import (
-    VolatilityAnalyzer,
     TradingStrategy,
+    VolatilityAnalyzer,
     generate_synthetic_gex_data,
     generate_synthetic_price_data,
 )
-from app.core.constants import SHORT_GAMMA_THRESHOLD, LONG_GAMMA_THRESHOLD
 
 ET = ZoneInfo("America/New_York")
 

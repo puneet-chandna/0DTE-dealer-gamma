@@ -7,11 +7,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from app.core.constants import CONTRACT_MULTIPLIER
+from app.core.constants import CONTRACT_MULTIPLIER, RISK_FREE_RATE, SPX_DIVIDEND_YIELD
 from app.core.gex_calculator import GEXCalculator
 from app.core.greeks import BlackScholesGreeks
-from app.core.constants import SPX_DIVIDEND_YIELD, RISK_FREE_RATE
-
 
 ET = ZoneInfo("America/New_York")
 
@@ -20,7 +18,7 @@ ET = ZoneInfo("America/New_York")
 def sample_options_df() -> pd.DataFrame:
     """Create sample options chain DataFrame for testing."""
     # Current timestamp (2 hours to expiration)
-    now = datetime(2024, 1, 15, 12, 0, 0, tzinfo=ET)
+    datetime(2024, 1, 15, 12, 0, 0, tzinfo=ET)
     expiration = "2024-01-15T16:00:00"
 
     data = [

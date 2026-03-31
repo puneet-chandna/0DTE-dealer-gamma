@@ -4,16 +4,16 @@ Bug prevention tests as specified in the master plan.
 These tests ensure critical invariants are maintained.
 """
 
-from datetime import datetime, timedelta
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
 import pytest
 
-from app.core.greeks import BlackScholesGreeks
+from app.core.constants import MAX_IV, MIN_IV, RISK_FREE_RATE, SPX_DIVIDEND_YIELD
 from app.core.gex_calculator import GEXCalculator
-from app.core.constants import SPX_DIVIDEND_YIELD, RISK_FREE_RATE, MIN_IV, MAX_IV
+from app.core.greeks import BlackScholesGreeks
 
 ET = ZoneInfo("America/New_York")
 
@@ -136,7 +136,7 @@ class TestGEXSignConvention:
             {"strike": 5900.0, "type": "put", "open_interest": 1000, "implied_vol": 0.20, "expiration": expiration},
         ])
         result = gex_calculator.calculate_gex_from_chain(df, 5875.0, timestamp)
-        
+
         # Calls should contribute positive, puts negative
         assert result.total_call_gex > 0, f"Call GEX should be positive, got {result.total_call_gex}"
         assert result.total_put_gex < 0, f"Put GEX should be negative, got {result.total_put_gex}"
@@ -308,14 +308,14 @@ class TestEdgeCases:
     def test_large_gex_values_no_overflow(self):
         """Large OI should not cause integer overflow."""
         calc = GEXCalculator(risk_free_rate=RISK_FREE_RATE, dividend_yield=SPX_DIVIDEND_YIELD)
-        
+
         timestamp = get_test_timestamp()
         expiration = get_test_expiration()
         df = pd.DataFrame([
             {"strike": 5900.0, "type": "call", "open_interest": 100000, "implied_vol": 0.20, "expiration": expiration},
         ])
         result = calc.calculate_gex_from_chain(df, 5900.0, timestamp)
-        
+
         assert np.isfinite(result.total_call_gex), "Large GEX should be finite"
         # With 100k OI, gamma ~0.001, the GEX should be significant
         assert abs(result.total_call_gex) > 1e6, f"Large GEX should be significant, got {result.total_call_gex}"

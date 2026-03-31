@@ -1,10 +1,9 @@
 """0DTE GEX Backend - Greeks Calculation Tests."""
 
 import numpy as np
-import pytest
 
-from app.core.greeks import BlackScholesGreeks, ImpliedVolatilitySolver
 from app.core.constants import SPX_DIVIDEND_YIELD
+from app.core.greeks import BlackScholesGreeks, ImpliedVolatilitySolver
 
 
 class TestBlackScholesGreeks:

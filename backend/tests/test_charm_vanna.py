@@ -2,11 +2,10 @@
 
 import numpy as np
 import pandas as pd
-import pytest
 
-from app.core.greeks import BlackScholesGreeks
 from app.core.charm_vanna_calculator import CharmVannaCalculator
 from app.core.constants import SPX_DIVIDEND_YIELD
+from app.core.greeks import BlackScholesGreeks
 
 
 class TestCharmGreek:

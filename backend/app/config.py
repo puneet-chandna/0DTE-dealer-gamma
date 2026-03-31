@@ -1,7 +1,6 @@
 """0DTE GEX Backend - Application Configuration."""
 
 from functools import lru_cache
-from typing import List, Optional
 
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -22,7 +21,7 @@ class Settings(BaseSettings):
 
     # Data Providers
     data_provider: str = "yfinance"
-    tradier_api_key: Optional[str] = None
+    tradier_api_key: str | None = None
     tradier_base_url: str = "https://api.tradier.com/v1"
 
     # Background Tasks
@@ -34,18 +33,18 @@ class Settings(BaseSettings):
     debug: bool = True
 
     # CORS
-    cors_origins: List[str] = ["http://localhost:3000"]
+    cors_origins: list[str] = ["http://localhost:3000"]
 
     # API Rate Limiting
     api_rate_limit: int = 100  # requests per minute per IP
 
     # WebSocket Authentication (optional)
     ws_auth_enabled: bool = False
-    ws_auth_secret: Optional[str] = None
+    ws_auth_secret: str | None = None
 
     @field_validator("cors_origins", mode="before")
     @classmethod
-    def parse_cors_origins(cls, v: str | List[str]) -> List[str]:
+    def parse_cors_origins(cls, v: str | list[str]) -> list[str]:
         """Parse CORS origins from string or list."""
         if isinstance(v, str):
             # Handle JSON-like string from env var

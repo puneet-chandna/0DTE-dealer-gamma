@@ -4,18 +4,15 @@ Tests IV-surface, technical-indicators, vectorbt-backtest endpoints
 including parameter validation, error handling, and response schemas.
 """
 
-import json
 import sys
-from datetime import date, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pandas as pd
-import pytest
 from fastapi.testclient import TestClient
 
+from app.core.provider_registry import ProviderUnavailableError
 from app.main import app
 from app.models.schemas import GEXSnapshot
-from app.core.provider_registry import ProviderUnavailableError
 
 client = TestClient(app)
 
@@ -448,7 +445,7 @@ class TestVectorbtBacktestEndpoint:
         if resp.status_code == 200:
             curve = resp.json()["equity_curve"]
             assert isinstance(curve, list)
-            assert all(isinstance(v, (int, float)) for v in curve)
+            assert all(isinstance(v, int | float) for v in curve)
 
     def test_end_date_before_start_date_handled(self):
         """Should return error or 503 when date range is invalid."""

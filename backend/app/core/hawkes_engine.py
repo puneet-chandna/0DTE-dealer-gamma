@@ -19,17 +19,18 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Any, Deque, Dict, Optional
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
 
-from app.core.constants import DEFAULT_RISK_FREE_RATE, SPX_DIVIDEND_YIELD
 from app.core.constants import (
+    DEFAULT_RISK_FREE_RATE,
     HAWKES_ALPHA,
     HAWKES_BETA,
     HAWKES_VOLUME_THRESHOLD,
+    SPX_DIVIDEND_YIELD,
 )
 from app.core.greeks import BlackScholesGreeks
 
@@ -133,23 +134,23 @@ class HawkesEngine:
         # Internal state
         self._call_intensity: float = 0.0
         self._put_intensity: float = 0.0
-        self._last_contracts: Dict[str, ContractSnapshot] = {}
-        self._last_timestamp: Optional[float] = None
-        self._last_trading_day: Optional[date] = None
+        self._last_contracts: dict[str, ContractSnapshot] = {}
+        self._last_timestamp: float | None = None
+        self._last_trading_day: date | None = None
         self._provider_mode: str = "tradier_rich"
         self._baseline_ready: bool = False
         self._confidence_score: float = 0.0
         self._event_count: int = 0
-        self._rolling_imbalance: Deque[float] = deque(maxlen=self.rolling_window)
-        self._rolling_total_intensity: Deque[float] = deque(maxlen=self.rolling_window)
+        self._rolling_imbalance: deque[float] = deque(maxlen=self.rolling_window)
+        self._rolling_total_intensity: deque[float] = deque(maxlen=self.rolling_window)
 
     def update(
         self,
         options_df: pd.DataFrame,
-        timestamp: Optional[float] = None,
+        timestamp: float | None = None,
         *,
-        spot_price: Optional[float] = None,
-        provider_mode: Optional[str] = None,
+        spot_price: float | None = None,
+        provider_mode: str | None = None,
     ) -> HawkesState:
         """
         Update the Hawkes-style state with a new options-chain snapshot.
@@ -345,7 +346,7 @@ class HawkesEngine:
         )
         restored_last_timestamp = (
             float(last_timestamp)
-            if isinstance(last_timestamp, (int, float))
+            if isinstance(last_timestamp, int | float)
             else None
         )
         restored_last_trading_day = (
@@ -402,7 +403,7 @@ class HawkesEngine:
             return 5.0
         return max(1.0, timestamp - self._last_timestamp)
 
-    def _normalize_provider_mode(self, provider_mode: Optional[str]) -> str:
+    def _normalize_provider_mode(self, provider_mode: str | None) -> str:
         """Normalize provider mode labels used across the backend and UI."""
         normalized = (provider_mode or self._provider_mode or "tradier_rich").strip().lower()
         if normalized in {"tradier", "tradier_rich"}:
@@ -436,7 +437,7 @@ class HawkesEngine:
         options_df: pd.DataFrame,
         *,
         timestamp: float,
-        spot_price: Optional[float],
+        spot_price: float | None,
         provider_mode: str,
     ) -> tuple[pd.DataFrame, float, float]:
         """Create a normalized snapshot and fill missing Greeks when possible."""
@@ -499,7 +500,7 @@ class HawkesEngine:
         frame: pd.DataFrame,
         *,
         timestamp: float,
-        spot_price: Optional[float],
+        spot_price: float | None,
         provider_mode: str,
     ) -> tuple[pd.DataFrame, float]:
         """Fill missing delta/gamma values using Black-Scholes when needed."""
@@ -567,9 +568,9 @@ class HawkesEngine:
 
         return frame, computed_ratio
 
-    def _build_contract_map(self, frame: pd.DataFrame) -> Dict[str, ContractSnapshot]:
+    def _build_contract_map(self, frame: pd.DataFrame) -> dict[str, ContractSnapshot]:
         """Build the normalized contract lookup for one snapshot."""
-        contracts: Dict[str, ContractSnapshot] = {}
+        contracts: dict[str, ContractSnapshot] = {}
         for row in frame.itertuples(index=False):
             option_type = getattr(row, "type", "")
             if option_type not in {"call", "put"}:
@@ -597,7 +598,7 @@ class HawkesEngine:
 
     def _resolve_effective_spot(
         self,
-        spot_price: Optional[float],
+        spot_price: float | None,
         frame: pd.DataFrame,
     ) -> float:
         """Use the supplied spot or fall back to the median strike."""
@@ -678,7 +679,7 @@ class HawkesEngine:
         rolling_imbalance_score = min(1.0, imbalance / imbalance_reference)
         return float(np.clip(0.75 * rolling_imbalance_score + 0.25 * dominance, 0.0, 1.0))
 
-    def _rolling_reference(self, values: Deque[float]) -> float:
+    def _rolling_reference(self, values: deque[float]) -> float:
         """Return a stable rolling normalization anchor."""
         if not values:
             return MIN_NORMALIZATION_SCALE

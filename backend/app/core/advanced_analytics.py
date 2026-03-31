@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from typing import Dict, Optional, Tuple
 
 import pandas as pd
 
@@ -15,10 +14,10 @@ from app.models.schemas import AdvancedAnalytics, GEXSnapshot, HawkesStateModel
 
 logger = logging.getLogger(__name__)
 
-StreamKey = Tuple[str, str]
+StreamKey = tuple[str, str]
 
-_hawkes_engines: Dict[StreamKey, HawkesEngine] = {}
-_kalman_filters: Dict[StreamKey, GEXKalmanFilter] = {}
+_hawkes_engines: dict[StreamKey, HawkesEngine] = {}
+_kalman_filters: dict[StreamKey, GEXKalmanFilter] = {}
 _analytics_lock = threading.Lock()
 _stream_locks = {}
 
@@ -71,7 +70,7 @@ def _get_stream_lock(*, symbol: str, provider: str):
         return stream_lock
 
 
-def reset_advanced_analytics_state(*, symbol: Optional[str] = None, provider: Optional[str] = None) -> None:
+def reset_advanced_analytics_state(*, symbol: str | None = None, provider: str | None = None) -> None:
     """Reset cached state for tests or lifecycle boundaries."""
     if symbol is None and provider is None:
         with _analytics_lock:
@@ -96,7 +95,7 @@ def enrich_snapshot_with_advanced_analytics(
     options_df: pd.DataFrame,
     symbol: str,
     provider: str,
-    timestamp_seconds: Optional[float] = None,
+    timestamp_seconds: float | None = None,
 ) -> GEXSnapshot:
     """Attach Hawkes and Kalman analytics to a snapshot without breaking the caller on failure."""
     if timestamp_seconds is None:

@@ -6,7 +6,6 @@ volatility could explode.
 """
 
 import logging
-from typing import List, Optional
 
 import pandas as pd
 import pandas_ta as ta
@@ -29,7 +28,7 @@ class TechnicalIndicatorEngine:
     @staticmethod
     def compute_indicators(
         price_df: pd.DataFrame,
-        indicators: Optional[List[str]] = None,
+        indicators: list[str] | None = None,
         atr_length: int = 14,
         rsi_length: int = 14,
         bb_length: int = 20,

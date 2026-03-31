@@ -3,17 +3,17 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import UTC, date, datetime, time, timedelta
 from functools import lru_cache
-from typing import Iterable, Optional
 from zoneinfo import ZoneInfo
 
 import numpy as np
 import pandas as pd
 
-from app.core.analytics import VolatilityAnalyzer
 from app.core.advanced_analytics import enrich_snapshot_with_advanced_analytics
+from app.core.analytics import VolatilityAnalyzer
 from app.core.charm_vanna_calculator import CharmVannaCalculator
 from app.core.constants import LONG_GAMMA_THRESHOLD, SHORT_GAMMA_THRESHOLD
 from app.core.data_acquisition import get_current_trading_date
@@ -80,8 +80,8 @@ class DemoDataService:
     def get_current_snapshot(
         self,
         symbol: str = "SPX",
-        now: Optional[datetime] = None,
-        anchor_snapshot: Optional[GEXSnapshot] = None,
+        now: datetime | None = None,
+        anchor_snapshot: GEXSnapshot | None = None,
         provider: str = "demo",
     ) -> GEXSnapshot:
         """Return the current synthetic snapshot for the active 5-second bucket."""
@@ -113,7 +113,7 @@ class DemoDataService:
         start_date: date,
         end_date: date,
         interval: str = "1min",
-        anchor_snapshot: Optional[GEXSnapshot] = None,
+        anchor_snapshot: GEXSnapshot | None = None,
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Return aligned price and GEX data across the requested date range."""
         sessions = [
@@ -144,7 +144,7 @@ class DemoDataService:
         start_date: date,
         end_date: date,
         interval: str,
-        anchor_snapshot: Optional[GEXSnapshot] = None,
+        anchor_snapshot: GEXSnapshot | None = None,
     ) -> list[GEXSnapshot]:
         """Build historical snapshots for charts and replay views."""
         _, gex_data = self.get_time_series(
@@ -179,7 +179,7 @@ class DemoDataService:
         symbol: str,
         start_date: date,
         end_date: date,
-        anchor_snapshot: Optional[GEXSnapshot] = None,
+        anchor_snapshot: GEXSnapshot | None = None,
     ):
         """Compute summary statistics from the coherent demo GEX history."""
         _, gex_data = self.get_time_series(
@@ -193,8 +193,8 @@ class DemoDataService:
     def get_iv_surface(
         self,
         symbol: str,
-        now: Optional[datetime] = None,
-        anchor_snapshot: Optional[GEXSnapshot] = None,
+        now: datetime | None = None,
+        anchor_snapshot: GEXSnapshot | None = None,
     ) -> dict:
         """Generate a deterministic IV surface and skew from the active demo session."""
         snapshot = self.get_current_snapshot(
@@ -262,8 +262,8 @@ class DemoDataService:
         period: str,
         interval: str,
         indicators: list[str],
-        now: Optional[datetime] = None,
-        anchor_snapshot: Optional[GEXSnapshot] = None,
+        now: datetime | None = None,
+        anchor_snapshot: GEXSnapshot | None = None,
     ) -> dict:
         """Generate deterministic indicator overlays from the same demo price series."""
         normalized_now = self._normalize_now(now)
@@ -315,8 +315,8 @@ class DemoDataService:
     def get_ws_update(
         self,
         symbol: str = "SPX",
-        now: Optional[datetime] = None,
-        anchor_snapshot: Optional[GEXSnapshot] = None,
+        now: datetime | None = None,
+        anchor_snapshot: GEXSnapshot | None = None,
         provider: str = "demo",
     ) -> dict:
         """Build the lightweight WebSocket update payload for demo mode."""
@@ -402,7 +402,7 @@ class DemoDataService:
         center = round(spot / strike_step) * strike_step
         offsets = np.arange(-8, 9, dtype=float)
         expiration = datetime.combine(session.trading_date, time(16, 0), tzinfo=ET).astimezone(
-            timezone.utc
+            UTC
         )
 
         records: list[dict[str, float | str]] = []
@@ -450,7 +450,7 @@ class DemoDataService:
         return pd.DataFrame.from_records(records)
 
     @staticmethod
-    def _optional_rounded_anchor(value: Optional[float], *, digits: int = 4) -> Optional[float]:
+    def _optional_rounded_anchor(value: float | None, *, digits: int = 4) -> float | None:
         """Convert snapshot metrics for anchoring; None stays None (no float(None))."""
         if value is None:
             return None
@@ -460,7 +460,7 @@ class DemoDataService:
         self,
         symbol: str,
         trading_date: date,
-        anchor_snapshot: Optional[GEXSnapshot] = None,
+        anchor_snapshot: GEXSnapshot | None = None,
     ) -> DemoSession:
         if anchor_snapshot is None:
             return self._get_session(symbol, trading_date)
@@ -480,11 +480,11 @@ class DemoDataService:
     def _get_anchored_session(
         symbol: str,
         trading_date: date,
-        anchor_spot_price: Optional[float],
-        anchor_net_gex: Optional[float],
-        anchor_zero_gamma_level: Optional[float],
-        anchor_total_call_gex: Optional[float],
-        anchor_total_put_gex: Optional[float],
+        anchor_spot_price: float | None,
+        anchor_net_gex: float | None,
+        anchor_zero_gamma_level: float | None,
+        anchor_total_call_gex: float | None,
+        anchor_total_put_gex: float | None,
     ) -> DemoSession:
         base_session = DemoDataService._get_session(symbol, trading_date)
 
@@ -544,7 +544,7 @@ class DemoDataService:
         row_index: int,
         timestamp: datetime,
         bucket_index: int,
-        override_row: Optional[pd.Series] = None,
+        override_row: pd.Series | None = None,
     ) -> GEXSnapshot:
         row = override_row if override_row is not None else session.gex_data.iloc[row_index]
         spot = float(row["spot_price"])
@@ -650,16 +650,16 @@ class DemoDataService:
             current += timedelta(days=1)
 
     @staticmethod
-    def _normalize_now(now: Optional[datetime]) -> datetime:
+    def _normalize_now(now: datetime | None) -> datetime:
         if now is None:
             return datetime.now(ET)
         if now.tzinfo is None:
-            return now.replace(tzinfo=timezone.utc).astimezone(ET)
+            return now.replace(tzinfo=UTC).astimezone(ET)
         return now.astimezone(ET)
 
     @staticmethod
     def _seed_for(symbol: str, trading_date: date) -> int:
-        digest = hashlib.sha256(f"{symbol}:{trading_date.isoformat()}".encode("utf-8")).hexdigest()
+        digest = hashlib.sha256(f"{symbol}:{trading_date.isoformat()}".encode()).hexdigest()
         return int(digest[:16], 16) % (2**32)
 
     @staticmethod
@@ -736,7 +736,7 @@ class DemoDataService:
         )
 
 
-_demo_data_service: Optional[DemoDataService] = None
+_demo_data_service: DemoDataService | None = None
 
 
 def get_demo_data_service() -> DemoDataService:

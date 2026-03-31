@@ -7,13 +7,12 @@ backtesting of volatility-based trading strategies.
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional, Tuple
 
 import numpy as np
 import pandas as pd
 from scipy import stats
 
-from app.core.constants import SHORT_GAMMA_THRESHOLD, LONG_GAMMA_THRESHOLD
+from app.core.constants import LONG_GAMMA_THRESHOLD, SHORT_GAMMA_THRESHOLD
 from app.models.schemas import AnalyticsResult, SummaryStatistics
 
 logger = logging.getLogger(__name__)

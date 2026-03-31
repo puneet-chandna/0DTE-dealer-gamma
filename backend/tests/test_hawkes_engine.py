@@ -1,11 +1,9 @@
 """Tests for the Hawkes Process Engine."""
 
-import time
-import numpy as np
 import pandas as pd
 import pytest
 
-from app.core.hawkes_engine import HawkesEngine, HawkesState
+from app.core.hawkes_engine import HawkesEngine
 
 
 class TestHawkesEngine:

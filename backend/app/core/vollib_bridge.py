@@ -5,11 +5,9 @@ against py_vollib, and IV surface/skew computation helpers.
 """
 
 import logging
-from typing import Optional
 
 import numpy as np
 import pandas as pd
-from numpy.typing import NDArray
 
 from app.core.constants import DEFAULT_RISK_FREE_RATE, SPX_DIVIDEND_YIELD
 
