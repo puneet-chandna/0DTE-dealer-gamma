@@ -86,18 +86,16 @@ export default function DashboardPage() {
   const lastUpdate = lastUpdateTime
     ? format(new Date(lastUpdateTime), 'h:mm:ss a')
     : undefined;
-  const captureTimestampLabel = useMemo(() => {
-    if (!gexData?.timestamp) return undefined;
-
+  let captureTimestampLabel: string | undefined;
+  if (gexData?.timestamp) {
     const formattedTimestamp = formatMarketTimestamp(gexData.timestamp);
-    if (!formattedTimestamp) return undefined;
-
-    const isReplayCapture = isTruthyMetric(gexData.metrics?.is_replay_data);
-    const isPersistedFallback = isTruthyMetric(gexData.metrics?.is_persisted_fallback);
-    if (isReplayCapture) return `Replay capture: ${formattedTimestamp}`;
-    if (isPersistedFallback) return `Stored capture: ${formattedTimestamp}`;
-    return undefined;
-  }, [gexData?.metrics, gexData?.timestamp]);
+    if (formattedTimestamp) {
+      const isReplayCapture = isTruthyMetric(gexData.metrics?.is_replay_data);
+      const isPersistedFallback = isTruthyMetric(gexData.metrics?.is_persisted_fallback);
+      if (isReplayCapture) captureTimestampLabel = `Replay capture: ${formattedTimestamp}`;
+      else if (isPersistedFallback) captureTimestampLabel = `Stored capture: ${formattedTimestamp}`;
+    }
+  }
 
   // Transform strikes data for bar chart
   const barChartData: GEXChartDataPoint[] = useMemo(() => {
