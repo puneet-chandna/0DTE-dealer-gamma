@@ -9,6 +9,14 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { DataProviderInfo, ProviderName } from '@/types';
 
+function getInitialDarkModePreference(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return false;
+  }
+
+  return window.matchMedia('(prefers-color-scheme: dark)').matches;
+}
+
 function resolveSelectedProvider(
   selectedProvider: ProviderName,
   availableProviders: DataProviderInfo[],
@@ -135,7 +143,7 @@ export const useUIStore = create<UIState>()(
       toggleNetGex: () => set((state) => ({ showNetGex: !state.showNetGex })),
 
       // Theme - respect system preference
-      isDarkMode: false,
+      isDarkMode: getInitialDarkModePreference(),
       toggleDarkMode: () => set((state) => ({ isDarkMode: !state.isDarkMode })),
 
       // Auto refresh - enabled by default at 30s

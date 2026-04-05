@@ -8,11 +8,20 @@ import { useUIStore } from '@/stores/uiStore';
 
 export function AppShellEffects() {
   const queryClient = useQueryClient();
-  const { demoModeEnabled, selectedProvider } = useUIStore();
+  const { demoModeEnabled, isDarkMode, selectedProvider } = useUIStore();
   const previousModeRef = useRef(demoModeEnabled);
   const previousProviderRef = useRef(selectedProvider);
 
   useProviders();
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const nextTheme = isDarkMode ? 'dark' : 'light';
+
+    root.dataset.theme = nextTheme;
+    root.classList.toggle('dark', isDarkMode);
+    root.style.colorScheme = nextTheme;
+  }, [isDarkMode]);
 
   useEffect(() => {
     if (
