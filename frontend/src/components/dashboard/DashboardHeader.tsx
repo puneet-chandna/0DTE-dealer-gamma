@@ -4,7 +4,7 @@
 
 'use client';
 
-import { memo } from 'react';
+import { memo, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -61,8 +61,14 @@ function DashboardHeaderComponent({
     toggleDemoMode,
   } =
     useUIStore();
+  const [hasMounted, setHasMounted] = useState(false);
 
   const isConnected = connectionState === 'connected';
+  const showDarkModeEnabled = hasMounted && isDarkMode;
+
+  useEffect(() => {
+    setHasMounted(true);
+  }, []);
 
   return (
     <header className="border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm">
@@ -211,9 +217,15 @@ function DashboardHeaderComponent({
           <button
             onClick={toggleDarkMode}
             className="rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
-            title={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+            title={
+              hasMounted
+                ? showDarkModeEnabled
+                  ? 'Switch to light mode'
+                  : 'Switch to dark mode'
+                : 'Toggle theme'
+            }
           >
-            {isDarkMode ? (
+            {showDarkModeEnabled ? (
               <Sun className="h-4 w-4" />
             ) : (
               <Moon className="h-4 w-4" />

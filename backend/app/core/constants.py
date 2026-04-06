@@ -6,9 +6,9 @@ Update quarterly or as market conditions change.
 
 # Risk-free rate FALLBACK (used when FRED is unreachable)
 # Live rate is fetched from FRED via pandas-datareader (see rate_provider.py)
-# Source: Federal Reserve Bank of New York
-# Last updated: 2024-Q4
-DEFAULT_RISK_FREE_RATE: float = 0.05  # 5% annualized
+# Source: FRED DTB4WK short-term Treasury proxy
+# Last updated: 2026-04-02
+DEFAULT_RISK_FREE_RATE: float = 0.0363  # 3.63% annualized
 
 # Backward-compatible alias (deprecated — prefer DEFAULT_RISK_FREE_RATE)
 RISK_FREE_RATE: float = DEFAULT_RISK_FREE_RATE

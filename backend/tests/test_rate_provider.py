@@ -16,6 +16,10 @@ from app.core.rate_provider import RiskFreeRateProvider
 class TestRiskFreeRateProviderInit:
     """Test RiskFreeRateProvider initialisation."""
 
+    def test_default_fallback_matches_current_short_term_treasury_proxy(self):
+        """Fallback should reflect the configured short-term Treasury proxy."""
+        assert DEFAULT_RISK_FREE_RATE == pytest.approx(0.0363)
+
     def test_starts_with_no_cached_rate(self):
         """Provider should have no cached rate on first creation."""
         provider = RiskFreeRateProvider()

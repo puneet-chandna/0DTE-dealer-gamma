@@ -1,5 +1,8 @@
 import { fireEvent, render, screen } from '@testing-library/react';
+import { hydrateRoot } from 'react-dom/client';
+import { renderToString } from 'react-dom/server';
 import type { ReactNode } from 'react';
+import { act } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DashboardHeader } from './DashboardHeader';
@@ -96,5 +99,40 @@ describe('DashboardHeader', () => {
     );
 
     expect(screen.getByText(/replay capture: mar 27, 2026 3:34 pm et/i)).toBeInTheDocument();
+  });
+
+  it('avoids a hydration mismatch when the client theme differs from the server render', async () => {
+    storeState.state = {
+      ...storeState.state,
+      isDarkMode: false,
+    };
+
+    const serverMarkup = renderToString(<DashboardHeader />);
+    const container = document.createElement('div');
+    container.innerHTML = serverMarkup;
+    document.body.appendChild(container);
+
+    storeState.state = {
+      ...storeState.state,
+      isDarkMode: true,
+    };
+
+    const recoverableErrors: Error[] = [];
+    let root: ReturnType<typeof hydrateRoot> | undefined;
+
+    await act(async () => {
+      root = hydrateRoot(container, <DashboardHeader />, {
+        onRecoverableError: (error) => {
+          recoverableErrors.push(error);
+        },
+      });
+    });
+
+    expect(recoverableErrors).toEqual([]);
+
+    await act(async () => {
+      root?.unmount();
+    });
+    container.remove();
   });
 });
