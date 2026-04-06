@@ -1,10 +1,11 @@
 import React, { type ReactNode } from 'react';
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { act, render, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { useDashboardData, useIntradayTimeSeries } from './useDashboardData';
+import { DashboardDataProvider, useDashboardData, useIntradayTimeSeries } from './useDashboardData';
 import { queryKeys } from './useGEXData';
+import { useGEXStream } from './useWebSocket';
 import { gexAPI } from '@/lib/api';
 import type { GEXByStrike, GEXSnapshot, RegimeData } from '@/types';
 
@@ -168,6 +169,16 @@ function createWrapper(queryClient: QueryClient) {
   };
 }
 
+function createProviderWrapper(queryClient: QueryClient) {
+  return function Wrapper({ children }: { children: ReactNode }) {
+    return (
+      <QueryClientProvider client={queryClient}>
+        <DashboardDataProvider>{children}</DashboardDataProvider>
+      </QueryClientProvider>
+    );
+  };
+}
+
 describe('useDashboardData', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -194,7 +205,7 @@ describe('useDashboardData', () => {
     const setQueryDataSpy = vi.spyOn(queryClient, 'setQueryData');
 
     renderHook(() => useDashboardData(), {
-      wrapper: createWrapper(queryClient),
+      wrapper: createProviderWrapper(queryClient),
     });
 
     await waitFor(() => {
@@ -226,7 +237,7 @@ describe('useDashboardData', () => {
     vi.mocked(gexAPI.getGEXByStrikes).mockResolvedValue(liveStrikes);
 
     const { result } = renderHook(() => useDashboardData(), {
-      wrapper: createWrapper(createQueryClient()),
+      wrapper: createProviderWrapper(createQueryClient()),
     });
 
     await waitFor(() => {
@@ -260,7 +271,7 @@ describe('useDashboardData', () => {
     vi.mocked(gexAPI.getGEXByStrikes).mockResolvedValue(liveStrikes);
 
     const { result } = renderHook(() => useDashboardData(), {
-      wrapper: createWrapper(createQueryClient()),
+      wrapper: createProviderWrapper(createQueryClient()),
     });
 
     await act(async () => {
@@ -301,7 +312,7 @@ describe('useDashboardData', () => {
     vi.mocked(gexAPI.getGEXByStrikes).mockResolvedValue(liveStrikes);
 
     const { result } = renderHook(() => useDashboardData(), {
-      wrapper: createWrapper(queryClient),
+      wrapper: createProviderWrapper(queryClient),
     });
 
     await act(async () => {
@@ -335,7 +346,7 @@ describe('useDashboardData', () => {
     vi.mocked(gexAPI.getGEXByStrikes).mockResolvedValue(liveStrikes);
 
     const { result } = renderHook(() => useDashboardData(), {
-      wrapper: createWrapper(createQueryClient()),
+      wrapper: createProviderWrapper(createQueryClient()),
     });
 
     await act(async () => {
@@ -361,7 +372,7 @@ describe('useDashboardData', () => {
     vi.mocked(gexAPI.getGEXByStrikes).mockResolvedValue(liveStrikes);
 
     const { result } = renderHook(() => useDashboardData(), {
-      wrapper: createWrapper(createQueryClient()),
+      wrapper: createProviderWrapper(createQueryClient()),
     });
 
     await waitFor(() => {
@@ -392,7 +403,7 @@ describe('useDashboardData', () => {
     vi.mocked(gexAPI.getGEXByStrikes).mockResolvedValue(liveStrikes);
 
     const { result } = renderHook(() => useDashboardData(), {
-      wrapper: createWrapper(createQueryClient()),
+      wrapper: createProviderWrapper(createQueryClient()),
     });
 
     await waitFor(() => {
@@ -420,7 +431,7 @@ describe('useDashboardData', () => {
     vi.mocked(gexAPI.getGEXByStrikes).mockResolvedValue(liveStrikes);
 
     const { result } = renderHook(() => useDashboardData(), {
-      wrapper: createWrapper(createQueryClient()),
+      wrapper: createProviderWrapper(createQueryClient()),
     });
 
     expect(result.current.isStale).toBe(false);
@@ -447,7 +458,7 @@ describe('useDashboardData', () => {
     queryClient.setQueryData(queryKeys.gex.regime('live', 'yfinance'), liveRegime);
 
     renderHook(() => useDashboardData(), {
-      wrapper: createWrapper(queryClient),
+      wrapper: createProviderWrapper(queryClient),
     });
 
     await waitFor(() => {
@@ -466,6 +477,42 @@ describe('useDashboardData', () => {
     expect(
       queryClient.getQueryData<RegimeData>(queryKeys.gex.regime('live', 'yfinance'))
     ).toEqual(liveRegime);
+  });
+
+  it('keeps a single websocket stream alive when dashboard consumers remount under a shared provider', async () => {
+    vi.mocked(gexAPI.getCurrentGEX).mockResolvedValue(liveCurrentGex);
+    vi.mocked(gexAPI.getCurrentRegime).mockResolvedValue(liveRegime);
+    vi.mocked(gexAPI.getGEXByStrikes).mockResolvedValue(liveStrikes);
+
+    function Consumer() {
+      useDashboardData();
+      return null;
+    }
+
+    const queryClient = createQueryClient();
+    const wrapper = createProviderWrapper(queryClient);
+
+    function Host({ mounted }: { mounted: boolean }) {
+      return mounted ? <Consumer /> : null;
+    }
+
+    const { rerender } = render(<Host mounted />, { wrapper });
+
+    await waitFor(() => {
+      expect(gexAPI.getCurrentGEX).toHaveBeenCalledTimes(1);
+    });
+
+    const initialStreamCallCount = vi.mocked(useGEXStream).mock.calls.length;
+
+    rerender(<Host mounted={false} />);
+    rerender(<Host mounted />);
+
+    expect(gexAPI.getCurrentGEX).toHaveBeenCalledTimes(1);
+    expect(gexAPI.getCurrentRegime).toHaveBeenCalledTimes(1);
+    expect(gexAPI.getGEXByStrikes).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(useGEXStream).mock.calls.length).toBeGreaterThanOrEqual(initialStreamCallCount);
+    expect(websocketState.disconnect).not.toHaveBeenCalled();
+    expect(websocketState.reconnect).not.toHaveBeenCalled();
   });
 });
 

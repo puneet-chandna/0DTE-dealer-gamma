@@ -3,6 +3,7 @@ import { Inter } from 'next/font/google';
 import './globals.css';
 import { QueryProvider } from '@/providers/QueryProvider';
 import { AppShellEffects } from '@/components/app/AppShellEffects';
+import { DashboardDataProvider } from '@/hooks/useDashboardData';
 
 const inter = Inter({
   variable: '--font-inter',
@@ -44,8 +45,10 @@ export default function RootLayout({
         suppressHydrationWarning
       >
         <QueryProvider>
-          <AppShellEffects />
-          {children}
+          <DashboardDataProvider>
+            <AppShellEffects />
+            {children}
+          </DashboardDataProvider>
         </QueryProvider>
       </body>
     </html>

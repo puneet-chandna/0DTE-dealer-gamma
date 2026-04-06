@@ -1,3 +1,5 @@
+'use client';
+
 /**
  * 0DTE GEX Frontend - Hybrid Dashboard Data Hook
  *
@@ -8,7 +10,18 @@
  * - Exposes real-time status for UI indicators
  */
 
-import { useEffect, useMemo, useState, useCallback, useReducer, useRef } from 'react';
+import {
+  createElement,
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useGEXStream } from './useWebSocket';
 import { useCurrentGEX, useCurrentRegime, useGEXByStrikes, useHistoricalGEX, queryKeys } from './useGEXData';
@@ -50,11 +63,13 @@ interface TimeSeriesPoint {
   spotPrice: number;
 }
 
+const DashboardDataContext = createContext<DashboardData | null>(null);
+
 /**
  * Unified hook for dashboard data that prefers WebSocket when available
  * and falls back to REST polling when disconnected.
  */
-export function useDashboardData(): DashboardData {
+function useDashboardDataState(): DashboardData {
   const queryClient = useQueryClient();
   const [currentTime, setCurrentTime] = useState(() => Date.now());
   const { demoModeEnabled, selectedProvider } = useUIStore();
@@ -261,6 +276,26 @@ export function useDashboardData(): DashboardData {
     reconnect: wsStream.reconnect,
     disconnect: wsStream.disconnect,
   };
+}
+
+interface DashboardDataProviderProps {
+  children: ReactNode;
+}
+
+export function DashboardDataProvider({ children }: DashboardDataProviderProps) {
+  const value = useDashboardDataState();
+
+  return createElement(DashboardDataContext.Provider, { value }, children);
+}
+
+export function useDashboardData(): DashboardData {
+  const value = useContext(DashboardDataContext);
+
+  if (value === null) {
+    throw new Error('useDashboardData must be used within DashboardDataProvider');
+  }
+
+  return value;
 }
 
 /**
