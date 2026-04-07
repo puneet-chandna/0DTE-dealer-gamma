@@ -118,7 +118,7 @@ export default function DashboardPage() {
     }));
   }, [intradayData]);
 
-  // Refresh handler - invalidate all queries
+  // Refresh handler - invalidate all queries and reconnect WebSocket
   const handleRefresh = () => {
     queryClient.invalidateQueries({
       queryKey: queryKeys.gex.current(mode, selectedProvider),
@@ -129,10 +129,8 @@ export default function DashboardPage() {
     queryClient.invalidateQueries({
       queryKey: queryKeys.gex.strikes(mode, selectedProvider),
     });
-    // Also reconnect WebSocket if disconnected
-    if (!isRealtime) {
-      reconnect();
-    }
+    // Always reconnect WebSocket to clear stale WS state and force fresh data
+    reconnect();
   };
 
   // Show regime banner for short gamma (warning)
