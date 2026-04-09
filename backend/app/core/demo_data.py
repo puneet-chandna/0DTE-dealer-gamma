@@ -98,6 +98,7 @@ class DemoDataService:
             row_index=row_index,
             timestamp=normalized_now,
             bucket_index=bucket_index,
+            anchor_snapshot=anchor_snapshot,
         )
         return self._enrich_demo_snapshot(
             snapshot=snapshot,
@@ -170,6 +171,7 @@ class DemoDataService:
                     timestamp=timestamp.to_pydatetime(),
                     bucket_index=row_index,
                     override_row=row,
+                    anchor_snapshot=anchor_snapshot,
                 )
             )
         return snapshots
@@ -341,6 +343,72 @@ class DemoDataService:
         if snapshot.advanced_analytics is not None:
             payload["advanced_analytics"] = snapshot.advanced_analytics.model_dump()
         return payload
+
+    def ensure_snapshot_advanced_analytics(
+        self,
+        *,
+        snapshot: GEXSnapshot,
+        symbol: str,
+        provider: str = "demo",
+    ) -> GEXSnapshot:
+        """Backfill demo analytics onto replay snapshots that predate the analytics fields."""
+        advanced = (
+            snapshot.advanced_analytics.model_copy(deep=True)
+            if snapshot.advanced_analytics is not None
+            else AdvancedAnalytics()
+        )
+        needs_charm_vanna = advanced.charm_vanna is None
+        needs_hawkes = advanced.hawkes is None or advanced.smoothed_net_gex is None
+
+        if not needs_charm_vanna and not needs_hawkes:
+            return snapshot
+
+        normalized_timestamp = self._normalize_now(snapshot.timestamp)
+        session = self._resolve_session(
+            symbol,
+            get_current_trading_date(normalized_timestamp),
+            anchor_snapshot=snapshot,
+        )
+        row_index = self._session_row_index(pd.Timestamp(normalized_timestamp))
+        options_df = self._build_demo_options_chain(
+            session=session,
+            row_index=row_index,
+            timestamp=normalized_timestamp,
+        )
+
+        if needs_charm_vanna:
+            expiry_timestamps = pd.to_datetime(options_df["expiration"], utc=True)
+            expiry_ts = pd.Series(expiry_timestamps).dt.tz_convert(normalized_timestamp.tzinfo or ET)
+            time_to_expiry = np.maximum(
+                (expiry_ts - normalized_timestamp).dt.total_seconds().to_numpy()
+                / (365.25 * 24 * 3600),
+                0.0,
+            )
+            cv_result = self._charm_vanna.calculate_all(
+                options_df=options_df,
+                spot_price=snapshot.spot_price,
+                time_to_expiration=time_to_expiry,
+            )
+            advanced.charm_vanna = CharmVannaSnapshot(
+                charm_flow=cv_result["charm_flow"],
+                vanna_flow=cv_result["vanna_flow"],
+                net_hidden_flow=cv_result["net_hidden_flow"],
+                charm_by_strike=cv_result["charm_by_strike"],
+                vanna_by_strike=cv_result["vanna_by_strike"],
+            )
+
+        snapshot.advanced_analytics = advanced
+
+        if needs_hawkes:
+            return enrich_snapshot_with_advanced_analytics(
+                snapshot,
+                options_df=options_df,
+                symbol=symbol,
+                provider=f"demo:{provider}",
+                timestamp_seconds=normalized_timestamp.timestamp(),
+            )
+
+        return snapshot
 
     def _enrich_demo_snapshot(
         self,
@@ -545,6 +613,7 @@ class DemoDataService:
         timestamp: datetime,
         bucket_index: int,
         override_row: pd.Series | None = None,
+        anchor_snapshot: GEXSnapshot | None = None,
     ) -> GEXSnapshot:
         row = override_row if override_row is not None else session.gex_data.iloc[row_index]
         spot = float(row["spot_price"])
@@ -560,6 +629,11 @@ class DemoDataService:
         )
         dominant_strike = max(gex_by_strike, key=lambda strike: abs(gex_by_strike[strike]))
         regime_code = 1.0 if net_gex > LONG_GAMMA_THRESHOLD else -1.0 if net_gex < SHORT_GAMMA_THRESHOLD else 0.0
+        zero_gamma_crossing_found, zero_gamma_relation = self._resolve_demo_zero_gamma_metadata(
+            zero_gamma_level=zero_gamma_level,
+            gex_by_strike=gex_by_strike,
+            anchor_snapshot=anchor_snapshot,
+        )
 
         return GEXSnapshot(
             timestamp=timestamp,
@@ -575,8 +649,54 @@ class DemoDataService:
                 "gex_imbalance": abs(total_call_gex) / max(abs(total_put_gex), 1.0),
                 "is_demo_data": 1.0,
                 "demo_bucket": float(bucket_index),
+                "zero_gamma_crossing_found": zero_gamma_crossing_found,
+                "zero_gamma_relation": zero_gamma_relation,
             },
         )
+
+    @staticmethod
+    def _coerce_metric_bool(value: object) -> bool | None:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int | float) and np.isfinite(value):
+            return bool(value)
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "1", "yes", "on"}:
+                return True
+            if normalized in {"false", "0", "no", "off"}:
+                return False
+        return None
+
+    def _resolve_demo_zero_gamma_metadata(
+        self,
+        *,
+        zero_gamma_level: float,
+        gex_by_strike: dict[float, float],
+        anchor_snapshot: GEXSnapshot | None,
+    ) -> tuple[bool, str]:
+        """Infer or preserve zero-gamma relation semantics for demo snapshots."""
+        if anchor_snapshot is not None:
+            anchor_crossing = self._coerce_metric_bool(
+                anchor_snapshot.metrics.get("zero_gamma_crossing_found")
+            )
+            anchor_relation = anchor_snapshot.metrics.get("zero_gamma_relation")
+            if anchor_crossing is False and anchor_relation in {"above_range", "below_range"}:
+                return False, anchor_relation
+
+        if not gex_by_strike:
+            return True, "in_range"
+
+        strikes = sorted(gex_by_strike.keys())
+        min_strike = strikes[0]
+        max_strike = strikes[-1]
+
+        if zero_gamma_level < min_strike:
+            return False, "below_range"
+        if zero_gamma_level > max_strike:
+            return False, "above_range"
+
+        return True, "in_range"
 
     def _build_strike_map(
         self,

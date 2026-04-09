@@ -311,7 +311,12 @@ async def _get_gex_update(
         )
         if replay_snapshots:
             bucket_index = int(datetime.now(ET).timestamp()) // WS_UPDATE_INTERVAL
-            snapshot = replay_snapshots[bucket_index % len(replay_snapshots)]
+            snapshot = replay_snapshots[bucket_index % len(replay_snapshots)].model_copy(deep=True)
+            snapshot = get_demo_data_service().ensure_snapshot_advanced_analytics(
+                snapshot=snapshot,
+                symbol=symbol,
+                provider=active_provider,
+            )
             return _build_ws_payload_from_snapshot(
                 snapshot=snapshot,
                 provider=active_provider,

@@ -348,6 +348,11 @@ async def get_current_gex(
     if demo:
         replay_snapshot = await _get_replay_snapshot(symbol=symbol, provider=active_provider)
         if replay_snapshot is not None:
+            replay_snapshot = get_demo_data_service().ensure_snapshot_advanced_analytics(
+                snapshot=replay_snapshot.model_copy(deep=True),
+                symbol=symbol,
+                provider=active_provider,
+            )
             replay_payload = replay_snapshot.model_dump()
             replay_payload["provider"] = active_provider
             replay_payload.setdefault("metrics", {})

@@ -103,6 +103,36 @@ def test_current_gex_demo_mode_shapes_synthetic_fallback_from_latest_snapshot(mo
     assert data["net_gex"] == -7.9e8
 
 
+def test_current_gex_demo_mode_preserves_above_range_zero_gamma_relation(monkeypatch):
+    """Anchored demo current GEX should mark zero gamma as above-range when the anchor says so."""
+    import app.api.routes.gex as gex_routes
+
+    anchor_snapshot = _build_snapshot(
+        spot_price=6030.0,
+        net_gex=-8.2e8,
+        zero_gamma_level=6175.0,
+    )
+    anchor_snapshot.metrics["zero_gamma_crossing_found"] = False
+    anchor_snapshot.metrics["zero_gamma_relation"] = "above_range"
+
+    monkeypatch.setattr(gex_routes, "_get_replay_snapshot", AsyncMock(return_value=None))
+    monkeypatch.setattr(
+        gex_routes,
+        "_get_latest_persisted_snapshot",
+        AsyncMock(return_value=anchor_snapshot),
+    )
+
+    response = client.get(
+        "/api/gex/current",
+        params={"demo": "true", "provider": "yfinance", "symbol": "SPX"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["metrics"]["zero_gamma_crossing_found"] is False
+    assert data["metrics"]["zero_gamma_relation"] == "above_range"
+
+
 def test_current_gex_demo_mode_synthetic_fallback_includes_advanced_analytics(monkeypatch):
     """Synthetic demo current GEX should include advanced analytics when replay is unavailable."""
     import app.api.routes.gex as gex_routes
@@ -121,6 +151,31 @@ def test_current_gex_demo_mode_synthetic_fallback_includes_advanced_analytics(mo
 
     assert response.status_code == 200
     data = response.json()
+    assert data["advanced_analytics"]["charm_vanna"] is not None
+    assert data["advanced_analytics"]["hawkes"] is not None
+    assert data["advanced_analytics"]["smoothed_net_gex"] is not None
+
+
+def test_current_gex_demo_replay_backfills_advanced_analytics_when_missing(monkeypatch):
+    """Replay demo current GEX should synthesize advanced analytics when older snapshots lack them."""
+    import app.api.routes.gex as gex_routes
+
+    replay_snapshot = _build_snapshot(
+        spot_price=6031.0,
+        net_gex=-7.4e8,
+        zero_gamma_level=6020.0,
+    )
+
+    monkeypatch.setattr(gex_routes, "_get_replay_snapshot", AsyncMock(return_value=replay_snapshot))
+
+    response = client.get(
+        "/api/gex/current",
+        params={"demo": "true", "provider": "tradier", "symbol": "SPX"},
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["metrics"]["is_replay_data"] == 1.0
     assert data["advanced_analytics"]["charm_vanna"] is not None
     assert data["advanced_analytics"]["hawkes"] is not None
     assert data["advanced_analytics"]["smoothed_net_gex"] is not None
@@ -240,6 +295,40 @@ async def test_demo_websocket_synthetic_fallback_includes_advanced_analytics(mon
 
     assert payload["is_demo"] is True
     assert payload["is_replay"] is False
+    assert payload["advanced_analytics"]["charm_vanna"] is not None
+    assert payload["advanced_analytics"]["hawkes"] is not None
+
+
+@pytest.mark.asyncio
+async def test_demo_websocket_replay_backfills_advanced_analytics_when_missing(monkeypatch):
+    """Replay demo websocket updates should synthesize advanced analytics when older snapshots lack them."""
+    import app.api.websocket as websocket_routes
+    from app.config import Settings
+
+    replay_snapshot = _build_snapshot(
+        spot_price=6014.0,
+        net_gex=-5.8e8,
+        zero_gamma_level=6008.0,
+    )
+    history_service = SimpleNamespace(
+        get_historical_snapshots=AsyncMock(return_value=[replay_snapshot]),
+    )
+
+    monkeypatch.setattr(
+        websocket_routes,
+        "get_historical_data_service",
+        lambda: history_service,
+    )
+
+    payload = await websocket_routes._get_gex_update(
+        Settings(data_provider="tradier"),
+        demo=True,
+        symbol="SPX",
+        provider="tradier",
+    )
+
+    assert payload["is_demo"] is True
+    assert payload["is_replay"] is True
     assert payload["advanced_analytics"]["charm_vanna"] is not None
     assert payload["advanced_analytics"]["hawkes"] is not None
 
