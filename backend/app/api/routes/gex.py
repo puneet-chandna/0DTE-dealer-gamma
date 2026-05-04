@@ -120,6 +120,29 @@ async def _get_replay_snapshot(
     return snapshots[-1]
 
 
+def _ensure_replay_snapshot_advanced_analytics(
+    *,
+    snapshot: GEXSnapshot,
+    symbol: str,
+    provider: str,
+) -> GEXSnapshot:
+    """Backfill replay analytics when the configured demo service supports it."""
+    demo_service = get_demo_data_service()
+    ensure_advanced_analytics = getattr(
+        demo_service,
+        "ensure_snapshot_advanced_analytics",
+        None,
+    )
+    if not callable(ensure_advanced_analytics):
+        return snapshot
+
+    return ensure_advanced_analytics(
+        snapshot=snapshot,
+        symbol=symbol,
+        provider=provider,
+    )
+
+
 async def _get_latest_persisted_snapshot(
     *,
     symbol: str,
@@ -348,7 +371,7 @@ async def get_current_gex(
     if demo:
         replay_snapshot = await _get_replay_snapshot(symbol=symbol, provider=active_provider)
         if replay_snapshot is not None:
-            replay_snapshot = get_demo_data_service().ensure_snapshot_advanced_analytics(
+            replay_snapshot = _ensure_replay_snapshot_advanced_analytics(
                 snapshot=replay_snapshot.model_copy(deep=True),
                 symbol=symbol,
                 provider=active_provider,

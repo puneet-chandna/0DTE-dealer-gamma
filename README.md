@@ -1,3 +1,8 @@
+<img
+  src="assets/0dte-poster-brutalist.svg"
+  alt="0DTE Dealer GEX Monitor brutalist poster"
+  style="width: 100%; max-width: 900px; height: auto;"
+/>
 # 0DTE Dealer Gamma Exposure (GEX) Monitor
 
 Real-time dashboard to monitor Dealer Gamma Exposure for 0DTE (zero-days-to-expiration) options on SPX.
@@ -8,11 +13,7 @@ Real-time dashboard to monitor Dealer Gamma Exposure for 0DTE (zero-days-to-expi
 > and other noncommercial use are allowed under the license. Commercial use requires
 > separate written permission from the copyright holders.
 
-<img
-  src="assets/0dte-poster-brutalist.svg"
-  alt="0DTE Dealer GEX Monitor brutalist poster"
-  style="width: 100%; max-width: 900px; height: auto;"
-/>
+
 
 ---
 
