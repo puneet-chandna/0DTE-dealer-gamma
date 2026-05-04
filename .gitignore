@@ -92,6 +92,9 @@ docker-compose.override.yml
 *.bak
 *.tmp
 Thumbs.db
+
+# Local academic PDF (broad glob — avoids committing identifiable filenames)
+/BCE4??J*REPORT*.pdf
 gex_react_architecture.md
 0DTE Dealer Gamma Exposure Project Specification.pdf
 .cursorrules
