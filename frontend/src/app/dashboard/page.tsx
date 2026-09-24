@@ -219,6 +219,14 @@ export default function DashboardPage() {
                         {selectedProviderInfo?.display_name ?? selectedProvider} • SPX @ {gexData.spot_price.toLocaleString()}
                       </span>
                     )}
+                    {selectedProvider === 'yfinance' && (
+                      <span
+                        className="rounded bg-amber-900/40 px-1.5 py-0.5 text-[11px] text-amber-300"
+                        title="Yahoo Finance has no SPX options: SPY options are fetched and spot, strikes, bid/ask are scaled ×10 as an SPX approximation. Greeks are computed locally. Quotes are delayed ~15 min."
+                      >
+                        SPX via SPY x10 proxy
+                      </span>
+                    )}
                   </div>
                 </div>
               </CardHeader>
@@ -291,8 +299,8 @@ export default function DashboardPage() {
             <div className="text-center">
               <p className="text-xs text-zinc-600">
                 {isRealtime
-                  ? 'Real-time data via WebSocket • Updates every 5 seconds during market hours (9:30 AM - 4:00 PM ET)'
-                  : 'Polling data via REST API • Updates every 30 seconds during market hours (9:30 AM - 4:00 PM ET)'}
+                  ? 'Updates every 5s WS / 30s REST during 9:30-16:00 ET; Yahoo delayed, Tradier live • WebSocket'
+                  : 'Updates every 5s WS / 30s REST during 9:30-16:00 ET; Yahoo delayed, Tradier live • REST polling'}
               </p>
             </div>
           </div>

@@ -110,6 +110,14 @@ This dashboard should not be treated as:
 
 Gamma-based dashboards are informative, but they are still model-driven and data-dependent. Intraday positioning can change quickly, and market behavior can ignore a level longer than expected.
 
+## Data Delays and the SPY Proxy
+
+When the data provider is Yahoo Finance, two caveats apply:
+
+- **Delayed quotes (~15 min).** Yahoo is not a live feed. The dashboard polls every 5 s (WebSocket) / 30 s (REST) during 9:30–16:00 ET, but quotes are only as fresh as Yahoo's delayed feed. Tradier is the live alternative.
+- **SPX via SPY ×10 proxy.** Yahoo has no SPX options, so the backend fetches SPY options and scales spot, strikes, bid, and ask by 10. These are approximations of SPX, not real SPX quotes, and all Greeks are computed locally (yfinance provides no Greeks).
+- **Open interest cadence.** OI does not refresh on every poll — it updates on exchange cadence (typically once per day/session). Intraday GEX moves are therefore driven mostly by price and IV changes, not by fresh positioning data.
+
 ## A Simple Beginner Workflow
 
 If you are new to this style of dashboard, start with these questions:

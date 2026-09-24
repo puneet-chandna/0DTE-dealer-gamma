@@ -5,7 +5,7 @@
 />
 # 0DTE Dealer Gamma Exposure (GEX) Monitor
 
-Real-time dashboard to monitor Dealer Gamma Exposure for 0DTE (zero-days-to-expiration) options on SPX.
+Near-real-time (5s poll, provider-delayed) dashboard to monitor Dealer Gamma Exposure for 0DTE (zero-days-to-expiration) options on SPX.
 
 **Goal:** Identify the "Zero Gamma Level" and "Net GEX" to predict intraday volatility regimes.
 
@@ -33,7 +33,7 @@ Real-time dashboard to monitor Dealer Gamma Exposure for 0DTE (zero-days-to-expi
 
 ## Features
 
-- **Real-time GEX Calculation** - Vectorized Black-Scholes Greeks (1000+ contracts in <1ms)
+- **Near-real-time GEX Calculation** - Vectorized Black-Scholes Greeks (~0.5ms p50 for 1000 contracts, vectorized NumPy — see `docs/BENCHMARKS.md`)
 - **Zero Gamma Level** - Linear interpolation where cumulative GEX crosses zero
 - **Market Regime Detection** - Short gamma (🔴) / Long gamma (🟢) / Neutral (🟡)
 - **WebSocket Streaming** - Live updates every 5 seconds during market hours
@@ -51,7 +51,7 @@ Real-time dashboard to monitor Dealer Gamma Exposure for 0DTE (zero-days-to-expi
 | **Frontend**  | Next.js 16, TypeScript, TailwindCSS, React Query, Zustand, Recharts |
 | **Backend**   | Python 3.13, FastAPI, NumPy (vectorized), SciPy, Pydantic v2        |
 | **Database**  | SQLite (local default, zero-setup) / PostgreSQL 18 (opt-in, Docker or cloud) |
-| **Real-time** | WebSocket                                                           |
+| **Near-real-time (5s poll, provider-delayed)** | WebSocket                                                           |
 | **Data**      | YFinance (default), Tradier, provider registry architecture         |
 
 ---

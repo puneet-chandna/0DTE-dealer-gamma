@@ -142,7 +142,7 @@ export default function BacktestPage() {
         <div className="mb-8">
           <h1 className="text-2xl font-bold tracking-tight">Strategy Backtester</h1>
           <p className="mt-1 text-sm text-zinc-400">
-            GEX signal-based backtesting powered by vectorbt
+            GEX signal-based backtesting powered by vectorbt (long-only; fees/slippage 0.1% each; series freq must match the 1min assumption)
           </p>
         </div>
 
@@ -285,6 +285,7 @@ export default function BacktestPage() {
                       <p className="text-sm text-zinc-500">Configure parameters and run a backtest</p>
                       <p className="mt-1 text-xs text-zinc-600">
                         Strategy: Long when Net GEX {'<'} entry threshold, exit when {'>'} exit threshold
+                        {' '}• Long-only, no shorts • Fees/slippage 0.1% each • Input bars must be 1min (freq assumption)
                       </p>
                     </div>
                   </div>
