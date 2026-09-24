@@ -88,15 +88,17 @@ odte-dealer-gamma/
 - Node.js 20+ with pnpm
 - Docker & Docker Compose (optional — only needed for the Postgres path)
 
-### 1. Clone and Setup
+### 1. Clone and Bootstrap Env
 
 ```bash
 git clone https://github.com/<your-org>/odte-dealer-gamma.git
 cd odte-dealer-gamma
 
-# Copy the canonical app environment templates
-cp backend/.env.example backend/.env
-cp frontend/.env.example frontend/.env.local
+# Idempotent: copies the templates into place ONLY if missing
+# (existing backend/.env / frontend/.env.local are never overwritten).
+./scripts/setup_env.sh --sqlite            # default: zero-setup SQLite
+# ./scripts/setup_env.sh --postgres-local  # project-owned Postgres on 127.0.0.1:55432
+# ./scripts/setup_env.sh --postgres-docker # Docker Compose Postgres on localhost:5432
 
 # Optional: if you want to use Tradier instead of the default provider,
 # set TRADIER_API_KEY in backend/.env
@@ -107,6 +109,10 @@ The defaults run on SQLite — no Docker or database setup required.
 (a file created inside `backend/` on first run). To use Postgres instead,
 set `DATABASE_URL` to a Postgres connection string (see
 [Local Database Defaults](#local-database-defaults)).
+
+`setup_env.sh` also validates `DATABASE_URL` plus `NEXT_PUBLIC_API_URL` /
+`NEXT_PUBLIC_WS_URL` (fails fast with a clear message) and removes the stale
+`POLYGON_API_KEY` entry from the root `.env` if present.
 
 The canonical setup templates are [backend/.env.example](backend/.env.example)
 and [frontend/.env.example](frontend/.env.example). The root [.env.example](.env.example)
@@ -127,25 +133,49 @@ Frontend (`frontend/.env.local`):
 - `NEXT_PUBLIC_API_URL=http://localhost:8000`
 - `NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws`
 
-### 2. Start Database (optional — SQLite is the default)
+### 2. Run Everything (SQLite Default — No Docker)
 
-No database setup is needed for the default SQLite flow. Only follow this
-section if you want Postgres instead of SQLite:
+```bash
+./scripts/dev.sh
+```
+
+This single-process runner applies migrations (`alembic upgrade head`), then
+starts the backend (`uvicorn app.main:app --reload`) and the frontend
+(`pnpm dev`) as one child process group:
+
+- SQLite file: `backend/odte_gex.db` (created on first run). No database
+  terminal, no TCP wait, no Docker.
+- One PID file: `.local-run/dev.pid`. One log file: `.local-run/dev.log`
+  with `[backend]` / `[frontend]` prefixes per line.
+- Stop everything with `Ctrl+C` (INT/TERM shuts down backend, frontend, and
+  their descendants — no orphans).
+- API: http://localhost:8000/docs — Dashboard: http://localhost:3000
+
+### 3. Postgres Opt-In (Optional)
+
+Only if you want Postgres instead of SQLite. Pick one server, point
+`DATABASE_URL` at it (via `./scripts/setup_env.sh --postgres-local` or
+`--postgres-docker`), then run `./scripts/dev.sh` as usual — the runner
+preserves the Postgres flow (ensures the local server / waits for the
+external one) before migrating and starting the services.
+
+```txt
+DATABASE_URL=postgresql+asyncpg://odte_user:your_secure_password_here@localhost:5432/odte_gex
+DATABASE_URL=postgresql+asyncpg://odte_user:odte_password@127.0.0.1:55432/odte_gex
+```
 
 ```bash
 docker compose up -d
+# ... or, without Docker: ./scripts/setup_local_postgres.sh
+./scripts/dev.sh
 ```
 
-If Docker is unavailable on your machine, you can use the project-owned local
-Postgres fallback instead:
+### Appendix A. Legacy Multi-Terminal Startup
 
-```bash
-./scripts/setup_local_postgres.sh
-```
-
-### One-Command Local Startup
-
-You can launch the whole app with one command and get separate terminals for:
+`./scripts/dev.sh` (above) is the recommended runner. The multi-terminal
+launchers remain as legacy shims (no deletion) and still support the SQLite
+default (no DB terminal for `sqlite:` URLs) and the Postgres flow. You can
+launch the whole app with one command and get separate terminals for:
 - database logs
 - backend logs
 - frontend logs
@@ -182,14 +212,7 @@ Notes:
 - If PostgreSQL is not installed or not reachable on native Windows, `start_app.ps1` stops and shows colored setup guidance instead of trying to install it automatically.
 - If you stop the backend or frontend terminals, the DB can keep running until you stop the DB terminal separately.
 
-### 3. Run Database Migrations
-
-```bash
-cd backend
-alembic upgrade head
-```
-
-### 4. Backend
+### Appendix B. Manual Setup (No Runner)
 
 ```bash
 cd backend
@@ -201,8 +224,6 @@ uvicorn app.main:app --reload
 ```
 
 API available at: http://localhost:8000/docs
-
-### 5. Frontend
 
 ```bash
 cd frontend
@@ -221,34 +242,12 @@ override, the backend uses:
 sqlite+aiosqlite:///./odte_gex.db
 ```
 
-(a file created inside `backend/` on first run). That means the normal local
-flow needs no Docker at all:
+(a file created inside `backend/` on first run, i.e. `backend/odte_gex.db`).
+That means the normal local flow (`./scripts/setup_env.sh --sqlite`, then
+`./scripts/dev.sh`) needs no Docker and no DB terminal at all.
 
-```bash
-cd backend
-source .venv/bin/activate
-alembic upgrade head
-uvicorn app.main:app --reload
-```
-
-To use Postgres instead (Docker or the local fallback), set `backend/.env` to
-one of:
-
-```txt
-DATABASE_URL=postgresql+asyncpg://odte_user:your_secure_password_here@localhost:5432/odte_gex
-DATABASE_URL=postgresql+asyncpg://odte_user:odte_password@127.0.0.1:55432/odte_gex
-```
-
-Then run:
-
-```bash
-docker compose up -d
-# ... or, without Docker: ./scripts/setup_local_postgres.sh
-cd backend
-source .venv/bin/activate
-alembic upgrade head
-uvicorn app.main:app --reload
-```
+To use Postgres instead (Docker or the local fallback), see
+[Postgres Opt-In](#3-postgres-opt-in-optional) for the `DATABASE_URL` values.
 
 ---
 

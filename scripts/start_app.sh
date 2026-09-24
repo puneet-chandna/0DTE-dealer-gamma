@@ -47,7 +47,7 @@ detect_terminal() {
 }
 
 is_sqlite_url() {
-  [[ "$1" == sqlite:* ]]
+  [[ "$1" == sqlite* ]]
 }
 
 read_database_url() {
