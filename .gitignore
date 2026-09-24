@@ -88,6 +88,12 @@ docker-compose.override.yml
 .local-postgres/
 .local-run/
 
+# Local SQLite database files (default local run creates backend/odte_gex.db)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
 # Misc
 *.bak
 *.tmp

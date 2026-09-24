@@ -5,7 +5,7 @@
 />
 # 0DTE Dealer Gamma Exposure (GEX) Monitor
 
-Real-time dashboard to monitor Dealer Gamma Exposure for 0DTE (zero-days-to-expiration) options on SPX.
+Near-real-time (5s poll, provider-delayed) dashboard to monitor Dealer Gamma Exposure for 0DTE (zero-days-to-expiration) options on SPX.
 
 **Goal:** Identify the "Zero Gamma Level" and "Net GEX" to predict intraday volatility regimes.
 
@@ -33,13 +33,13 @@ Real-time dashboard to monitor Dealer Gamma Exposure for 0DTE (zero-days-to-expi
 
 ## Features
 
-- **Real-time GEX Calculation** - Vectorized Black-Scholes Greeks (1000+ contracts in <1ms)
+- **Near-real-time GEX Calculation** - Vectorized Black-Scholes Greeks (~0.5ms p50 for 1000 contracts, vectorized NumPy — see `docs/BENCHMARKS.md`)
 - **Zero Gamma Level** - Linear interpolation where cumulative GEX crosses zero
 - **Market Regime Detection** - Short gamma (🔴) / Long gamma (🟢) / Neutral (🟡)
 - **WebSocket Streaming** - Live updates every 5 seconds during market hours
 - **Interactive Charts** - Strike-by-strike GEX visualization with Recharts
 - **Historical Analysis** - Backtesting and volatility analysis tools
-- **Persistent Historical Storage** - Provider-separated Postgres storage for GEX snapshots, IV surfaces, and replay sessions
+- **Persistent Historical Storage** - Provider-separated SQLite/Postgres storage for GEX snapshots, IV surfaces, and replay sessions
 - **Provider-Based Data Layer** - Configurable market-data providers with a free local-development path
 
 ---
@@ -50,8 +50,8 @@ Real-time dashboard to monitor Dealer Gamma Exposure for 0DTE (zero-days-to-expi
 | ------------- | ------------------------------------------------------------------- |
 | **Frontend**  | Next.js 16, TypeScript, TailwindCSS, React Query, Zustand, Recharts |
 | **Backend**   | Python 3.13, FastAPI, NumPy (vectorized), SciPy, Pydantic v2        |
-| **Database**  | PostgreSQL 18 (local Docker first, cloud-ready schema)              |
-| **Real-time** | WebSocket                                                           |
+| **Database**  | SQLite (local default, zero-setup) / PostgreSQL 18 (opt-in, Docker or cloud) |
+| **Near-real-time (5s poll, provider-delayed)** | WebSocket                                                           |
 | **Data**      | YFinance (default), Tradier, provider registry architecture         |
 
 ---
@@ -86,7 +86,7 @@ odte-dealer-gamma/
 
 - Python 3.11+ (project uses 3.13)
 - Node.js 20+ with pnpm
-- Docker & Docker Compose
+- Docker & Docker Compose (optional — only needed for the Postgres path)
 
 ### 1. Clone and Setup
 
@@ -102,6 +102,12 @@ cp frontend/.env.example frontend/.env.local
 # set TRADIER_API_KEY in backend/.env
 ```
 
+The defaults run on SQLite — no Docker or database setup required.
+`backend/.env` ships with `DATABASE_URL=sqlite+aiosqlite:///./odte_gex.db`
+(a file created inside `backend/` on first run). To use Postgres instead,
+set `DATABASE_URL` to a Postgres connection string (see
+[Local Database Defaults](#local-database-defaults)).
+
 The canonical setup templates are [backend/.env.example](backend/.env.example)
 and [frontend/.env.example](frontend/.env.example). The root [.env.example](.env.example)
 is a combined reference for local development, but the backend/frontend templates should
@@ -110,7 +116,7 @@ be treated as the primary setup docs.
 ### Environment Variables (minimum)
 
 Backend (`backend/.env`):
-- `DATABASE_URL` (Postgres connection string)
+- `DATABASE_URL` (SQLite by default; set a Postgres connection string to opt in)
 - `DATA_PROVIDER` (`yfinance` by default, `tradier` if configured)
 - `TRADIER_API_KEY` (only required when using `tradier`)
 - `HOST`, `PORT`
@@ -121,7 +127,10 @@ Frontend (`frontend/.env.local`):
 - `NEXT_PUBLIC_API_URL=http://localhost:8000`
 - `NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws`
 
-### 2. Start Database
+### 2. Start Database (optional — SQLite is the default)
+
+No database setup is needed for the default SQLite flow. Only follow this
+section if you want Postgres instead of SQLite:
 
 ```bash
 docker compose up -d
@@ -205,35 +214,36 @@ Dashboard available at: http://localhost:3000
 
 ### Local Database Defaults
 
-The repo is now wired for local-first Postgres persistence. If you use the
-default `docker-compose.yml`, the backend default `DATABASE_URL` already
-matches it:
+The repo defaults to SQLite for zero-setup local runs. With no `DATABASE_URL`
+override, the backend uses:
 
 ```txt
-postgresql+asyncpg://odte_user:odte_password@localhost:5432/odte_gex
+sqlite+aiosqlite:///./odte_gex.db
 ```
 
-That means the normal local flow is:
+(a file created inside `backend/` on first run). That means the normal local
+flow needs no Docker at all:
 
 ```bash
-docker compose up -d
 cd backend
 source .venv/bin/activate
 alembic upgrade head
 uvicorn app.main:app --reload
 ```
 
-If you use the local fallback database instead of Docker, set
-`backend/.env` to:
+To use Postgres instead (Docker or the local fallback), set `backend/.env` to
+one of:
 
 ```txt
+DATABASE_URL=postgresql+asyncpg://odte_user:your_secure_password_here@localhost:5432/odte_gex
 DATABASE_URL=postgresql+asyncpg://odte_user:odte_password@127.0.0.1:55432/odte_gex
 ```
 
 Then run:
 
 ```bash
-./scripts/setup_local_postgres.sh
+docker compose up -d
+# ... or, without Docker: ./scripts/setup_local_postgres.sh
 cd backend
 source .venv/bin/activate
 alembic upgrade head

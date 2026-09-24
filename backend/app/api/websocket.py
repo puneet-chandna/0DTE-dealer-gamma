@@ -1,6 +1,7 @@
-"""0DTE GEX Backend - WebSocket Endpoint for Real-time Streaming.
+"""0DTE GEX Backend - WebSocket Endpoint for Near-real-time (5s poll, provider-delayed) Streaming.
 
-Provides real-time GEX updates to connected clients with 5-second intervals.
+Provides near-real-time GEX updates to connected clients with 5-second intervals.
+Quotes are only as fresh as the upstream provider (Yahoo delayed, Tradier live).
 """
 
 import asyncio

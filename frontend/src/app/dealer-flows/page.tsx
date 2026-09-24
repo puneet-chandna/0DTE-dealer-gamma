@@ -33,7 +33,7 @@ const TABS: { id: TabId; label: string; question: string }[] = [
   { id: 'magnetics', label: 'Price Magnetics', question: 'Where is price being pulled?' },
   { id: 'cascade', label: 'Cascade Risk', question: 'What happens if price moves?' },
   { id: 'decay', label: 'Gamma Decay', question: 'How much time do I have?' },
-  { id: 'hidden', label: 'Hidden Flows', question: 'What are dealers doing right now?' },
+  { id: 'hidden', label: 'Flow proxy (Hawkes-style)', question: 'What are dealers doing right now?' },
 ];
 
 // ============================================================================
@@ -471,6 +471,22 @@ export default function DealerFlowsPage() {
                 isLoading={isLoading}
               />
             </div>
+            {(() => {
+              const hawkes = gexData?.advanced_analytics?.hawkes;
+              if (!hawkes || isLoading) return null;
+              const parts: string[] = [];
+              if (hawkes.provider_mode) parts.push(`mode: ${hawkes.provider_mode}`);
+              if (typeof hawkes.confidence_score === 'number')
+                parts.push(`confidence: ${(hawkes.confidence_score * 100).toFixed(0)}%`);
+              if (typeof hawkes.event_count === 'number')
+                parts.push(`events: ${hawkes.event_count}`);
+              if (parts.length === 0) return null;
+              return (
+                <p className="mt-3 text-[11px] text-zinc-600" title="Hawkes flow signal is a statistical proxy over quote/trade intensity, not observed dealer orders. yfinance_proxy mode uses coarser inputs than tradier_rich.">
+                  Flow proxy ({parts.join(' • ')}) — statistical estimate, not observed dealer orders.
+                </p>
+              );
+            })()}
           </TabLayout>
         )}
 
