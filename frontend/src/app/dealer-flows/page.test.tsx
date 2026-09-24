@@ -123,7 +123,7 @@ describe('DealerFlowsPage source label', () => {
     });
 
     render(<DealerFlowsPage />);
-    fireEvent.click(screen.getByRole('button', { name: /hidden flows/i }));
+    fireEvent.click(screen.getByRole('button', { name: /flow proxy/i }));
 
     expect(screen.getByText(/order flow momentum is balanced/i)).toBeInTheDocument();
   });
@@ -148,7 +148,7 @@ describe('DealerFlowsPage source label', () => {
     });
 
     render(<DealerFlowsPage />);
-    fireEvent.click(screen.getByRole('button', { name: /hidden flows/i }));
+    fireEvent.click(screen.getByRole('button', { name: /flow proxy/i }));
 
     expect(screen.getByText(/balanced, but hawkes intensities are elevated on both sides/i)).toBeInTheDocument();
   });
@@ -179,7 +179,7 @@ describe('DealerFlowsPage source label', () => {
     });
 
     render(<DealerFlowsPage />);
-    fireEvent.click(screen.getByRole('button', { name: /hidden flows/i }));
+    fireEvent.click(screen.getByRole('button', { name: /flow proxy/i }));
 
     expect(screen.getByText(/Hidden Flows Panel 8000000/)).toBeInTheDocument();
     expect(screen.getByText(/Momentum Gauge 0.33/)).toBeInTheDocument();

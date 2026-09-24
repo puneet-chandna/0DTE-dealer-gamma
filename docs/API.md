@@ -18,7 +18,7 @@ Currently, the API does not require authentication. All endpoints are public.
 
 ### `GET /api/gex/current`
 
-Get current real-time GEX calculation.
+Get current near-real-time (5s poll, provider-delayed) GEX calculation.
 
 **Parameters:**
 
@@ -225,6 +225,11 @@ Backtest trading strategy based on GEX signals.
 }
 ```
 
+> **Backtest caveats (vectorbt engine):** long-only (enter long in short-gamma,
+> exit on recovery — no shorts); fees and slippage default to 0.1% each;
+> `freq` is assumed `1min`, so the bar `interval` of the input series must match
+> minute-level data or Sharpe/duration stats will be mis-scaled.
+
 ---
 
 ### `GET /api/analytics/summary-statistics`
@@ -294,9 +299,10 @@ Get list of all supported dynamic data providers and the active default.
 {
   "providers": {
     "yfinance": {
-      "has_greeks": true,
+      "has_greeks": false,
       "needs_api_key": false,
-      "requires_auth": false
+      "requires_auth": false,
+      "note": "SPX via SPY x10 proxy; Greeks computed locally; Yahoo delayed"
     },
     "tradier": {
       "has_greeks": true,
@@ -378,7 +384,7 @@ Get current spot price based on active provider.
 
 ### `WS /ws/gex-stream`
 
-Real-time GEX updates via WebSocket.
+Near-real-time (5s poll, provider-delayed) GEX updates via WebSocket.
 
 **Connection:** `ws://localhost:8000/ws/gex-stream`
 
