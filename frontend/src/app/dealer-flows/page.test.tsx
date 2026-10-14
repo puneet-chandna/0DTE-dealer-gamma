@@ -116,6 +116,9 @@ describe('DealerFlowsPage source label', () => {
             put_intensity: 0,
             net_toxicity: 0,
             squeeze_probability: 0,
+            provider_mode: 'tradier_rich',
+            confidence_score: 0,
+            event_count: 0,
           },
           smoothed_net_gex: null,
         },
@@ -123,9 +126,10 @@ describe('DealerFlowsPage source label', () => {
     });
 
     render(<DealerFlowsPage />);
-    fireEvent.click(screen.getByRole('button', { name: /hidden flows/i }));
+    fireEvent.click(screen.getByRole('button', { name: /flow proxy/i }));
 
     expect(screen.getByText(/order flow momentum is balanced/i)).toBeInTheDocument();
+    expect(screen.getByText(/heuristic confidence: 0%.*changed contracts: 0/i)).toBeInTheDocument();
   });
 
   it('distinguishes balanced but elevated Hawkes intensity from quiet flow', () => {
@@ -148,7 +152,7 @@ describe('DealerFlowsPage source label', () => {
     });
 
     render(<DealerFlowsPage />);
-    fireEvent.click(screen.getByRole('button', { name: /hidden flows/i }));
+    fireEvent.click(screen.getByRole('button', { name: /flow proxy/i }));
 
     expect(screen.getByText(/balanced, but hawkes intensities are elevated on both sides/i)).toBeInTheDocument();
   });
@@ -179,7 +183,7 @@ describe('DealerFlowsPage source label', () => {
     });
 
     render(<DealerFlowsPage />);
-    fireEvent.click(screen.getByRole('button', { name: /hidden flows/i }));
+    fireEvent.click(screen.getByRole('button', { name: /flow proxy/i }));
 
     expect(screen.getByText(/Hidden Flows Panel 8000000/)).toBeInTheDocument();
     expect(screen.getByText(/Momentum Gauge 0.33/)).toBeInTheDocument();

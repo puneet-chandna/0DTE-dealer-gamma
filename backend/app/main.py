@@ -46,7 +46,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 app = FastAPI(
     title="0DTE GEX API",
-    description="Real-time Dealer Gamma Exposure Analysis for 0DTE Options",
+    description="Near-real-time (5s poll, provider-delayed) Dealer Gamma Exposure Analysis for 0DTE Options",
     version="1.0.0",
     lifespan=lifespan,
     docs_url="/docs" if settings.is_development else None,

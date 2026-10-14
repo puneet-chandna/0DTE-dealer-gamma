@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # ============================================================================
 # Request Models
@@ -68,11 +68,13 @@ class OptionContract(BaseModel):
 class OptionsChainResponse(BaseModel):
     """Full options chain response including all contracts."""
 
+    model_config = ConfigDict(allow_inf_nan=False)
+
     underlying: str
     spot_price: float
     expiration_date: str
     contract_count: int
-    contracts: list[dict[str, float | str | int]]
+    contracts: list[dict[str, float | str | int | None]]
     timestamp: str
     provider: str | None = None
 

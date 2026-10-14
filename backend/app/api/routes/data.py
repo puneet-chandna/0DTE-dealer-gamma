@@ -5,6 +5,7 @@ Provides access to options chain data, spot prices, and market status.
 
 import logging
 from datetime import date, datetime
+from math import isfinite
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Query
@@ -112,12 +113,12 @@ async def get_options_chain(
         )
         spot_price = await client.get_spot_price(symbol=symbol)
 
-        # Update spot price in cache
-        cache.update_spot_price(spot_price, symbol=symbol)
-
         # Convert DataFrame to list of dicts
         options_list = []
         for _, row in options_df.iterrows():
+            implied_vol = float(row["implied_vol"]) if row.get("implied_vol") else None
+            if implied_vol is not None and not isfinite(implied_vol):
+                implied_vol = None
             contract = {
                 "symbol": row.get("symbol", ""),
                 "strike": float(row["strike"]),
@@ -128,7 +129,7 @@ async def get_options_chain(
                 "mid": float(row.get("mid", 0)),
                 "open_interest": int(row.get("open_interest", 0)),
                 "volume": int(row.get("volume", 0)),
-                "implied_vol": float(row["implied_vol"]) if row.get("implied_vol") else None,
+                "implied_vol": implied_vol,
             }
             options_list.append(contract)
 
@@ -155,11 +156,12 @@ async def get_options_chain(
             "provider": client.provider_name,
         }
 
-        # Cache and return
-        cache.set(cache_key, result)
+        response = OptionsChainResponse(**result)
+        cache.update_spot_price(response.spot_price, symbol=symbol)
+        cache.set(cache_key, response.model_dump())
         logger.info(f"Fetched {len(options_list)} contracts for {symbol} via {client.provider_name}")
 
-        return OptionsChainResponse(**result)
+        return response
 
     except HTTPException:
         raise # Re-raise FastAPI HTTPExceptions

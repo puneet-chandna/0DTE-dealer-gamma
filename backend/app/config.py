@@ -16,8 +16,9 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Database
-    database_url: str = "postgresql+asyncpg://odte_user:odte_password@localhost:5432/odte_gex"
+    # Database (SQLite by default for zero-setup local runs;
+    # override with Postgres, e.g. via backend/.env, for shared/prod use)
+    database_url: str = "sqlite+aiosqlite:///./odte_gex.db"
 
     # Data Providers
     data_provider: str = "yfinance"

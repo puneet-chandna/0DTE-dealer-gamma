@@ -204,7 +204,7 @@ for i in range(len(strikes) - 1):
 All Greeks calculations use NumPy vectorization:
 
 ```python
-# ✅ Correct: Vectorized (processes 1000+ contracts in <1ms)
+# ✅ Correct: Vectorized (1000 contracts in ~0.5ms p50 — see docs/BENCHMARKS.md)
 gamma = np.exp(-q * T) * norm.pdf(d1) / (S * sigma * np.sqrt(T))
 
 # ❌ Wrong: Python loops (100x slower)

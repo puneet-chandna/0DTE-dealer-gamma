@@ -18,7 +18,9 @@ Currently, the API does not require authentication. All endpoints are public.
 
 ### `GET /api/gex/current`
 
-Get current real-time GEX calculation.
+Get the current GEX snapshot. Freshness depends on the selected provider,
+cache state, and any saved-data fallback. REST GEX polling is a client setting
+(30 seconds by default), and automatic polling can be disabled.
 
 **Parameters:**
 
@@ -225,6 +227,11 @@ Backtest trading strategy based on GEX signals.
 }
 ```
 
+> **Backtest caveats (vectorbt engine):** long-only (enter long in short-gamma,
+> exit on recovery — no shorts); fees and slippage default to 0.1% each;
+> `freq` is assumed `1min`, so the bar `interval` of the input series must match
+> minute-level data or Sharpe/duration stats will be mis-scaled.
+
 ---
 
 ### `GET /api/analytics/summary-statistics`
@@ -294,9 +301,10 @@ Get list of all supported dynamic data providers and the active default.
 {
   "providers": {
     "yfinance": {
-      "has_greeks": true,
+      "has_greeks": false,
       "needs_api_key": false,
-      "requires_auth": false
+      "requires_auth": false,
+      "note": "SPX via SPY x10 proxy; Greeks computed locally; Yahoo delayed"
     },
     "tradier": {
       "has_greeks": true,
@@ -378,7 +386,8 @@ Get current spot price based on active provider.
 
 ### `WS /ws/gex-stream`
 
-Real-time GEX updates via WebSocket.
+Repeated GEX snapshots via WebSocket. Delivery cadence does not guarantee
+fresh provider quotes.
 
 **Connection:** `ws://localhost:8000/ws/gex-stream`
 
@@ -408,7 +417,11 @@ Real-time GEX updates via WebSocket.
 | `market_status` | Market open/close notification      |
 | `connection`    | Connection established confirmation |
 
-**Update Frequency:** Every 5 seconds during market hours.
+**Update Frequency:** The loop waits up to 5 seconds after each completed
+update; provider fetches can make the interval longer. Incoming client messages
+can end the wait early. Connections continue receiving updates outside market
+hours, with `market_open` reporting the app's market-hours check. Background
+refresh tasks separately pause when that check is closed.
 
 ---
 

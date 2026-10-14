@@ -13,7 +13,26 @@ branch_labels = None
 depends_on = None
 
 
+def _json_type_and_default(literal: str) -> tuple[sa.types.TypeEngine, sa.TextClause]:
+    """Portable JSON column type: JSONB on Postgres, generic JSON on SQLite.
+
+    Keeps the existing Postgres DDL identical ('{}'::jsonb) while allowing
+    `alembic upgrade head` to run on a fresh SQLite file for local runs.
+    """
+    try:
+        bind = op.get_bind()
+        dialect = bind.dialect.name if bind is not None else "postgresql"
+    except Exception:
+        dialect = "postgresql"
+    if dialect == "sqlite":
+        return sa.JSON(), sa.text(f"'{literal}'")
+    return postgresql.JSONB(astext_type=sa.Text()), sa.text(f"'{literal}'::jsonb")
+
+
 def upgrade() -> None:
+    dict_json, dict_default = _json_type_and_default("{}")
+    list_json, list_default = _json_type_and_default("[]")
+
     op.create_table(
         "market_sessions",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -26,7 +45,7 @@ def upgrade() -> None:
         sa.Column("raw_snapshot_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("first_captured_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_captured_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("capture_metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb")),
+        sa.Column("capture_metadata", dict_json, nullable=False, server_default=dict_default),
         sa.UniqueConstraint(
             "provider",
             "symbol",
@@ -54,7 +73,7 @@ def upgrade() -> None:
         sa.Column("net_gex", sa.Float(), nullable=False),
         sa.Column("zero_gamma_level", sa.Float(), nullable=False),
         sa.Column("dominant_strike", sa.Float(), nullable=False),
-        sa.Column("metrics", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb")),
+        sa.Column("metrics", dict_json, nullable=False, server_default=dict_default),
         sa.UniqueConstraint(
             "provider",
             "symbol",
@@ -93,8 +112,8 @@ def upgrade() -> None:
         sa.Column("spot_price", sa.Float(), nullable=False),
         sa.Column("expiration_date", sa.Date(), nullable=True),
         sa.Column("contract_count", sa.Integer(), nullable=False),
-        sa.Column("payload", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'[]'::jsonb")),
-        sa.Column("source_metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False, server_default=sa.text("'{}'::jsonb")),
+        sa.Column("payload", list_json, nullable=False, server_default=list_default),
+        sa.Column("source_metadata", dict_json, nullable=False, server_default=dict_default),
         sa.UniqueConstraint(
             "provider",
             "symbol",

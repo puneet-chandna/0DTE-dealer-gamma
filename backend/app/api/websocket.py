@@ -1,6 +1,8 @@
-"""0DTE GEX Backend - WebSocket Endpoint for Real-time Streaming.
+"""0DTE GEX Backend - WebSocket Endpoint for GEX Snapshot Streaming.
 
-Provides real-time GEX updates to connected clients with 5-second intervals.
+The loop waits up to five seconds after each completed update and continues
+outside market hours. Fetch time and client messages affect the interval.
+Provider/account/environment determine quote freshness; polling guarantees none.
 """
 
 import asyncio
@@ -459,9 +461,9 @@ async def _get_gex_update(
 
 @router.websocket("/gex-stream")
 async def websocket_gex_stream(websocket: WebSocket) -> None:
-    """Real-time GEX streaming via WebSocket.
+    """GEX snapshot streaming via WebSocket, including outside market hours.
 
-    Client receives updates every 5 seconds with:
+    The loop waits up to five seconds between completed updates containing:
     - net_gex: Current net dealer gamma exposure
     - net_gex_billions: Net GEX in billions
     - zero_gamma_level: Price where net GEX = 0

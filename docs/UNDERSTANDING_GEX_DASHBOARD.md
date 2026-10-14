@@ -110,6 +110,18 @@ This dashboard should not be treated as:
 
 Gamma-based dashboards are informative, but they are still model-driven and data-dependent. Intraday positioning can change quickly, and market behavior can ignore a level longer than expected.
 
+## Data Delays and the SPY Proxy
+
+When the data provider is Yahoo Finance, these caveats apply:
+
+- **No guaranteed freshness.** The app does not measure or enforce a fixed Yahoo quote delay. Frequent polling does not make upstream quotes newer.
+- **SPX via SPY ×10 proxy.** Yahoo has no SPX options, so the backend fetches SPY options and scales spot, strikes, bid, and ask by 10. These are approximations of SPX, not real SPX quotes, and all Greeks are computed locally (yfinance provides no Greeks).
+- **Open interest cadence.** OI comes from the provider; it need not change on every poll. Price and IV changes can move GEX without new positioning data.
+
+The WebSocket loop waits up to 5 seconds between completed updates and continues outside market hours. REST GEX polling is configurable (30 seconds by default) and can be disabled. Background refresh tasks separately pause outside the app's market-hours check. Polling cadence and data freshness are different measures.
+
+Tradier freshness depends on the API environment and account access. Its brokerage API offers real-time quotes to brokerage account holders; its sandbox serves delayed equity/options quotes and no Greeks. See [Tradier's market-data guide](https://docs.tradier.com/docs/market-data).
+
 ## A Simple Beginner Workflow
 
 If you are new to this style of dashboard, start with these questions:

@@ -5,7 +5,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKEND_DIR="$REPO_ROOT/backend"
 FRONTEND_DIR="$REPO_ROOT/frontend"
 BACKEND_VENV_BIN="$BACKEND_DIR/.venv/bin"
-DEFAULT_DATABASE_URL="postgresql+asyncpg://odte_user:odte_password@127.0.0.1:55432/odte_gex"
+DEFAULT_DATABASE_URL="sqlite+aiosqlite:///./odte_gex.db"
 
 fail() {
   echo "Error: $*" >&2
@@ -46,19 +46,12 @@ detect_terminal() {
   fail "No supported terminal launcher found."
 }
 
+is_sqlite_url() {
+  [[ "$1" == sqlite* ]]
+}
+
 read_database_url() {
-  local env_file="$BACKEND_DIR/.env"
-  local database_url=""
-
-  if [[ -f "$env_file" ]]; then
-    database_url="$(awk -F= '/^[[:space:]]*DATABASE_URL=/{sub(/^[^=]*=/, ""); print; exit}' "$env_file")"
-  fi
-
-  if [[ -z "$database_url" ]]; then
-    database_url="$DEFAULT_DATABASE_URL"
-  fi
-
-  printf '%s\n' "$database_url"
+  "$ENV_PYTHON" "$REPO_ROOT/scripts/read_env.py" "$BACKEND_DIR/.env" DATABASE_URL "$DEFAULT_DATABASE_URL"
 }
 
 parse_database_endpoint() {
@@ -151,26 +144,39 @@ require_file "$REPO_ROOT/scripts/cleanup_runtime_state.sh"
 require_command python3
 require_command pnpm
 
+if [[ -x "$BACKEND_VENV_BIN/python" ]] && "$BACKEND_VENV_BIN/python" -c 'import dotenv' >/dev/null 2>&1; then
+  ENV_PYTHON="$BACKEND_VENV_BIN/python"
+elif python3 -c 'import dotenv' >/dev/null 2>&1; then
+  ENV_PYTHON="$(command -v python3)"
+else
+  fail "python-dotenv is unavailable. Create backend/.venv and install backend/requirements.txt."
+fi
+
 "$REPO_ROOT/scripts/cleanup_runtime_state.sh"
 
 TERMINAL_APP="$(detect_terminal)"
 DATABASE_URL_VALUE="$(read_database_url)"
-mapfile -t DB_ENDPOINT < <(parse_database_endpoint "$DATABASE_URL_VALUE")
-DB_HOST="${DB_ENDPOINT[0]}"
-DB_PORT="${DB_ENDPOINT[1]}"
-DB_MODE="$(determine_db_mode "$DB_HOST" "$DB_PORT")"
+if is_sqlite_url "$DATABASE_URL_VALUE"; then
+  DB_MODE="sqlite"
+  echo "SQLite database configured ($DATABASE_URL_VALUE). No DB terminal needed."
+else
+  mapfile -t DB_ENDPOINT < <(parse_database_endpoint "$DATABASE_URL_VALUE")
+  DB_HOST="${DB_ENDPOINT[0]}"
+  DB_PORT="${DB_ENDPOINT[1]}"
+  DB_MODE="$(determine_db_mode "$DB_HOST" "$DB_PORT")"
 
-case "$DB_MODE" in
-  local)
-    launch_terminal "$TERMINAL_APP" "ODTE DB" "$REPO_ROOT/scripts/run_local_db_terminal.sh"
-    ;;
-  external)
-    echo "External database configured at $DB_HOST:$DB_PORT. No DB terminal launched."
-    ;;
-esac
+  case "$DB_MODE" in
+    local)
+      launch_terminal "$TERMINAL_APP" "ODTE DB" "$REPO_ROOT/scripts/run_local_db_terminal.sh"
+      ;;
+    external)
+      echo "External database configured at $DB_HOST:$DB_PORT. No DB terminal launched."
+      ;;
+  esac
 
-echo "Waiting for database at $DB_HOST:$DB_PORT ..."
-wait_for_database "$DB_HOST" "$DB_PORT" || fail "Database did not become reachable."
+  echo "Waiting for database at $DB_HOST:$DB_PORT ..."
+  wait_for_database "$DB_HOST" "$DB_PORT" || fail "Database did not become reachable."
+fi
 
 echo "Running backend migrations..."
 (
@@ -182,6 +188,10 @@ launch_terminal "$TERMINAL_APP" "ODTE Backend" "$REPO_ROOT/scripts/run_backend_d
 launch_terminal "$TERMINAL_APP" "ODTE Frontend" "$REPO_ROOT/scripts/run_frontend_dev.sh"
 
 echo "All services launched."
-echo "  Database: $DB_MODE ($DB_HOST:$DB_PORT)"
+if [[ "$DB_MODE" == "sqlite" ]]; then
+  echo "  Database: sqlite ($DATABASE_URL_VALUE)"
+else
+  echo "  Database: $DB_MODE ($DB_HOST:$DB_PORT)"
+fi
 echo "  Backend: http://localhost:8000"
 echo "  Frontend: http://localhost:3000"
