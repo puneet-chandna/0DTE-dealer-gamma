@@ -56,7 +56,6 @@ def test_windows_startup_script_guides_users_to_local_postgres_or_wsl() -> None:
 
     assert "Docker" not in windows_script
     assert "WSL" in windows_script
-    assert "Git Bash" in windows_script
     assert "PostgreSQL" in windows_script
     assert "Write-Host" in windows_script
 

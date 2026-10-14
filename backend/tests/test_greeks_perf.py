@@ -1,9 +1,8 @@
 """0DTE GEX Backend - Greeks Throughput Benchmark (NON-GATING).
 
 Times ``BlackScholesGreeks.calculate_all_greeks`` on n=1000 0DTE-like
-contracts and prints p50/p99. The assertion bound is deliberately generous
-(<200ms) so CI never flakes on shared runners; this test records a
-measurement, it does not gate on hardware speed.
+contracts and prints the median and maximum of five retained timings.
+Only output shape and finiteness gate this test, never hardware speed.
 
 Live market numbers (provider fetch + GEX calc on real chains) are recorded
 in ``docs/BENCHMARKS.md`` — see that file for the Tradier/yFinance runs.
@@ -31,7 +30,7 @@ def _build_0dte_chain(n: int = 1000) -> tuple:
 class TestGreeksPerf:
     """Non-gating throughput probe for the vectorized Greeks path."""
 
-    def test_calculate_all_greeks_1000_contracts_reports_timing(self, capsys=None):
+    def test_calculate_all_greeks_1000_contracts_reports_timing(self):
         s, k, t, sigma, option_type = _build_0dte_chain(1000)
 
         # Warmup (imports, first-call overhead) — not timed.
@@ -51,12 +50,9 @@ class TestGreeksPerf:
 
         timed = sorted(runs_ms[2:])  # drop first two timed runs (cache warmup)
         p50 = float(np.median(timed))
-        p99 = float(timed[-1])  # ~max of 5 samples; labelled honestly
+        max_ms = float(timed[-1])
         print(
             f"\n[greeks-perf] n=1000 0DTE-like contracts: "
-            f"p50={p50:.2f}ms p99~max={p99:.2f}ms "
+            f"p50={p50:.2f}ms max_of_5={max_ms:.2f}ms "
             f"(runs={[f'{x:.2f}' for x in timed]})"
         )
-
-        # Generous non-gating bound: ~300x headroom over typical ~0.6ms.
-        assert p50 < 200.0, f"Greeks p50 unexpectedly slow: {p50:.1f}ms"

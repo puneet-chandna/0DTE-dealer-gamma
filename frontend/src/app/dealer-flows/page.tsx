@@ -477,13 +477,13 @@ export default function DealerFlowsPage() {
               const parts: string[] = [];
               if (hawkes.provider_mode) parts.push(`mode: ${hawkes.provider_mode}`);
               if (typeof hawkes.confidence_score === 'number')
-                parts.push(`confidence: ${(hawkes.confidence_score * 100).toFixed(0)}%`);
+                parts.push(`heuristic confidence: ${(hawkes.confidence_score * 100).toFixed(0)}%`);
               if (typeof hawkes.event_count === 'number')
-                parts.push(`events: ${hawkes.event_count}`);
+                parts.push(`changed contracts: ${hawkes.event_count}`);
               if (parts.length === 0) return null;
               return (
-                <p className="mt-3 text-[11px] text-zinc-600" title="Hawkes flow signal is a statistical proxy over quote/trade intensity, not observed dealer orders. yfinance_proxy mode uses coarser inputs than tradier_rich.">
-                  Flow proxy ({parts.join(' • ')}) — statistical estimate, not observed dealer orders.
+                <p className="mt-3 text-[11px] text-zinc-400" title="This proxy scores positive volume/open-interest changes between consecutive options-chain snapshots. Confidence is an uncalibrated heuristic. Changed contracts counts contracts crossing the scoring threshold, not trades or dealer orders.">
+                  Flow proxy ({parts.join(' • ')}) — snapshot estimate, not observed dealer orders.
                 </p>
               );
             })()}

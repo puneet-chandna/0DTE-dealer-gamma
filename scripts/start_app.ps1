@@ -4,7 +4,7 @@ $RepoRoot = Split-Path -Parent $PSScriptRoot
 $BackendDir = Join-Path $RepoRoot "backend"
 $FrontendDir = Join-Path $RepoRoot "frontend"
 $BackendPython = Join-Path $BackendDir ".venv\Scripts\python.exe"
-$DefaultDatabaseUrl = "postgresql+asyncpg://odte_user:odte_password@127.0.0.1:55432/odte_gex"
+$DefaultDatabaseUrl = "sqlite+aiosqlite:///./odte_gex.db"
 
 function Get-EnvValue {
     param(
@@ -13,17 +13,11 @@ function Get-EnvValue {
         [string]$DefaultValue = ""
     )
 
-    if (-not (Test-Path $FilePath)) {
-        return $DefaultValue
+    $value = & $BackendPython (Join-Path $PSScriptRoot "read_env.py") $FilePath $Name $DefaultValue
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not read a valid $Name from the environment or $FilePath."
     }
-
-    foreach ($line in Get-Content $FilePath) {
-        if ($line -match "^\s*$Name=(.*)$") {
-            return $Matches[1].Trim()
-        }
-    }
-
-    return $DefaultValue
+    return $value
 }
 
 function Wait-ForPort {
@@ -67,11 +61,11 @@ function Show-WindowsGuidance {
 
     Write-ColorLine ""
     Write-ColorLine "Native Windows note:" Yellow
-    Write-ColorLine "This project's standard local database flow is Linux/WSL/Git Bash with scripts/start_app.sh." Cyan
+    Write-ColorLine "This project's managed local PostgreSQL flow runs on Linux or WSL." Cyan
     Write-ColorLine $Reason Red
     Write-ColorLine ""
     Write-ColorLine "Recommended paths:" Green
-    Write-ColorLine "1. Use WSL or Git Bash and run: ./scripts/start_app.sh" Green
+    Write-ColorLine "1. Use WSL and run: ./scripts/dev.sh (or ./scripts/start_app.sh for separate terminals)" Green
     Write-ColorLine "2. Or install PostgreSQL 17 on Windows, start the server manually, and point backend/.env DATABASE_URL to that running database." Green
     Write-ColorLine ""
     Write-ColorLine "Windows PostgreSQL checklist:" Yellow
@@ -91,45 +85,54 @@ if (-not (Get-Command pnpm -ErrorAction SilentlyContinue)) {
 
 $envFile = Join-Path $BackendDir ".env"
 $databaseUrl = Get-EnvValue -FilePath $envFile -Name "DATABASE_URL" -DefaultValue $DefaultDatabaseUrl
-$normalizedUrl = $databaseUrl -replace '^postgresql\+asyncpg://', 'postgresql://'
-$databaseUri = [System.Uri]$normalizedUrl
-$dbHost = $databaseUri.Host
-$dbPort = if ($databaseUri.Port -gt 0) { $databaseUri.Port } else { 5432 }
+if ($databaseUrl.StartsWith("sqlite+aiosqlite://")) {
+    Write-Host "SQLite database configured. No PostgreSQL server is needed."
+} else {
+    $normalizedUrl = $databaseUrl -replace '^postgresql\+asyncpg://|^postgres://', 'postgresql://'
+    $databaseUri = [System.Uri]$normalizedUrl
+    $dbHost = $databaseUri.Host
+    $dbPort = if ($databaseUri.Port -gt 0) { $databaseUri.Port } else { 5432 }
 
-$isLocalDatabase = $dbHost -eq "localhost" -or $dbHost -eq "127.0.0.1"
-$psqlInstalled = [bool](Get-Command psql -ErrorAction SilentlyContinue)
+    $isLocalDatabase = $dbHost -eq "localhost" -or $dbHost -eq "127.0.0.1"
+    $psqlInstalled = [bool](Get-Command psql -ErrorAction SilentlyContinue)
 
-if ($isLocalDatabase -and -not $psqlInstalled) {
-    Show-WindowsGuidance "PostgreSQL does not appear to be installed on this Windows machine."
-    exit 1
-}
-
-try {
-    Write-Host "Waiting for database at ${dbHost}:${dbPort} ..."
-    Wait-ForPort -HostName $dbHost -Port $dbPort
-} catch {
-    if ($isLocalDatabase) {
-        Show-WindowsGuidance "A local PostgreSQL server is not reachable at ${dbHost}:${dbPort}."
+    if ($isLocalDatabase -and -not $psqlInstalled) {
+        Show-WindowsGuidance "PostgreSQL does not appear to be installed on this Windows machine."
         exit 1
     }
 
-    throw
-}
+    try {
+        Write-Host "Waiting for database at ${dbHost}:${dbPort} ..."
+        Wait-ForPort -HostName $dbHost -Port $dbPort
+    } catch {
+        if ($isLocalDatabase) {
+            Show-WindowsGuidance "A local PostgreSQL server is not reachable at ${dbHost}:${dbPort}."
+            exit 1
+        }
 
-if ($isLocalDatabase) {
-    Write-ColorLine "Local PostgreSQL is reachable. Continuing with backend and frontend startup." Green
-} else {
-    Write-Host "External database configured at ${dbHost}:${dbPort}."
+        throw
+    }
+
+    if ($isLocalDatabase) {
+        Write-ColorLine "Local PostgreSQL is reachable. Continuing with backend and frontend startup." Green
+    } else {
+        Write-Host "External database configured at ${dbHost}:${dbPort}."
+    }
 }
 
 Write-Host "Running backend migrations..."
 Push-Location $BackendDir
-& $BackendPython -m alembic upgrade head
-Pop-Location
+try {
+    & $BackendPython -m alembic upgrade head
+    if ($LASTEXITCODE -ne 0) {
+        throw "Backend migrations failed (exit $LASTEXITCODE). Services were not started."
+    }
+} finally {
+    Pop-Location
+}
 
 $backendCommand = @"
 Set-Location '$BackendDir'
-& '.\.venv\Scripts\python.exe' -m alembic upgrade head
 & '.\.venv\Scripts\python.exe' -m uvicorn app.main:app --reload
 "@
 

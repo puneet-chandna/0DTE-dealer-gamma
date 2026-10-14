@@ -116,6 +116,9 @@ describe('DealerFlowsPage source label', () => {
             put_intensity: 0,
             net_toxicity: 0,
             squeeze_probability: 0,
+            provider_mode: 'tradier_rich',
+            confidence_score: 0,
+            event_count: 0,
           },
           smoothed_net_gex: null,
         },
@@ -126,6 +129,7 @@ describe('DealerFlowsPage source label', () => {
     fireEvent.click(screen.getByRole('button', { name: /flow proxy/i }));
 
     expect(screen.getByText(/order flow momentum is balanced/i)).toBeInTheDocument();
+    expect(screen.getByText(/heuristic confidence: 0%.*changed contracts: 0/i)).toBeInTheDocument();
   });
 
   it('distinguishes balanced but elevated Hawkes intensity from quiet flow', () => {

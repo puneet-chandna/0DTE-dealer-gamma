@@ -86,7 +86,13 @@ odte-dealer-gamma/
 
 - Python 3.12+ (project uses 3.13)
 - Node.js 20+ with pnpm
+- [Bash 5.1+](https://lists.gnu.org/archive/html/info-gnu/2020-12/msg00003.html) for `dev.sh` on Linux, macOS with a current Bash, or WSL
 - Docker & Docker Compose (optional — only needed for the Postgres path)
+
+The commands below use a POSIX environment. Native Windows users should use
+the [PowerShell launcher](#appendix-a-legacy-multi-terminal-startup): Python's
+`os.setsid` process groups are unavailable on Windows, including native Python
+started from Git Bash, so `dev.sh` requires Linux, macOS, or WSL.
 
 ### 1. Clone, Install Dependencies, and Bootstrap Env
 
@@ -180,19 +186,19 @@ docker compose up -d
 
 `./scripts/dev.sh` (above) is the recommended runner. The multi-terminal
 launchers remain as legacy shims (no deletion) and still support the SQLite
-default (no DB terminal for `sqlite:` URLs) and the Postgres flow. You can
+default (no DB terminal for SQLite) and the Postgres flow. You can
 launch the whole app with one command and get separate terminals for:
 - database logs
 - backend logs
 - frontend logs
 
-Linux / Git Bash / WSL:
+Linux / WSL:
 
 ```bash
 ./scripts/start_app.sh
 ```
 
-Linux / Git Bash / WSL stop command:
+Linux / WSL stop command:
 
 ```bash
 ./scripts/stop_app.sh
@@ -201,11 +207,21 @@ Linux / Git Bash / WSL stop command:
 Native Windows PowerShell:
 
 ```powershell
+python -m venv backend\.venv
+.\backend\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
+pnpm --dir frontend install --frozen-lockfile
+if (-not (Test-Path backend\.env)) { Copy-Item backend\.env.example backend\.env }
+if (-not (Test-Path frontend\.env.local)) { Copy-Item frontend\.env.example frontend\.env.local }
 powershell -ExecutionPolicy Bypass -File .\scripts\start_app.ps1
 ```
 
+Keep existing environment files when rerunning setup. The PowerShell launcher
+uses SQLite by default; PostgreSQL is only needed when `DATABASE_URL` selects it.
+Stop native Windows services by closing their terminals or pressing `Ctrl+C`
+in each window.
+
 Behavior:
-- The DB gets its own visible terminal so you can watch logs and stop it with `Ctrl+C`.
+- The project-owned Postgres fallback gets its own visible terminal on Linux/WSL.
 - The backend gets its own terminal and runs `uvicorn --reload`.
 - The frontend gets its own terminal and runs `pnpm dev`.
 - No `tmux` is required.
@@ -214,8 +230,7 @@ Behavior:
 
 Notes:
 - `start_app.sh` supports the local project-owned Postgres fallback on port `55432`.
-- `start_app.ps1` is guidance-first on native Windows. It recommends WSL or Git Bash for the repo-standard local PostgreSQL flow.
-- If PostgreSQL is not installed or not reachable on native Windows, `start_app.ps1` stops and shows colored setup guidance instead of trying to install it automatically.
+- `start_app.ps1` skips PostgreSQL checks for SQLite. For an opted-in local PostgreSQL server, it stops and shows setup guidance if the server is missing or unreachable.
 - If you stop the backend or frontend terminals, the DB can keep running until you stop the DB terminal separately.
 
 ### Appendix B. Manual Setup (No Runner)

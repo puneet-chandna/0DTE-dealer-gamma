@@ -18,7 +18,9 @@ Currently, the API does not require authentication. All endpoints are public.
 
 ### `GET /api/gex/current`
 
-Get current near-real-time (5s poll, provider-delayed) GEX calculation.
+Get the current GEX snapshot. Freshness depends on the selected provider,
+cache state, and any saved-data fallback. REST GEX polling is a client setting
+(30 seconds by default), and automatic polling can be disabled.
 
 **Parameters:**
 
@@ -384,7 +386,8 @@ Get current spot price based on active provider.
 
 ### `WS /ws/gex-stream`
 
-Near-real-time (5s poll, provider-delayed) GEX updates via WebSocket.
+Repeated GEX snapshots via WebSocket. Delivery cadence does not guarantee
+fresh provider quotes.
 
 **Connection:** `ws://localhost:8000/ws/gex-stream`
 
@@ -414,7 +417,11 @@ Near-real-time (5s poll, provider-delayed) GEX updates via WebSocket.
 | `market_status` | Market open/close notification      |
 | `connection`    | Connection established confirmation |
 
-**Update Frequency:** Every 5 seconds during market hours.
+**Update Frequency:** The loop waits up to 5 seconds after each completed
+update; provider fetches can make the interval longer. Incoming client messages
+can end the wait early. Connections continue receiving updates outside market
+hours, with `market_open` reporting the app's market-hours check. Background
+refresh tasks separately pause when that check is closed.
 
 ---
 

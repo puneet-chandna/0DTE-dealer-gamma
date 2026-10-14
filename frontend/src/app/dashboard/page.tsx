@@ -222,7 +222,7 @@ export default function DashboardPage() {
                     {selectedProvider === 'yfinance' && (
                       <span
                         className="rounded bg-amber-900/40 px-1.5 py-0.5 text-[11px] text-amber-300"
-                        title="Yahoo Finance has no SPX options: SPY options are fetched and spot, strikes, bid/ask are scaled ×10 as an SPX approximation. Greeks are computed locally. Quotes are delayed ~15 min."
+                        title="Yahoo Finance has no SPX options: SPY options are fetched and spot, strikes, bid/ask are scaled ×10 as an SPX approximation. Greeks are computed locally. Quote freshness is not guaranteed."
                       >
                         SPX via SPY x10 proxy
                       </span>
@@ -297,10 +297,11 @@ export default function DashboardPage() {
 
             {/* Footer info */}
             <div className="text-center">
-              <p className="text-xs text-zinc-600">
+              <p className="text-xs text-zinc-400">
                 {isRealtime
-                  ? 'Updates every 5s WS / 30s REST during 9:30-16:00 ET; Yahoo delayed, Tradier live • WebSocket'
-                  : 'Updates every 5s WS / 30s REST during 9:30-16:00 ET; Yahoo delayed, Tradier live • REST polling'}
+                  ? 'WebSocket updates (about every 5s)'
+                  : 'REST data (configurable refresh interval, 30s default)'}
+                {' • Provider freshness varies; updates can continue outside market hours.'}
               </p>
             </div>
           </div>
