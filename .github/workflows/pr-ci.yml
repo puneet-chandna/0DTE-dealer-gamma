@@ -2,19 +2,18 @@ name: pr-ci
 
 on:
   pull_request:
-    branches:
-      - main
     types:
       - opened
       - reopened
       - synchronize
       - ready_for_review
+      - edited
   pull_request_review:
     types:
       - submitted
 
 concurrency:
-  group: pr-ci-${{ github.event.pull_request.number || github.ref }}
+  group: pr-ci-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name }}
   cancel-in-progress: true
 
 permissions:
@@ -30,13 +29,12 @@ jobs:
     name: backend-lint
     if: >-
       ${{
-        github.event.pull_request.base.ref == 'main' &&
         (
           (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
           (github.event_name == 'pull_request_review' && github.event.pull_request.draft == false && github.event.review.state == 'approved')
         )
       }}
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-puneet-chandna
     timeout-minutes: 15
     defaults:
       run:
@@ -71,13 +69,12 @@ jobs:
     name: backend-tests
     if: >-
       ${{
-        github.event.pull_request.base.ref == 'main' &&
         (
           (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
           (github.event_name == 'pull_request_review' && github.event.pull_request.draft == false && github.event.review.state == 'approved')
         )
       }}
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-puneet-chandna
     timeout-minutes: 20
     defaults:
       run:
@@ -114,6 +111,7 @@ jobs:
 
       - name: Upload backend test artifacts
         if: always()
+        continue-on-error: true # Optional reports must not replace the test result when storage is full.
         uses: actions/upload-artifact@v4
         with:
           name: backend-test-artifacts
@@ -126,13 +124,12 @@ jobs:
     name: frontend-quality
     if: >-
       ${{
-        github.event.pull_request.base.ref == 'main' &&
         (
           (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
           (github.event_name == 'pull_request_review' && github.event.pull_request.draft == false && github.event.review.state == 'approved')
         )
       }}
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-puneet-chandna
     timeout-minutes: 15
     defaults:
       run:
@@ -169,13 +166,12 @@ jobs:
     name: frontend-tests
     if: >-
       ${{
-        github.event.pull_request.base.ref == 'main' &&
         (
           (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
           (github.event_name == 'pull_request_review' && github.event.pull_request.draft == false && github.event.review.state == 'approved')
         )
       }}
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-puneet-chandna
     timeout-minutes: 20
     defaults:
       run:
@@ -210,6 +206,7 @@ jobs:
 
       - name: Upload frontend coverage artifacts
         if: always()
+        continue-on-error: true # Optional reports must not replace the test result when storage is full.
         uses: actions/upload-artifact@v4
         with:
           name: frontend-coverage-artifacts
@@ -220,13 +217,12 @@ jobs:
     name: frontend-build
     if: >-
       ${{
-        github.event.pull_request.base.ref == 'main' &&
         (
           (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
           (github.event_name == 'pull_request_review' && github.event.pull_request.draft == false && github.event.review.state == 'approved')
         )
       }}
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-puneet-chandna
     timeout-minutes: 20
     defaults:
       run:

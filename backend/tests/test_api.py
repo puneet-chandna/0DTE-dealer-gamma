@@ -528,6 +528,7 @@ class TestDataEndpoints:
         assert data["status"] in ["open", "pre_market", "after_hours", "closed_weekend"]
         assert "current_time_et" in data
 
+    @pytest.mark.integration
     def test_options_chain_endpoint(self):
         """Options chain should return data via YFinance (no API key required)."""
         response = client.get("/api/data/options-chain")

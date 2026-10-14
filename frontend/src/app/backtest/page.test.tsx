@@ -3,6 +3,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 
 import BacktestPage from './page';
+import type { useVectorbtBacktest } from '@/hooks/useAnalyticsData';
 import type { DataProviderInfo, VectorBTBacktestResult } from '@/types';
 
 const sampleResult: VectorBTBacktestResult = {
@@ -31,8 +32,11 @@ const { mockUseUIStore, mockUseVectorbtBacktest } = vi.hoisted(() => ({
     selectedProvider: 'yfinance',
     availableProviders: [] as DataProviderInfo[],
   })),
-  mockUseVectorbtBacktest: vi.fn(() => ({
-    data: null,
+  mockUseVectorbtBacktest: vi.fn<
+    (params: Parameters<typeof useVectorbtBacktest>[0], enabled: boolean) =>
+      Pick<ReturnType<typeof useVectorbtBacktest>, 'data' | 'isLoading' | 'error' | 'isFetching'>
+  >(() => ({
+    data: undefined,
     isLoading: false,
     error: null,
     isFetching: false,
@@ -57,7 +61,7 @@ vi.mock('@/components/charts', () => ({
 }));
 
 vi.mock('@/hooks/useAnalyticsData', () => ({
-  useVectorbtBacktest: (params: unknown, enabled: boolean) =>
+  useVectorbtBacktest: (params: Parameters<typeof useVectorbtBacktest>[0], enabled: boolean) =>
     mockUseVectorbtBacktest(params, enabled),
 }));
 
@@ -82,7 +86,7 @@ describe('BacktestPage reviewer demo validation', () => {
           params?.start_date === '2025-01-01' &&
           params?.end_date === '2025-03-01'
             ? sampleResult
-            : null,
+            : undefined,
         isLoading: false,
         error: null,
         isFetching: false,

@@ -4,7 +4,7 @@
 
 'use client';
 
-import { memo, useEffect, useState } from 'react';
+import { memo, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -30,6 +30,8 @@ const pageLinks = [
   { href: '/dealer-flows', label: 'Dealer Flows', icon: Waves },
   { href: '/backtest', label: 'Backtest', icon: FlaskConical },
 ] as const;
+
+const subscribeToHydration = () => () => {};
 
 interface DashboardHeaderProps {
   isConnected?: boolean;
@@ -61,14 +63,10 @@ function DashboardHeaderComponent({
     toggleDemoMode,
   } =
     useUIStore();
-  const [hasMounted, setHasMounted] = useState(false);
+  const hasMounted = useSyncExternalStore(subscribeToHydration, () => true, () => false);
 
   const isConnected = connectionState === 'connected';
   const showDarkModeEnabled = hasMounted && isDarkMode;
-
-  useEffect(() => {
-    setHasMounted(true);
-  }, []);
 
   return (
     <header className="border-b border-zinc-800 bg-zinc-950/80 backdrop-blur-sm">
