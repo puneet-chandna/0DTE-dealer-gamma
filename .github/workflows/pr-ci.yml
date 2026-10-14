@@ -111,6 +111,7 @@ jobs:
 
       - name: Upload backend test artifacts
         if: always()
+        continue-on-error: true # Optional reports must not replace the test result when storage is full.
         uses: actions/upload-artifact@v4
         with:
           name: backend-test-artifacts
@@ -205,6 +206,7 @@ jobs:
 
       - name: Upload frontend coverage artifacts
         if: always()
+        continue-on-error: true # Optional reports must not replace the test result when storage is full.
         uses: actions/upload-artifact@v4
         with:
           name: frontend-coverage-artifacts
