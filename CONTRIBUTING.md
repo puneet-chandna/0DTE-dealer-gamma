@@ -27,6 +27,13 @@ agreement (CLA) is required.
 - keep code and documentation changes easy to review
 - add or update tests when your change affects behavior
 - explain any tradeoffs or limitations in the pull request description
+- keep Greeks calculations vectorized with NumPy
+- follow the existing React Query server-data caching and Zustand UI-state patterns
+- keep strict TypeScript typing and do not introduce `any`
+- use `America/New_York` for SPX market dates and sessions, preserving timezone-aware timestamps
+
+See [ARCHITECTURE.md](docs/ARCHITECTURE.md) for component and calculation details,
+and [LOCAL_DEVELOPMENT.md](docs/LOCAL_DEVELOPMENT.md) for setup and development checks.
 
 ## License Compatibility
 

@@ -1,341 +1,190 @@
-<img
-  src="assets/0dte-poster-brutalist.svg"
-  alt="0DTE Dealer GEX Monitor brutalist poster"
-  style="width: 100%; max-width: 900px; height: auto;"
-/>
+<p align="center">
+  <img src="assets/0dte-poster-brutalist.svg" alt="0DTE Dealer GEX Monitor: illustrative gamma exposure chart" width="900" />
+</p>
+
 # 0DTE Dealer Gamma Exposure (GEX) Monitor
 
-Near-real-time (5s poll, provider-delayed) dashboard to monitor Dealer Gamma Exposure for 0DTE (zero-days-to-expiration) options on SPX.
+<p align="center">
+  <strong>Read the options landscape. Explore the session.</strong><br />
+  Net GEX, zero gamma, strike exposure, and historical replay for SPX 0DTE options.
+</p>
 
-**Goal:** Identify the "Zero Gamma Level" and "Net GEX" to predict intraday volatility regimes.
+<p align="center">
+  <code>SPX · 0DTE</code>&nbsp;&nbsp;
+  <code>SQLite by default</code>&nbsp;&nbsp;
+  <a href="LICENSE"><strong>Source-available</strong></a>
+</p>
 
-> Source-available under `PolyForm Noncommercial 1.0.0`. Personal study, research,
-> and other noncommercial use are allowed under the license. Commercial use requires
-> separate written permission from the copyright holders.
-
-
+<p align="center">
+  <a href="#features">Features</a> &nbsp;·&nbsp;
+  <a href="#quick-start"><strong>Quick start</strong></a> &nbsp;·&nbsp;
+  <a href="#configuration">Configuration</a> &nbsp;·&nbsp;
+  <a href="#tests">Tests</a> &nbsp;·&nbsp;
+  <a href="#documentation">Guides</a>
+</p>
 
 ---
 
-## Table of Contents
-- [Features](#features)
-- [Quick Start](#quick-start)
-- [Key Concepts](#key-concepts)
-- [Tests](#tests)
-- [Documentation](#documentation)
-- [Deployment](#deployment)
-- [Architecture Rules](#architecture-rules)
-- [License and Commercial Use](#license-and-commercial-use)
-- [Contributing](#contributing)
-- [Security](#security)
-
 ## Features
 
-- **Near-real-time GEX Calculation** - Vectorized Black-Scholes Greeks (~0.5ms p50 for 1000 contracts, vectorized NumPy — see `docs/BENCHMARKS.md`)
-- **Zero Gamma Level** - Linear interpolation where cumulative GEX crosses zero
-- **Market Regime Detection** - Short gamma (🔴) / Long gamma (🟢) / Neutral (🟡)
-- **WebSocket Streaming** - Live updates every 5 seconds during market hours
-- **Interactive Charts** - Strike-by-strike GEX visualization with Recharts
-- **Historical Analysis** - Backtesting and volatility analysis tools
-- **Persistent Historical Storage** - Provider-separated SQLite/Postgres storage for GEX snapshots, IV surfaces, and replay sessions
-- **Provider-Based Data Layer** - Configurable market-data providers with a free local-development path
+<table width="100%">
+  <thead>
+    <tr>
+      <th align="left" scope="col">View</th>
+      <th align="left" scope="col">What you can explore</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Gamma dashboard</strong></td>
+      <td>Net GEX, zero gamma, exposure by strike, intraday history, and regime labels.</td>
+    </tr>
+    <tr>
+      <td><strong>Analytics</strong></td>
+      <td>IV surfaces, skew, and technical indicators alongside spot price.</td>
+    </tr>
+    <tr>
+      <td><strong>Flow scenarios</strong></td>
+      <td>Estimated hedging flows and scenario simulations.</td>
+    </tr>
+    <tr>
+      <td><strong>Session replay</strong></td>
+      <td>Captured sessions and historical backtests, with history separated by provider.</td>
+    </tr>
+  </tbody>
+</table>
+
+> [!NOTE]
+> **Model-based signals. Provider-dependent data.** Yahoo Finance uses SPY options scaled by 10 as an SPX approximation. Configured Tradier can fetch SPX/SPXW options directly. Quote freshness varies by provider and API environment.
+
+<details>
+<summary><strong>Update timing and data interpretation</strong></summary>
+
+WebSocket updates have a nominal five-second interval; fetch time and client
+messages can change it. Current GEX REST polling is configurable (30 seconds by
+default). These updates can continue outside market hours. Polling more often
+does not guarantee fresher quotes.
+
+Read the [dashboard guide](docs/UNDERSTANDING_GEX_DASHBOARD.md#data-delays-and-the-spy-proxy)
+for provider caveats and interpretation limits.
+
+</details>
 
 ---
 
 ## Quick Start
 
-### Prerequisites
+**Prerequisites:** Python **3.12+**, Node.js **20+** with **pnpm**, and
+[Bash **5.1+**](https://lists.gnu.org/archive/html/info-gnu/2020-12/msg00003.html)
+on Linux, macOS with a current Bash, or WSL.
 
-- Python 3.12+ (project uses 3.13)
-- Node.js 20+ with pnpm
-- [Bash 5.1+](https://lists.gnu.org/archive/html/info-gnu/2020-12/msg00003.html) for `dev.sh` on Linux, macOS with a current Bash, or WSL
-- Docker & Docker Compose (optional — only needed for the Postgres path)
+**Native Windows?** Use the [PowerShell setup](docs/LOCAL_DEVELOPMENT.md#native-windows-powershell).
+The Bash runner requires POSIX process groups, which native Windows Python does
+not provide, including when started from Git Bash.
 
-The commands below use a POSIX environment. Native Windows users should use
-the [PowerShell launcher](#appendix-a-legacy-multi-terminal-startup): Python's
-`os.setsid` process groups are unavailable on Windows, including native Python
-started from Git Bash, so `dev.sh` requires Linux, macOS, or WSL.
-
-### 1. Clone, Install Dependencies, and Bootstrap Env
+### 1. Clone
 
 ```bash
-git clone https://github.com/<your-org>/odte-dealer-gamma.git
-cd odte-dealer-gamma
+git clone https://github.com/puneet-chandna/0DTE-dealer-gamma.git
+cd 0DTE-dealer-gamma
+```
 
+### 2. Install and configure
+
+```bash
 python3 -m venv backend/.venv
 backend/.venv/bin/python -m pip install -r backend/requirements.txt
 pnpm --dir frontend install --frozen-lockfile
-
-# Idempotent: copies the templates into place ONLY if missing
-# and preserves your existing database configuration.
 ./scripts/setup_env.sh
-# Explicit modes replace only DATABASE_URL in backend/.env:
-# ./scripts/setup_env.sh --sqlite          # zero-setup SQLite
-# ./scripts/setup_env.sh --postgres-local  # project-owned Postgres on 127.0.0.1:55432
-# ./scripts/setup_env.sh --postgres-docker # Docker Compose Postgres on localhost:5432
-
-# Optional: if you want to use Tradier instead of the default provider,
-# set TRADIER_API_KEY in backend/.env
 ```
 
-The defaults run on SQLite — no Docker or database setup required.
-`backend/.env` ships with `DATABASE_URL=sqlite+aiosqlite:///./odte_gex.db`
-(a file created inside `backend/` on first run). To use Postgres instead,
-set `DATABASE_URL` to a Postgres connection string (see
-[Local Database Defaults](#local-database-defaults)).
-
-`setup_env.sh` also validates `DATABASE_URL` plus `NEXT_PUBLIC_API_URL` /
-`NEXT_PUBLIC_WS_URL` (fails fast with a clear message) and removes the stale
-`POLYGON_API_KEY` entry from the root `.env` if present.
-
-The canonical setup templates are [backend/.env.example](backend/.env.example)
-and [frontend/.env.example](frontend/.env.example). The root [.env.example](.env.example)
-is a combined reference for local development, but the backend/frontend templates should
-be treated as the primary setup docs.
-
-### Environment Variables (minimum)
-
-Backend (`backend/.env`):
-- `DATABASE_URL` (SQLite by default; set a Postgres connection string to opt in)
-- `DATA_PROVIDER` (`yfinance` by default, `tradier` if configured)
-- `TRADIER_API_KEY` (only required when using `tradier`)
-- `HOST`, `PORT`
-- `ENVIRONMENT` (development | staging | production)
-- `CORS_ORIGINS` (JSON array string)
-
-Frontend (`frontend/.env.local`):
-- `NEXT_PUBLIC_API_URL=http://localhost:8000`
-- `NEXT_PUBLIC_WS_URL=ws://localhost:8000/ws`
-
-### 2. Run Everything (SQLite Default — No Docker)
+### 3. Start the session
 
 ```bash
 ./scripts/dev.sh
 ```
 
-This single-process runner applies migrations (`alembic upgrade head`), then
-starts the backend (`uvicorn app.main:app --reload`) and the frontend
-(`pnpm dev`) in separate process groups managed by the runner:
+> [!TIP]
+> **SQLite is ready by default.** The runner applies migrations and starts both services. The database file is `backend/odte_gex.db`; no database server or Docker setup is required.
 
-- SQLite file: `backend/odte_gex.db` (created on first run). No database
-  terminal, no TCP wait, no Docker.
-- One PID file: `.local-run/dev.pid`. One log file: `.local-run/dev.log`
-  with `[backend]` / `[frontend]` prefixes per line.
-- Stop everything with `Ctrl+C` (INT/TERM shuts down backend, frontend, and
-  their descendants — no orphans).
-- API: http://localhost:8000/docs — Dashboard: http://localhost:3000
+**Open:** [Dashboard → localhost:3000](http://localhost:3000) ·
+[API docs → localhost:8000/docs](http://localhost:8000/docs)
 
-### 3. Postgres Opt-In (Optional)
-
-Only if you want Postgres instead of SQLite. Pick one server, point
-`DATABASE_URL` at it (via `./scripts/setup_env.sh --postgres-local` or
-`--postgres-docker`), then run `./scripts/dev.sh` as usual — the runner
-preserves the Postgres flow (ensures the local server / waits for the
-external one) before migrating and starting the services.
-
-```txt
-DATABASE_URL=postgresql+asyncpg://odte_user:your_secure_password_here@localhost:5432/odte_gex
-DATABASE_URL=postgresql+asyncpg://odte_user:odte_password@127.0.0.1:55432/odte_gex
-```
-
-```bash
-docker compose up -d
-# ... or, without Docker: ./scripts/setup_local_postgres.sh
-./scripts/dev.sh
-```
-
-### Appendix A. Legacy Multi-Terminal Startup
-
-`./scripts/dev.sh` (above) is the recommended runner. The multi-terminal
-launchers remain as legacy shims (no deletion) and still support the SQLite
-default (no DB terminal for SQLite) and the Postgres flow. You can
-launch the whole app with one command and get separate terminals for:
-- database logs
-- backend logs
-- frontend logs
-
-Linux / WSL:
-
-```bash
-./scripts/start_app.sh
-```
-
-Linux / WSL stop command:
-
-```bash
-./scripts/stop_app.sh
-```
-
-Native Windows PowerShell:
-
-```powershell
-python -m venv backend\.venv
-.\backend\.venv\Scripts\python.exe -m pip install -r backend\requirements.txt
-pnpm --dir frontend install --frozen-lockfile
-if (-not (Test-Path backend\.env)) { Copy-Item backend\.env.example backend\.env }
-if (-not (Test-Path frontend\.env.local)) { Copy-Item frontend\.env.example frontend\.env.local }
-powershell -ExecutionPolicy Bypass -File .\scripts\start_app.ps1
-```
-
-Keep existing environment files when rerunning setup. The PowerShell launcher
-uses SQLite by default; PostgreSQL is only needed when `DATABASE_URL` selects it.
-Stop native Windows services by closing their terminals or pressing `Ctrl+C`
-in each window.
-
-Behavior:
-- The project-owned Postgres fallback gets its own visible terminal on Linux/WSL.
-- The backend gets its own terminal and runs `uvicorn --reload`.
-- The frontend gets its own terminal and runs `pnpm dev`.
-- No `tmux` is required.
-- `stop_app.sh` stops frontend first, backend second, and local PostgreSQL last.
-- The local DB is stopped through `pg_ctl`, not by force-killing database processes.
-
-Notes:
-- `start_app.sh` supports the local project-owned Postgres fallback on port `55432`.
-- `start_app.ps1` skips PostgreSQL checks for SQLite. For an opted-in local PostgreSQL server, it stops and shows setup guidance if the server is missing or unreachable.
-- If you stop the backend or frontend terminals, the DB can keep running until you stop the DB terminal separately.
-
-### Appendix B. Manual Setup (No Runner)
-
-```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate  # Linux/Mac
-pip install -r requirements.txt
-alembic upgrade head
-uvicorn app.main:app --reload
-```
-
-API available at: http://localhost:8000/docs
-
-```bash
-cd frontend
-pnpm install
-pnpm dev
-```
-
-Dashboard available at: http://localhost:3000
-
-### Local Database Defaults
-
-The repo defaults to SQLite for zero-setup local runs. With no `DATABASE_URL`
-override, the backend uses:
-
-```txt
-sqlite+aiosqlite:///./odte_gex.db
-```
-
-(a file created inside `backend/` on first run, i.e. `backend/odte_gex.db`).
-That means the normal local flow (`./scripts/setup_env.sh`, then
-`./scripts/dev.sh`) needs no Docker and no DB terminal at all.
-
-To use Postgres instead (Docker or the local fallback), see
-[Postgres Opt-In](#3-postgres-opt-in-optional) for the `DATABASE_URL` values.
+**Logs:** `.local-run/dev.log` &nbsp;·&nbsp; **Stop:** <kbd>Ctrl</kbd> + <kbd>C</kbd>
+shuts down both services and their child processes.
 
 ---
 
-## Key Concepts
+## Configuration
 
-### GEX Formula
+Setup creates `backend/.env` and `frontend/.env.local` only when missing and
+preserves existing settings.
 
-Black-Scholes Gamma (Γ) is computed with a dividend yield suitable for SPX (approximately `q ≈ 0.015`).
+**Configuration references:** [Backend template](backend/.env.example) ·
+[Frontend template](frontend/.env.example)
 
-For each option contract `i`, the raw (magnitude) gamma exposure is:
+<details>
+<summary><strong>Enable Tradier</strong></summary>
 
-```txt
-raw_gex_i = OI_i × Γ_i × 100 × S²
-```
+Yahoo Finance is the default provider. Set `TRADIER_API_KEY` in `backend/.env`,
+restart the backend, and choose Tradier in the provider selector.
+Set `DATA_PROVIDER=tradier` to make it the backend default.
 
-The trader-facing Net GEX values in this project are normalized to a 1% underlying
-move and signed by option type:
+</details>
 
-```txt
-gex_i = raw_gex_i × 0.01
-```
+<details>
+<summary><strong>PostgreSQL, environment overrides, and alternate startup</strong></summary>
 
-- Calls contribute **positive** GEX
-- Puts contribute **negative** GEX
+Use the [local development guide](docs/LOCAL_DEVELOPMENT.md) for PostgreSQL,
+environment overrides, native Windows, and separate terminals. For hosted setup,
+follow the [deployment guide](docs/DEPLOYMENT.md).
 
-| Symbol | Description                               |
-| ------ | ----------------------------------------- |
-| OI     | Open Interest                             |
-| Γ      | Black-Scholes Gamma (with dividend yield) |
-| 100    | Contract multiplier                       |
-| S      | Spot price                                |
-| 0.01   | Convert to dollar gamma per 1% move       |
-
-### Dealer Positioning
-
-| Option Type | GEX Sign     |
-| ----------- | ------------ |
-| Calls       | **Positive** |
-| Puts        | **Negative** |
-
-**Net GEX = Σ(Call GEX) + Σ(Put GEX)**.
-
-### Market Regimes
-
-| Regime         | Net GEX | Implication              |
-| -------------- | ------- | ------------------------ |
-| 🔴 Short Gamma | < -$1B  | High volatility expected |
-| 🟢 Long Gamma  | > +$1B  | Low volatility expected  |
-| 🟡 Neutral     | ±$1B    | Normal conditions        |
+</details>
 
 ---
 
 ## Tests
 
+<details>
+<summary><strong>Run lint, tests, and type checks</strong></summary>
+
+Run these commands from the repository root after installing dependencies:
+
 ```bash
-# Backend
-cd backend && pytest -q
-
-# Frontend
-cd frontend && pnpm test:run
-
-# Type checking
-cd backend && mypy app
-cd frontend && pnpm tsc --noEmit
+(cd backend && .venv/bin/python -m ruff check .)
+(cd backend && .venv/bin/python -m pytest -q -m "not integration")
+pnpm --dir frontend lint
+pnpm --dir frontend test:run
+pnpm --dir frontend exec tsc --noEmit
 ```
 
-Both default test commands now print a coverage summary at the end of the run.
+The backend and frontend test commands print coverage summaries. Live provider
+checks use the backend `integration` marker and are separate from the deterministic
+suite. See [development checks](docs/LOCAL_DEVELOPMENT.md#development-checks) for
+additional commands.
+
+</details>
 
 ---
 
 ## Documentation
 
-| Document                                | Description                         |
-| --------------------------------------- | ----------------------------------- |
-| [UNDERSTANDING_GEX_DASHBOARD.md](docs/UNDERSTANDING_GEX_DASHBOARD.md) | Beginner guide for traders and non-quant reviewers |
-| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, data flow diagrams   |
-| [API.md](docs/API.md)                   | Complete REST & WebSocket reference |
-| [DEPLOYMENT.md](docs/DEPLOYMENT.md)     | Railway + Vercel deployment guide   |
-| [PROVIDER_INTEGRATION_PLAN.md](docs/PROVIDER_INTEGRATION_PLAN.md) | Completed provider work and prioritized remaining milestones |
-| [bugs.md](docs/bugs.md)                 | Recorded bug fixes and planned shared database rollout |
-
----
-
-## Deployment
-
-Deploy to Vercel (frontend) and Railway (backend):
-
-```bash
-# See detailed guide
-docs/DEPLOYMENT.md
-```
-
-**Quick Links:**
-
-- Backend: Railway auto-deploys from `backend/` folder
-- Frontend: Vercel auto-deploys from `frontend/` folder
-
----
-
-## Architecture Rules
-
-1. **Vectorization** - All Greeks calculations use NumPy (no Python loops)
-2. **State Management** - Server state in React Query, UI state in Zustand
-3. **Type Safety** - Strict TypeScript, no `any` types
-4. **Timezones** - All SPX data normalized to Eastern Time (ET)
+<table width="100%">
+  <thead>
+    <tr>
+      <th align="left" scope="col">When you want to…</th>
+      <th align="left" scope="col">Open</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Run locally</strong></td><td><a href="docs/LOCAL_DEVELOPMENT.md">Local development</a> · <a href="docs/LOCAL_DEVELOPMENT.md#native-windows-powershell">Windows setup</a></td></tr>
+    <tr><td><strong>Read the signals</strong></td><td><a href="docs/UNDERSTANDING_GEX_DASHBOARD.md">Dashboard guide</a> · <a href="docs/ARCHITECTURE.md#gex-calculation-logic">GEX calculations</a></td></tr>
+    <tr><td><strong>Explore the system</strong></td><td><a href="docs/ARCHITECTURE.md">Architecture</a> · <a href="docs/POSTGRES_SCHEMA.md">Database schema</a></td></tr>
+    <tr><td><strong>Integrate or deploy</strong></td><td><a href="docs/API.md">API reference</a> · <a href="docs/DEPLOYMENT.md">Deployment guide</a></td></tr>
+    <tr><td><strong>Check the evidence</strong></td><td><a href="docs/BENCHMARKS.md">Benchmarks</a> · <a href="docs/bugs.md">Bug tracker</a></td></tr>
+    <tr><td><strong>Plan or contribute</strong></td><td><a href="docs/PROVIDER_INTEGRATION_PLAN.md">Remaining-work plan</a> · <a href="CONTRIBUTING.md">Contribution guide</a></td></tr>
+  </tbody>
+</table>
 
 ---
 

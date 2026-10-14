@@ -119,7 +119,7 @@ sequenceDiagram
 ### Server State (React Query)
 
 - All API responses cached and managed by React Query
-- Automatic polling every 5 seconds during market hours
+- Current GEX polling is configurable (30 seconds by default); regime polling defaults to 10 seconds. These frontend timers can continue outside market hours.
 - Stale-while-revalidate pattern for instant UI
 
 ### Client State (Zustand)
@@ -143,36 +143,51 @@ interface UIState {
 
 ### Formula
 
-```
-GEX_i = OI_i × Γ_i × 100 × S²
+```txt
+raw_gex_i = OI_i × Γ_i × 100 × S²
+gex_i = raw_gex_i × 0.01
 ```
 
-Where:
+The calculator reports exposure for a 1% underlying move. Its Black-Scholes
+gamma calculation uses an SPX dividend-yield default of `q = 0.015` from
+[constants.py](../backend/app/core/constants.py).
 
 - `OI` = Open Interest
 - `Γ` = Black-Scholes Gamma (with dividend yield)
 - `100` = Contract multiplier
 - `S` = Spot price
+- `0.01` = Conversion to a 1% underlying move
 
-### Dealer Sign Convention
+### Sign Convention
 
-| Customer Action | Dealer Position | GEX Sign     |
-| --------------- | --------------- | ------------ |
-| Buy Calls       | Short Calls     | **Negative** |
-| Buy Puts        | Sell Puts       | **Positive** |
+The trader-facing baseline in [gex_calculator.py](../backend/app/core/gex_calculator.py)
+assigns positive exposure to calls and negative exposure to puts:
+
+```txt
+Net GEX = sum(Call GEX) + sum(Put GEX)
+```
+
+This is the application's modeling convention, not a measurement of actual
+dealer positions.
 
 ### Zero Gamma Level
 
-Linear interpolation where cumulative GEX crosses zero:
+The calculator sorts strikes, accumulates signed GEX, and interpolates the first
+zero crossing. An exact zero is returned directly. When the curve has no crossing,
+it returns a boundary strike with `zero_gamma_crossing_found=false` and an
+`above_range` or `below_range` relation. Empty or single-strike inputs fall back to
+spot with no crossing, so a displayed fallback is not a verified in-range level.
 
-```python
-# Simplified algorithm
-for i in range(len(strikes) - 1):
-    if cum_gex[i] * cum_gex[i+1] < 0:  # Sign change
-        # Linear interpolation between strikes
-        zero_gamma = strikes[i] + (strikes[i+1] - strikes[i]) *
-                     abs(cum_gex[i]) / (abs(cum_gex[i]) + abs(cum_gex[i+1]))
-```
+### Market Regimes
+
+The default regime threshold is $1 billion of net GEX:
+
+- Below −$1 billion: short gamma.
+- Above +$1 billion: long gamma.
+- Between those bounds, including the endpoints: neutral.
+
+These labels summarize the computed exposure. See the
+[dashboard guide](UNDERSTANDING_GEX_DASHBOARD.md) for interpretation and its limits.
 
 ---
 

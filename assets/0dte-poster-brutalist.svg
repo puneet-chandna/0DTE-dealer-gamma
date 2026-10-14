@@ -1,4 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 400" width="900" height="400">
+<title>0DTE Dealer GEX Monitor</title>
+<desc>Illustrative signed gamma exposure by strike, with an example zero gamma marker. The values are schematic, not live market data.</desc>
 <defs>
   <linearGradient id="posG" x1="0" y1="0" x2="0" y2="1">
     <stop offset="0%"   stop-color="#111"/>
@@ -18,8 +20,8 @@
 
 <!-- Title block - brutal sans-like via letter-spacing and weight -->
 <rect x="0" y="0" width="900" height="76" fill="#111"/>
-<text x="22" y="30" font-family="'Arial Black',Arial,sans-serif" font-size="9"  fill="#f7f5f0" letter-spacing="6">FINAL YEAR QUANT PROJECT · VIT CHENNAI</text>
-<text x="22" y="64" font-family="'Arial Black',Arial,sans-serif" font-size="33" fill="#f7f5f0" letter-spacing="-1">0DTE DEALER GEX MONITOR</text>
+<text x="22" y="23" font-family="'Arial Black',Arial,sans-serif" font-size="9"  fill="#f7f5f0" letter-spacing="6">FINAL YEAR QUANT PROJECT · VIT CHENNAI</text>
+<text x="22" y="64" font-family="'Arial Black',Arial,sans-serif" font-size="38" fill="#f7f5f0" letter-spacing="-1">0DTE DEALER GEX MONITOR</text>
 
 <!-- Accent stripe -->
 <rect x="0" y="76" width="900" height="5" fill="#e8c000"/>
@@ -30,9 +32,9 @@
 <text x="64" y="96"  font-family="'Courier New',monospace" font-size="9" fill="#111">NET GEX +$2.4B  ·</text>
 <text x="194" y="96" font-family="'Courier New',monospace" font-size="9" fill="#111">REGIME: LONG GAMMA  ·</text>
 <text x="358" y="96" font-family="'Courier New',monospace" font-size="9" fill="#111">ZERO Γ = 5902  ·</text>
-<text x="480" y="96" font-family="'Courier New',monospace" font-size="9" fill="#111">14:32:05 ET  ·</text>
-<text x="570" y="96" font-family="'Courier New',monospace" font-size="9" fill="#111">UPDATE 5s  ·</text>
-<text x="650" y="96" font-family="'Courier New',monospace" font-size="9" fill="#111">322 TESTS PASS</text>
+<text x="480" y="96" font-family="'Courier New',monospace" font-size="9" fill="#111">ILLUSTRATIVE  ·</text>
+<text x="570" y="96" font-family="'Courier New',monospace" font-size="9" fill="#111">MODEL VIEW  ·</text>
+<text x="650" y="96" font-family="'Courier New',monospace" font-size="9" fill="#111">YFINANCE / TRADIER</text>
 <!-- Animate ticker text scrolling illusion with opacity -->
 <text x="860" y="96" font-family="'Courier New',monospace" font-size="9" fill="#111">▶</text>
 
@@ -59,8 +61,6 @@
 <rect x="128" y="186" width="44" height="34"  fill="url(#posG)"/>
 <rect x="180" y="168" width="44" height="52"  fill="url(#posG)"/>
 <rect x="232" y="142" width="44" height="78"  fill="url(#posG)">
-  <animate attributeName="y"      values="142;139;142;145;142" dur="3s" repeatCount="indefinite"/>
-  <animate attributeName="height" values="78;81;78;75;78"      dur="3s" repeatCount="indefinite"/>
 </rect>
 <rect x="284" y="156" width="44" height="64"  fill="url(#posG)"/>
 <rect x="336" y="174" width="44" height="46"  fill="url(#posG)"/>
@@ -75,7 +75,6 @@
 <rect x="552" y="220" width="44" height="38"  fill="url(#negG)"/>
 <rect x="604" y="220" width="44" height="66"  fill="url(#negG)"/>
 <rect x="656" y="220" width="44" height="90"  fill="url(#negG)">
-  <animate attributeName="height" values="90;94;90;86;90" dur="3.4s" repeatCount="indefinite"/>
 </rect>
 <rect x="708" y="220" width="44" height="62"  fill="url(#negG)"/>
 <rect x="760" y="220" width="44" height="36"  fill="url(#negG)"/>
@@ -126,13 +125,12 @@
 <!-- Bottom row: tech + formula -->
 <rect x="0" y="360" width="900" height="40" fill="#111"/>
 <line x1="0" y1="360" x2="900" y2="360" stroke="#e8c000" stroke-width="3"/>
-<text x="18" y="376" font-family="'Courier New',monospace" font-size="8.5" fill="#e8c000">GEX = OI × Γ × 100 × S²</text>
-<text x="18" y="392" font-family="'Courier New',monospace" font-size="7"   fill="#888">Python 3.13 · FastAPI · Next.js 16 · TypeScript · NumPy (vectorized) · PostgreSQL · Docker · Polygon.io</text>
+<text x="18" y="376" font-family="'Courier New',monospace" font-size="8.5" fill="#e8c000">GEX / 1% MOVE = OI × Γ × 100 × S² × 0.01</text>
+<text x="18" y="392" font-family="'Courier New',monospace" font-size="7"   fill="#888">NET GEX · ZERO GAMMA · STRIKE EXPOSURE · SESSION REPLAY</text>
 <text x="882" y="392" font-family="'Courier New',monospace" font-size="7"  fill="#555" text-anchor="end">puneet-chandna</text>
 
 <!-- Live blink -->
 <circle cx="874" cy="374" r="5" fill="#e8c000">
-  <animate attributeName="opacity" values="1;0;1" dur="1s" repeatCount="indefinite"/>
 </circle>
-<text x="864" y="378" font-family="'Courier New',monospace" font-size="7" fill="#e8c000" text-anchor="end">LIVE</text>
+<text x="864" y="378" font-family="'Courier New',monospace" font-size="7" fill="#e8c000" text-anchor="end">ILLUSTRATION</text>
 </svg>
