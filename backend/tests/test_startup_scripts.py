@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import os
 import shutil
 import signal
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -227,7 +229,7 @@ def test_dev_runner_is_single_process_without_terminal_dependency() -> None:
 def test_sqlite_url_detection_covers_sqlalchemy_driver_urls() -> None:
     # Regression guard: the default URL is `sqlite+aiosqlite:///...`, which
     # does NOT match the glob `sqlite:*` (the `+` follows `sqlite` directly).
-    for script_name in ("dev.sh", "start_app.sh", "setup_env.sh"):
+    for script_name in ("dev.sh", "start_app.sh"):
         script_text = (SCRIPTS_DIR / script_name).read_text(encoding="utf-8")
         assert "== sqlite*" in script_text
         assert "== sqlite:*" not in script_text
@@ -246,6 +248,7 @@ def _sandbox_env(sandbox: Path, stub_bin: Path) -> dict[str, str]:
         "ODTE_BACKEND_VENV_BIN": str(sandbox / "backend" / ".venv" / "bin"),
         "ODTE_RUNTIME_DIR": str(sandbox / ".local-run"),
         "ODTE_DEV_SKIP_WAIT": "1",
+        "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
     }
 
 
@@ -260,6 +263,7 @@ def test_dev_runner_starts_and_stops_without_terminal_binaries(tmp_path: Path) -
 
     (sandbox / "scripts").mkdir()
     shutil.copy2(SCRIPTS_DIR / "dev.sh", sandbox / "scripts" / "dev.sh")
+    shutil.copy2(SCRIPTS_DIR / "read_env.py", sandbox / "scripts" / "read_env.py")
     (sandbox / "backend" / ".env").write_text(
         "DATABASE_URL=sqlite+aiosqlite:///./odte_gex.db\n", encoding="utf-8"
     )
@@ -269,7 +273,7 @@ def test_dev_runner_starts_and_stops_without_terminal_binaries(tmp_path: Path) -
         venv_bin / "alembic",
         "#!/usr/bin/env bash\necho 'stub alembic upgrade head'\nexit 0\n",
     )
-    _write_executable(venv_bin / "python", "#!/usr/bin/env bash\nexit 0\n")
+    (venv_bin / "python").symlink_to(sys.executable)
     _write_executable(
         venv_bin / "uvicorn",
         "#!/usr/bin/env bash\n"
@@ -289,7 +293,7 @@ def test_dev_runner_starts_and_stops_without_terminal_binaries(tmp_path: Path) -
 
     # Closed-world PATH: symlink only the tools dev.sh needs, proving the
     # runner works with no terminal emulator (or any other extra) on PATH.
-    for tool in ("bash", "python3", "awk", "sed", "mkdir", "rm", "sleep", "pgrep", "pkill"):
+    for tool in ("bash", "python3", "dirname", "sed", "mkdir", "rm", "sleep"):
         source = shutil.which(tool)
         assert source is not None, f"test prerequisite missing: {tool}"
         target = stub_bin / tool
@@ -384,6 +388,9 @@ def _make_setup_env_sandbox(tmp_path: Path) -> Path:
     sandbox = tmp_path / "setup-env-sandbox"
     (sandbox / "backend").mkdir(parents=True)
     (sandbox / "frontend").mkdir(parents=True)
+    venv_bin = sandbox / "backend/.venv/bin"
+    venv_bin.mkdir(parents=True)
+    (venv_bin / "python").symlink_to(sys.executable)
     shutil.copy2(REPO_ROOT / "backend" / ".env.example", sandbox / "backend" / ".env.example")
     shutil.copy2(REPO_ROOT / "frontend" / ".env.example", sandbox / "frontend" / ".env.example")
     (sandbox / ".env").write_text(
@@ -397,6 +404,7 @@ def _run_setup_env(sandbox: Path, *args: str) -> subprocess.CompletedProcess[str
         "PATH": "/usr/bin:/bin",
         "HOME": str(sandbox),
         "ODTE_REPO_ROOT": str(sandbox),
+        "PYTHONPATH": os.environ.get("PYTHONPATH", ""),
     }
     return subprocess.run(
         ["bash", str(SCRIPTS_DIR / "setup_env.sh"), *args],

@@ -2,13 +2,12 @@ name: pr-ci
 
 on:
   pull_request:
-    branches:
-      - main
     types:
       - opened
       - reopened
       - synchronize
       - ready_for_review
+      - edited
   pull_request_review:
     types:
       - submitted
@@ -30,13 +29,12 @@ jobs:
     name: backend-lint
     if: >-
       ${{
-        github.event.pull_request.base.ref == 'main' &&
         (
           (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
           (github.event_name == 'pull_request_review' && github.event.pull_request.draft == false && github.event.review.state == 'approved')
         )
       }}
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-puneet-chandna
     timeout-minutes: 15
     defaults:
       run:
@@ -71,13 +69,12 @@ jobs:
     name: backend-tests
     if: >-
       ${{
-        github.event.pull_request.base.ref == 'main' &&
         (
           (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
           (github.event_name == 'pull_request_review' && github.event.pull_request.draft == false && github.event.review.state == 'approved')
         )
       }}
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-puneet-chandna
     timeout-minutes: 20
     defaults:
       run:
@@ -126,13 +123,12 @@ jobs:
     name: frontend-quality
     if: >-
       ${{
-        github.event.pull_request.base.ref == 'main' &&
         (
           (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
           (github.event_name == 'pull_request_review' && github.event.pull_request.draft == false && github.event.review.state == 'approved')
         )
       }}
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-puneet-chandna
     timeout-minutes: 15
     defaults:
       run:
@@ -169,13 +165,12 @@ jobs:
     name: frontend-tests
     if: >-
       ${{
-        github.event.pull_request.base.ref == 'main' &&
         (
           (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
           (github.event_name == 'pull_request_review' && github.event.pull_request.draft == false && github.event.review.state == 'approved')
         )
       }}
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-puneet-chandna
     timeout-minutes: 20
     defaults:
       run:
@@ -220,13 +215,12 @@ jobs:
     name: frontend-build
     if: >-
       ${{
-        github.event.pull_request.base.ref == 'main' &&
         (
           (github.event_name == 'pull_request' && github.event.pull_request.draft == false) ||
           (github.event_name == 'pull_request_review' && github.event.pull_request.draft == false && github.event.review.state == 'approved')
         )
       }}
-    runs-on: ubuntu-latest
+    runs-on: namespace-profile-puneet-chandna
     timeout-minutes: 20
     defaults:
       run:

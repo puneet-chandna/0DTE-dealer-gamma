@@ -3,7 +3,7 @@
 # dev.sh — single-process local dev runner (SQLite default, no Docker required).
 #
 # Runs database migrations, then the backend (uvicorn) and the frontend
-# (pnpm dev) together as one child process group of this script:
+# (pnpm dev) together, each in a process group owned by this script:
 #   - one PID file:  .local-run/dev.pid  (this script's own PID)
 #   - one log file:  .local-run/dev.log  (both services, prefixed per line)
 #   - Ctrl+C (INT) or TERM stops backend + frontend + their descendants.
@@ -22,6 +22,7 @@
 set -euo pipefail
 
 REPO_ROOT="${ODTE_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$REPO_ROOT/backend"
 FRONTEND_DIR="$REPO_ROOT/frontend"
 BACKEND_VENV_BIN="${ODTE_BACKEND_VENV_BIN:-$BACKEND_DIR/.venv/bin}"
@@ -36,6 +37,7 @@ FRONTEND_WAIT_SECS="${ODTE_DEV_FRONTEND_WAIT_SECS:-120}"
 
 BACKEND_PID=""
 FRONTEND_PID=""
+STEP_PID=""
 SHUTTING_DOWN=0
 
 fail() {
@@ -71,18 +73,7 @@ is_sqlite_url() {
 }
 
 read_database_url() {
-  local env_file="$BACKEND_DIR/.env"
-  local database_url=""
-
-  if [[ -f "$env_file" ]]; then
-    database_url="$(awk -F= '/^[[:space:]]*DATABASE_URL=/{sub(/^[^=]*=/, ""); print; exit}' "$env_file")"
-  fi
-
-  if [[ -z "$database_url" ]]; then
-    database_url="$DEFAULT_DATABASE_URL"
-  fi
-
-  printf '%s\n' "$database_url"
+  "$ENV_PYTHON" "$SCRIPT_DIR/read_env.py" "$BACKEND_DIR/.env" DATABASE_URL "$DEFAULT_DATABASE_URL"
 }
 
 parse_database_endpoint() {
@@ -118,11 +109,13 @@ wait_for_tcp() {
   local port="$2"
   local timeout_secs="${3:-60}"
 
-  python3 - "$host" "$port" "$timeout_secs" <<'PY'
+  python3 - "$host" "$port" "$timeout_secs" <<'PY' &
+import os
 import socket
 import sys
 import time
 
+os.setsid()
 host = sys.argv[1]
 port = int(sys.argv[2])
 timeout_secs = int(sys.argv[3])
@@ -141,17 +134,24 @@ while time.time() < deadline:
 
 sys.exit(1)
 PY
+  STEP_PID="$!"
+  local status=0
+  wait "$STEP_PID" || status="$?"
+  STEP_PID=""
+  return "$status"
 }
 
 wait_for_http_ok() {
   local url="$1"
   local timeout_secs="$2"
 
-  python3 - "$url" "$timeout_secs" <<'PY'
+  python3 - "$url" "$timeout_secs" <<'PY' &
+import os
 import sys
 import time
 import urllib.request
 
+os.setsid()
 url = sys.argv[1]
 timeout_secs = int(sys.argv[2])
 
@@ -167,6 +167,11 @@ while time.time() < deadline:
 
 sys.exit(1)
 PY
+  STEP_PID="$!"
+  local status=0
+  wait "$STEP_PID" || status="$?"
+  STEP_PID=""
+  return "$status"
 }
 
 prefix_stream() {
@@ -177,24 +182,9 @@ prefix_stream() {
   done
 }
 
-kill_tree() {
-  # SIGTERM a process and all of its descendants (best effort, no orphans).
-  local root_pid="$1"
-  local child
-
-  if ! kill -0 "$root_pid" >/dev/null 2>&1; then
-    return 0
-  fi
-
-  if command -v pgrep >/dev/null 2>&1; then
-    while read -r child; do
-      if [[ -n "$child" ]]; then
-        kill_tree "$child"
-      fi
-    done < <(pgrep -P "$root_pid" 2>/dev/null || true)
-  fi
-
-  kill -TERM "$root_pid" >/dev/null 2>&1 || true
+start_service() {
+  # A group survives its leader exiting, so shutdown can still kill descendants.
+  exec python3 -c 'import os, sys; os.setsid(); os.execvp(sys.argv[1], sys.argv[1:])' "$@"
 }
 
 shutdown() {
@@ -204,28 +194,22 @@ shutdown() {
     return 0
   fi
   SHUTTING_DOWN=1
-  trap - INT TERM
+  trap - EXIT
+  trap '' INT TERM
 
   log "shutting down..."
 
-  if [[ -n "$BACKEND_PID" ]]; then
-    kill_tree "$BACKEND_PID"
+  for pid in $STEP_PID $BACKEND_PID $FRONTEND_PID; do
+    kill -TERM -- "-$pid" >/dev/null 2>&1 || kill -TERM "$pid" >/dev/null 2>&1 || true
+  done
+  if [[ -n "$STEP_PID$BACKEND_PID$FRONTEND_PID" ]]; then
+    sleep 3
   fi
-  if [[ -n "$FRONTEND_PID" ]]; then
-    kill_tree "$FRONTEND_PID"
-  fi
-
-  # Brief graceful window, then escalate any stragglers to SIGKILL.
-  sleep 3
-  for pid in $BACKEND_PID $FRONTEND_PID; do
-    if [[ -n "$pid" ]] && kill -0 "$pid" >/dev/null 2>&1; then
-      kill -KILL "$pid" >/dev/null 2>&1 || true
-      if command -v pkill >/dev/null 2>&1; then
-        pkill -KILL -P "$pid" >/dev/null 2>&1 || true
-      fi
-    fi
+  for pid in $STEP_PID $BACKEND_PID $FRONTEND_PID; do
+    kill -KILL -- "-$pid" >/dev/null 2>&1 || true
   done
 
+  wait "$STEP_PID" 2>/dev/null || true
   wait "$BACKEND_PID" 2>/dev/null || true
   wait "$FRONTEND_PID" 2>/dev/null || true
   rm -f "$PID_FILE"
@@ -243,6 +227,14 @@ venv_has_module() {
   [[ -x "$BACKEND_VENV_BIN/python" ]] \
     && "$BACKEND_VENV_BIN/python" -c "import $module" >/dev/null 2>&1
 }
+
+if venv_has_module "dotenv"; then
+  ENV_PYTHON="$BACKEND_VENV_BIN/python"
+elif python3 -c 'import dotenv' >/dev/null 2>&1; then
+  ENV_PYTHON="$(command -v python3)"
+else
+  fail "python-dotenv is unavailable. Create backend/.venv and install backend/requirements.txt."
+fi
 
 if [[ -x "$BACKEND_VENV_BIN/alembic" ]] && venv_has_module "alembic"; then
   ALEMBIC_BIN="$BACKEND_VENV_BIN/alembic"
@@ -281,12 +273,13 @@ printf '%s\n' "$$" > "$PID_FILE"
 
 trap 'shutdown 130' INT
 trap 'shutdown 143' TERM
+trap 'shutdown "$?"' EXIT
 
 DATABASE_URL_VALUE="$(read_database_url)"
 if is_sqlite_url "$DATABASE_URL_VALUE"; then
   DB_MODE="sqlite"
   log "SQLite database configured ($(redact_url "$DATABASE_URL_VALUE")). No DB terminal needed."
-  log "SQLite file lives at backend/odte_gex.db (created on first run)."
+  log "Relative SQLite paths are resolved from $BACKEND_DIR."
 else
   mapfile -t DB_ENDPOINT < <(parse_database_endpoint "$DATABASE_URL_VALUE")
   DB_HOST="${DB_ENDPOINT[0]}"
@@ -295,7 +288,10 @@ else
 
   if [[ "$DB_MODE" == "local" ]]; then
     log "Local Postgres configured. Ensuring project-owned server is up..."
-    "$REPO_ROOT/scripts/setup_local_postgres.sh"
+    start_service "$REPO_ROOT/scripts/setup_local_postgres.sh" &
+    STEP_PID="$!"
+    wait "$STEP_PID"
+    STEP_PID=""
   else
     log "External Postgres configured at $DB_HOST:$DB_PORT. Expecting it to be reachable (e.g. via 'docker compose up -d')."
   fi
@@ -305,20 +301,21 @@ else
 fi
 
 log "Running backend migrations..."
-(
-  cd "$BACKEND_DIR"
-  "$ALEMBIC_BIN" upgrade head
-)
+cd "$BACKEND_DIR"
+start_service "$ALEMBIC_BIN" upgrade head &
+STEP_PID="$!"
+wait "$STEP_PID"
+STEP_PID=""
 
-log "Starting backend (uvicorn) and frontend (pnpm dev) as one process group..."
+log "Starting backend (uvicorn) and frontend (pnpm dev)..."
 
 cd "$BACKEND_DIR"
-"$UVICORN_BIN" app.main:app --reload \
+start_service "$UVICORN_BIN" app.main:app --reload \
   > >(prefix_stream "[backend]" >> "$LOG_FILE") 2>&1 &
 BACKEND_PID="$!"
 
 cd "$FRONTEND_DIR"
-pnpm dev \
+start_service pnpm dev \
   > >(prefix_stream "[frontend]" >> "$LOG_FILE") 2>&1 &
 FRONTEND_PID="$!"
 
@@ -330,14 +327,14 @@ if [[ "${ODTE_DEV_SKIP_WAIT:-0}" != "1" ]]; then
   if wait_for_http_ok "http://localhost:8000/health" "$BACKEND_WAIT_SECS"; then
     log "Backend is up: http://localhost:8000 (docs: http://localhost:8000/docs)"
   else
-    log "Backend did not answer /health within ${BACKEND_WAIT_SECS}s — check $LOG_FILE."
+    fail "Backend did not answer /health within ${BACKEND_WAIT_SECS}s — check $LOG_FILE."
   fi
 
   log "Waiting for frontend http://localhost:3000 ..."
   if wait_for_http_ok "http://localhost:3000/" "$FRONTEND_WAIT_SECS"; then
     log "Frontend is up: http://localhost:3000"
   else
-    log "Frontend did not answer within ${FRONTEND_WAIT_SECS}s — check $LOG_FILE."
+    fail "Frontend did not answer within ${FRONTEND_WAIT_SECS}s — check $LOG_FILE."
   fi
 fi
 
@@ -346,5 +343,8 @@ set +e
 wait -n "$BACKEND_PID" "$FRONTEND_PID"
 service_status="$?"
 set -e
+if [[ "$service_status" -eq 0 ]]; then
+  service_status=1
+fi
 log "A service exited (status $service_status); stopping the other."
 shutdown "$service_status"

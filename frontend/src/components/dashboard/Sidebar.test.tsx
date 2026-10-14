@@ -3,6 +3,28 @@ import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Sidebar } from './Sidebar';
+import type { GEXSnapshot, RegimeData } from '@/types';
+
+const sampleGex: GEXSnapshot = {
+  timestamp: '2026-03-30T16:00:00Z',
+  net_gex: 1500000000,
+  total_call_gex: 2000000000,
+  total_put_gex: -500000000,
+  zero_gamma_level: 5600,
+  spot_price: 5550,
+  dominant_strike: 5575,
+  gex_by_strike: {},
+  metrics: {},
+};
+
+const sampleRegime: RegimeData = {
+  timestamp: sampleGex.timestamp,
+  regime: 'long_gamma',
+  net_gex: sampleGex.net_gex,
+  net_gex_billions: 1.5,
+  description: 'Dealers are long gamma',
+  color: 'green',
+};
 
 const storeState = vi.hoisted(() => ({
   state: {
@@ -58,20 +80,9 @@ describe('Sidebar layout variants', () => {
   it('renders stack mode as a full-width section instead of a left rail', () => {
     const { container } = render(
       <Sidebar
-        {...({
-          layout: 'stack',
-          gexData: {
-            net_gex: 1500000000,
-            zero_gamma_level: 5600,
-            spot_price: 5550,
-            dominant_strike: 5575,
-          },
-          regimeData: {
-            regime: 'long_gamma',
-            net_gex_billions: 1.5,
-            description: 'Dealers are long gamma',
-          },
-        } as never)}
+        layout="stack"
+        gexData={sampleGex}
+        regimeData={sampleRegime}
       />
     );
 
@@ -88,24 +99,18 @@ describe('Sidebar layout variants', () => {
   it('labels zero gamma as below range when no in-range crossing exists', () => {
     render(
       <Sidebar
-        {...({
-          layout: 'stack',
-          gexData: {
-            net_gex: 1500000000,
-            zero_gamma_level: 5200,
-            spot_price: 6420,
-            dominant_strike: 6400,
-            metrics: {
-              zero_gamma_crossing_found: false,
-              zero_gamma_relation: 'below_range',
-            },
+        layout="stack"
+        gexData={{
+          ...sampleGex,
+          zero_gamma_level: 5200,
+          spot_price: 6420,
+          dominant_strike: 6400,
+          metrics: {
+            zero_gamma_crossing_found: false,
+            zero_gamma_relation: 'below_range',
           },
-          regimeData: {
-            regime: 'long_gamma',
-            net_gex_billions: 1.5,
-            description: 'Dealers are long gamma',
-          },
-        } as never)}
+        }}
+        regimeData={sampleRegime}
       />
     );
 

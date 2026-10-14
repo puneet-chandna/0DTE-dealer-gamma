@@ -25,6 +25,8 @@
 set -euo pipefail
 
 REPO_ROOT="${ODTE_REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BACKEND_VENV_BIN="${ODTE_BACKEND_VENV_BIN:-$REPO_ROOT/backend/.venv/bin}"
 BACKEND_EXAMPLE="$REPO_ROOT/backend/.env.example"
 BACKEND_ENV="$REPO_ROOT/backend/.env"
 FRONTEND_EXAMPLE="$REPO_ROOT/frontend/.env.example"
@@ -33,7 +35,7 @@ ROOT_ENV="$REPO_ROOT/.env"
 
 SQLITE_URL="sqlite+aiosqlite:///./odte_gex.db"
 POSTGRES_LOCAL_URL="postgresql+asyncpg://odte_user:odte_password@127.0.0.1:55432/odte_gex"
-POSTGRES_DOCKER_URL="postgresql+asyncpg://odte_user:your_secure_password_here@localhost:5432/odte_gex"
+POSTGRES_DOCKER_URL="postgresql+asyncpg://odte_user:odte_password@localhost:5432/odte_gex"
 
 MODE="sqlite"
 MODE_EXPLICIT=0
@@ -54,9 +56,7 @@ redact_url() {
 }
 
 read_var() {
-  local file="$1"
-  local name="$2"
-  awk -F= -v key="$name" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' "$file" 2>/dev/null || true
+  "$ENV_PYTHON" "$SCRIPT_DIR/read_env.py" "$1" "$2"
 }
 
 ensure_from_example() {
@@ -75,17 +75,14 @@ ensure_from_example() {
 }
 
 set_database_url() {
-  local file="$1"
-  local url="$2"
-  local tmp_file="$file.tmp.$$"
+  "$ENV_PYTHON" - "$1" "$2" <<'PY'
+import sys
+from dotenv import dotenv_values, set_key
 
-  if grep -qE '^[[:space:]]*DATABASE_URL=' "$file"; then
-    sed -E "s#^[[:space:]]*DATABASE_URL=.*#DATABASE_URL=${url}#" "$file" > "$tmp_file"
-  else
-    cp "$file" "$tmp_file"
-    printf 'DATABASE_URL=%s\n' "$url" >> "$tmp_file"
-  fi
-  mv "$tmp_file" "$file"
+keys = [key for key in dotenv_values(sys.argv[1]) if key.upper() == "DATABASE_URL"]
+for key in keys or ["DATABASE_URL"]:
+    set_key(sys.argv[1], key, sys.argv[2], quote_mode="never")
+PY
 }
 
 case "${1:-}" in
@@ -116,6 +113,14 @@ case "${1:-}" in
     ;;
 esac
 
+if [[ -x "$BACKEND_VENV_BIN/python" ]] && "$BACKEND_VENV_BIN/python" -c 'import dotenv' >/dev/null 2>&1; then
+  ENV_PYTHON="$BACKEND_VENV_BIN/python"
+elif command -v python3 >/dev/null 2>&1 && python3 -c 'import dotenv' >/dev/null 2>&1; then
+  ENV_PYTHON="$(command -v python3)"
+else
+  fail "python-dotenv is unavailable. Create backend/.venv and install backend/requirements.txt before running setup_env.sh."
+fi
+
 ensure_from_example "$BACKEND_EXAMPLE" "$BACKEND_ENV" "backend env"
 ensure_from_example "$FRONTEND_EXAMPLE" "$FRONTEND_ENV" "frontend env"
 
@@ -126,27 +131,25 @@ fi
 
 # --- validation (fail fast with a clear message) ---
 DATABASE_URL_VALUE="$(read_var "$BACKEND_ENV" "DATABASE_URL")"
-[[ -n "$DATABASE_URL_VALUE" ]] || fail "DATABASE_URL is missing or empty in $BACKEND_ENV. Set it to '$SQLITE_URL' for the zero-setup SQLite default."
-if ! [[ "$DATABASE_URL_VALUE" == sqlite* || "$DATABASE_URL_VALUE" == postgresql* || "$DATABASE_URL_VALUE" == postgres:* ]]; then
-  fail "DATABASE_URL in $BACKEND_ENV has an unsupported scheme: '$(redact_url "$DATABASE_URL_VALUE")'. Use a 'sqlite:' URL or a 'postgresql:' URL."
-fi
-
 API_URL_VALUE="$(read_var "$FRONTEND_ENV" "NEXT_PUBLIC_API_URL")"
-[[ -n "$API_URL_VALUE" ]] || fail "NEXT_PUBLIC_API_URL is missing or empty in $FRONTEND_ENV. Expected e.g. 'http://localhost:8000'."
-
 WS_URL_VALUE="$(read_var "$FRONTEND_ENV" "NEXT_PUBLIC_WS_URL")"
-[[ -n "$WS_URL_VALUE" ]] || fail "NEXT_PUBLIC_WS_URL is missing or empty in $FRONTEND_ENV. Expected e.g. 'ws://localhost:8000/ws'."
 
 # --- stale provider key cleanup (root .env only, never touch app env files) ---
-if [[ -f "$ROOT_ENV" ]] && grep -q 'POLYGON_API_KEY' "$ROOT_ENV"; then
-  sed -i '/POLYGON_API_KEY/d' "$ROOT_ENV"
-  echo "Removed stale POLYGON_API_KEY from $ROOT_ENV"
+if [[ -f "$ROOT_ENV" ]]; then
+  "$ENV_PYTHON" - "$ROOT_ENV" <<'PY'
+import sys
+from dotenv import dotenv_values, unset_key
+
+if "POLYGON_API_KEY" in dotenv_values(sys.argv[1]):
+    unset_key(sys.argv[1], "POLYGON_API_KEY")
+    print(f"Removed stale POLYGON_API_KEY from {sys.argv[1]}")
+PY
 fi
 
-echo "Environment OK (mode: $MODE)."
+echo "Environment OK."
 echo "  backend:  $BACKEND_ENV (DATABASE_URL=$(redact_url "$DATABASE_URL_VALUE"))"
 echo "  frontend: $FRONTEND_ENV (NEXT_PUBLIC_API_URL=$API_URL_VALUE, NEXT_PUBLIC_WS_URL=$WS_URL_VALUE)"
 if [[ "$MODE" == "postgres-docker" ]]; then
-  echo "  NOTE: update the placeholder password in DATABASE_URL and run 'docker compose up -d' before starting the app."
+  echo "  NOTE: run 'docker compose up -d' before starting the app. If POSTGRES_USER/PASSWORD/DB are overridden in the root .env or shell, update backend/.env to match."
 fi
 echo "Next: ./scripts/dev.sh"

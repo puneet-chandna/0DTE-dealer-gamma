@@ -111,13 +111,14 @@ describe('DashboardHeader', () => {
     const container = document.createElement('div');
     container.innerHTML = serverMarkup;
     document.body.appendChild(container);
+    expect(container.querySelector('[title="Toggle theme"]')).not.toBeNull();
 
     storeState.state = {
       ...storeState.state,
       isDarkMode: true,
     };
 
-    const recoverableErrors: Error[] = [];
+    const recoverableErrors: unknown[] = [];
     let root: ReturnType<typeof hydrateRoot> | undefined;
 
     await act(async () => {
@@ -129,6 +130,7 @@ describe('DashboardHeader', () => {
     });
 
     expect(recoverableErrors).toEqual([]);
+    expect(container.querySelector('[title="Switch to light mode"]')).not.toBeNull();
 
     await act(async () => {
       root?.unmount();

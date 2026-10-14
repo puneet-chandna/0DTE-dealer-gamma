@@ -84,19 +84,25 @@ odte-dealer-gamma/
 
 ### Prerequisites
 
-- Python 3.11+ (project uses 3.13)
+- Python 3.12+ (project uses 3.13)
 - Node.js 20+ with pnpm
 - Docker & Docker Compose (optional — only needed for the Postgres path)
 
-### 1. Clone and Bootstrap Env
+### 1. Clone, Install Dependencies, and Bootstrap Env
 
 ```bash
 git clone https://github.com/<your-org>/odte-dealer-gamma.git
 cd odte-dealer-gamma
 
+python3 -m venv backend/.venv
+backend/.venv/bin/python -m pip install -r backend/requirements.txt
+pnpm --dir frontend install --frozen-lockfile
+
 # Idempotent: copies the templates into place ONLY if missing
-# (existing backend/.env / frontend/.env.local are never overwritten).
-./scripts/setup_env.sh --sqlite            # default: zero-setup SQLite
+# and preserves your existing database configuration.
+./scripts/setup_env.sh
+# Explicit modes replace only DATABASE_URL in backend/.env:
+# ./scripts/setup_env.sh --sqlite          # zero-setup SQLite
 # ./scripts/setup_env.sh --postgres-local  # project-owned Postgres on 127.0.0.1:55432
 # ./scripts/setup_env.sh --postgres-docker # Docker Compose Postgres on localhost:5432
 
@@ -141,7 +147,7 @@ Frontend (`frontend/.env.local`):
 
 This single-process runner applies migrations (`alembic upgrade head`), then
 starts the backend (`uvicorn app.main:app --reload`) and the frontend
-(`pnpm dev`) as one child process group:
+(`pnpm dev`) in separate process groups managed by the runner:
 
 - SQLite file: `backend/odte_gex.db` (created on first run). No database
   terminal, no TCP wait, no Docker.
@@ -243,7 +249,7 @@ sqlite+aiosqlite:///./odte_gex.db
 ```
 
 (a file created inside `backend/` on first run, i.e. `backend/odte_gex.db`).
-That means the normal local flow (`./scripts/setup_env.sh --sqlite`, then
+That means the normal local flow (`./scripts/setup_env.sh`, then
 `./scripts/dev.sh`) needs no Docker and no DB terminal at all.
 
 To use Postgres instead (Docker or the local fallback), see
