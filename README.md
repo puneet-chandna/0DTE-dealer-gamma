@@ -19,8 +19,6 @@ Near-real-time (5s poll, provider-delayed) dashboard to monitor Dealer Gamma Exp
 
 ## Table of Contents
 - [Features](#features)
-- [Tech Stack](#tech-stack)
-- [Project Structure](#project-structure)
 - [Quick Start](#quick-start)
 - [Key Concepts](#key-concepts)
 - [Tests](#tests)
@@ -41,42 +39,6 @@ Near-real-time (5s poll, provider-delayed) dashboard to monitor Dealer Gamma Exp
 - **Historical Analysis** - Backtesting and volatility analysis tools
 - **Persistent Historical Storage** - Provider-separated SQLite/Postgres storage for GEX snapshots, IV surfaces, and replay sessions
 - **Provider-Based Data Layer** - Configurable market-data providers with a free local-development path
-
----
-
-## Tech Stack
-
-| Layer         | Technology                                                          |
-| ------------- | ------------------------------------------------------------------- |
-| **Frontend**  | Next.js 16, TypeScript, TailwindCSS, React Query, Zustand, Recharts |
-| **Backend**   | Python 3.13, FastAPI, NumPy (vectorized), SciPy, Pydantic v2        |
-| **Database**  | SQLite (local default, zero-setup) / PostgreSQL 18 (opt-in, Docker or cloud) |
-| **Near-real-time (5s poll, provider-delayed)** | WebSocket                                                           |
-| **Data**      | YFinance (default), Tradier, provider registry architecture         |
-
----
-
-## Project Structure
-
-```
-odte-dealer-gamma/
-├── backend/           # Python FastAPI server
-│   ├── app/
-│   │   ├── api/       # REST & WebSocket endpoints
-│   │   ├── core/      # Greeks, GEX calculator, analytics
-│   │   ├── models/    # Pydantic schemas
-│   │   └── services/  # Background tasks, caching
-│   └── tests/         # pytest suite
-├── frontend/          # Next.js 16 app
-│   └── src/
-│       ├── app/       # App Router pages
-│       ├── components/# UI & chart components
-│       ├── hooks/     # React Query & WebSocket hooks
-│       ├── lib/       # API client, utilities
-│       └── test/      # Vitest suite
-├── docs/              # Documentation
-└── docker-compose.yml # PostgreSQL service
-```
 
 ---
 
@@ -347,7 +309,8 @@ Both default test commands now print a coverage summary at the end of the run.
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, data flow diagrams   |
 | [API.md](docs/API.md)                   | Complete REST & WebSocket reference |
 | [DEPLOYMENT.md](docs/DEPLOYMENT.md)     | Railway + Vercel deployment guide   |
-| [PROVIDER_INTEGRATION_PLAN.md](docs/PROVIDER_INTEGRATION_PLAN.md) | Provider architecture and rollout notes |
+| [PROVIDER_INTEGRATION_PLAN.md](docs/PROVIDER_INTEGRATION_PLAN.md) | Completed provider work and prioritized remaining milestones |
+| [bugs.md](docs/bugs.md)                 | Recorded bug fixes and planned shared database rollout |
 
 ---
 

@@ -2,6 +2,11 @@
 
 This file is the working tracker for runtime bugs, data correctness issues, and UX gaps that affect the current project.
 
+Documentation reviewed on **2026-10-14**: items 1–7 retain their recorded `fixed`
+status; this documentation pass did not rerun their live reproductions. Item 8
+remains `planned`. See the [prioritized remaining-work plan](PROVIDER_INTEGRATION_PLAN.md#prioritized-remaining-work)
+for implementation and rollout milestones.
+
 ## 1. Provider capture loop can fall behind or starve one provider
 - Severity: `P0`
 - Page/subsystem: `backend historical capture`
@@ -143,9 +148,15 @@ This file is the working tracker for runtime bugs, data correctness issues, and 
 - Expected behavior:
   Teammates should be able to point at a shared Postgres instance when collaboration needs shared captured data.
 - Current evidence from code/runtime:
-  The project is intentionally local-first right now.
+  The project is local-first. `DATABASE_URL` already selects SQLite or PostgreSQL,
+  and `docs/DEPLOYMENT.md` describes a hosted PostgreSQL setup. Those capabilities
+  do not establish that a shared teammate instance has been provisioned and verified.
 - Suspected root cause:
   Cloud DB rollout was deferred until local persistence is stable.
 - Acceptance criteria:
-  A later infra milestone should add a shared cloud Postgres option with safe env-based switching.
+  Reuse the existing `DATABASE_URL` switching and migrations. Two clients should
+  read the same provider/symbol/session history; restart and backup/restore checks
+  should preserve it. Document the capture owner and teammate access while
+  retaining local SQLite support and existing local data.
 - Status: `planned`
+- Priority and dependencies: [P2 shared PostgreSQL rollout](PROVIDER_INTEGRATION_PLAN.md#3-p2--roll-out-shared-postgresql-when-teammates-need-shared-history), after provider validation and when shared history is needed.
