@@ -50,7 +50,9 @@ def test_missing_or_nonfinite_iv_is_nullable_and_cacheable(chain_api, iv):
     assert response.status_code == 200
     assert response.json()["contracts"][0]["implied_vol"] is None
     assert cache.get(CACHE_KEY) == response.json()
-    assert client.get("/api/data/options-chain", params=PARAMS).json() == response.json()
+    repeated = client.get("/api/data/options-chain", params=PARAMS).json()
+    assert repeated["age_seconds"] >= response.json()["age_seconds"]
+    assert repeated == response.json() | {"age_seconds": repeated["age_seconds"]}
     provider.get_options_chain_snapshot.assert_awaited_once()
 
 
@@ -81,7 +83,10 @@ def test_invalid_required_numbers_preserve_cache_and_use_valid_stale(chain_api, 
 
         assert response.status_code == (200 if has_stale else 503)
         if has_stale:
-            assert response.json() == previous
+            body = response.json()
+            assert body["is_stale"] is True
+            assert body["age_seconds"] >= previous["age_seconds"]
+            assert body == previous | {"is_stale": True, "age_seconds": body["age_seconds"]}
         else:
             assert "Unable to fetch options chain" in response.json()["detail"]
         update_spot.assert_not_called()

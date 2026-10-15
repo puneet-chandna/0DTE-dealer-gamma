@@ -82,6 +82,17 @@ export function useWebSocket<T>(
   const [error, setError] = useState<string | null>(null);
   const [retryCount, setRetryCount] = useState(0);
   const [lastUpdateTime, setLastUpdateTime] = useState<number | null>(null);
+  const [sourceEndpoint, setSourceEndpoint] = useState(endpoint);
+
+  const matchesEndpoint = sourceEndpoint === endpoint;
+  if (!matchesEndpoint) {
+    setSourceEndpoint(endpoint);
+    setData(null);
+    setLastUpdateTime(null);
+    setConnectionState('connecting');
+    setError(null);
+    setRetryCount(0);
+  }
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -173,6 +184,7 @@ export function useWebSocket<T>(
       wsRef.current = ws;
 
       ws.onopen = () => {
+        if (wsRef.current !== ws) return;
         console.log(
           `[WebSocket] ${mode === 'retry' ? 'Reconnected' : 'Connected'} to ${endpoint}`
         );
@@ -184,6 +196,7 @@ export function useWebSocket<T>(
       };
 
       ws.onmessage = (event: MessageEvent) => {
+        if (wsRef.current !== ws) return;
         try {
           const message = JSON.parse(event.data as string) as WebSocketMessage<T>;
           setLastUpdateTime(Date.now());
@@ -199,8 +212,13 @@ export function useWebSocket<T>(
 
             case 'error':
               console.error('[WebSocket] Server error:', message.data);
-              setError(String(message.data));
-              onError?.(String(message.data));
+              const detail = message.data;
+              const serverError = typeof detail === 'string' ? detail : (
+                detail && typeof detail === 'object' && 'message' in detail && typeof detail.message === 'string'
+                  ? detail.message : 'WebSocket server error'
+              );
+              setError(serverError);
+              onError?.(serverError);
               break;
 
             case 'pong':
@@ -217,12 +235,14 @@ export function useWebSocket<T>(
       };
 
       ws.onerror = () => {
+        if (wsRef.current !== ws) return;
         const errorMessage = 'WebSocket connection error';
         setError(errorMessage);
         onError?.(errorMessage);
       };
 
       ws.onclose = (event) => {
+        if (wsRef.current !== ws) return;
         console.log(`[WebSocket] Disconnected from ${endpoint} (code: ${event.code})`);
         clearTimeouts();
         if (wsRef.current === ws) {
@@ -262,10 +282,9 @@ export function useWebSocket<T>(
     return () => {
       shouldReconnectRef.current = false;
       clearTimeouts();
-      if (wsRef.current) {
-        wsRef.current.close(1000, 'Component unmounted');
-        wsRef.current = null;
-      }
+      const previousSocket = wsRef.current;
+      wsRef.current = null;
+      previousSocket?.close(1000, 'Component unmounted');
     };
   }, [openConnection, clearTimeouts]);
 
@@ -307,12 +326,12 @@ export function useWebSocket<T>(
   }, [clearTimeouts, openConnection]);
 
   return {
-    data,
-    isConnected,
-    connectionState,
-    error,
-    retryCount,
-    lastUpdateTime,
+    data: matchesEndpoint ? data : null,
+    isConnected: matchesEndpoint && isConnected,
+    connectionState: matchesEndpoint ? connectionState : 'connecting',
+    error: matchesEndpoint ? error : null,
+    retryCount: matchesEndpoint ? retryCount : 0,
+    lastUpdateTime: matchesEndpoint ? lastUpdateTime : null,
     sendMessage,
     reconnect,
     disconnect,

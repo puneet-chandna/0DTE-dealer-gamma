@@ -131,7 +131,7 @@ def enrich_snapshot_with_advanced_analytics(
                 call_intensity=hawkes_state.call_intensity,
                 put_intensity=hawkes_state.put_intensity,
                 net_toxicity=hawkes_state.net_toxicity,
-                squeeze_probability=hawkes_state.squeeze_probability,
+                squeeze_score=hawkes_state.squeeze_score,
                 baseline_ready=hawkes_state.baseline_ready,
                 confidence_score=hawkes_state.confidence_score,
                 provider_mode=hawkes_state.provider_mode,

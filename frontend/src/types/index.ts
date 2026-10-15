@@ -66,6 +66,22 @@ export interface GEXHistorical {
 /**
  * Statistical analysis result for GEX-volatility relationship.
  */
+export interface DataProvenance {
+  provider: string;
+  requested_symbol: string;
+  actual_instrument: string;
+  is_proxy: boolean;
+  data_kind: 'captured' | 'synthetic';
+  sample_count: number;
+  actual_start?: string | null;
+  actual_end?: string | null;
+  timestamp_basis?: string;
+  nominal_options_delay_minutes?: number | null;
+  open_interest_frequency?: string;
+  calculation_versions: string[];
+  quality_limitations: string[];
+}
+
 export interface AnalyticsResult {
   mean_rv_negative_gex: number;
   mean_rv_positive_gex: number;
@@ -75,6 +91,7 @@ export interface AnalyticsResult {
   significant: boolean;
   sample_size_negative: number;
   sample_size_positive: number;
+  provenance?: DataProvenance | null;
 }
 
 /**
@@ -88,6 +105,7 @@ export interface SummaryStatistics {
   median_gex: number;
   pct_negative_days: number;
   sample_size: number;
+  provenance?: DataProvenance | null;
 }
 
 /**
@@ -105,6 +123,13 @@ export interface WebSocketMessage {
  * Real-time GEX update from WebSocket.
  */
 export interface GEXUpdate {
+  total_call_gex?: number;
+  total_put_gex?: number;
+  gex_by_strike?: Record<number, number>;
+  dominant_strike?: number;
+  metrics?: Record<string, SnapshotMetricValue>;
+  description?: string;
+  color?: string;
   net_gex: number;
   net_gex_billions: number;
   zero_gamma_level: number;
@@ -125,6 +150,31 @@ export interface MarketStatus {
   status: MarketStatusType;
   next_open: string | null;
   current_time_et: string;
+}
+
+export interface OptionsChainResponse {
+  underlying: string;
+  spot_price: number;
+  expiration_date: string;
+  contract_count: number;
+  contracts: Record<string, number | string | null>[];
+  timestamp: string;
+  provider: string | null;
+  is_stale: boolean;
+  age_seconds: number;
+  captured_at: string | null;
+  market_status: 'open' | 'closed';
+}
+
+export interface SpotPriceResponse {
+  symbol: string;
+  price: number;
+  timestamp: string;
+  provider: string | null;
+  is_stale: boolean;
+  age_seconds: number;
+  captured_at: string | null;
+  market_status: 'open' | 'closed';
 }
 
 /**
@@ -282,15 +332,15 @@ export interface TechnicalIndicatorResponse {
  */
 export interface VectorBTBacktestResult {
   total_return: number;
-  sharpe_ratio: number;
-  sortino_ratio: number;
-  calmar_ratio: number;
+  sharpe_ratio: number | null;
+  sortino_ratio: number | null;
+  calmar_ratio: number | null;
   max_drawdown: number;
   total_trades: number;
   winning_trades: number;
   losing_trades: number;
   win_rate: number;
-  profit_factor: number;
+  profit_factor: number | null;
   avg_trade_return: number;
   best_trade: number;
   worst_trade: number;
@@ -298,6 +348,17 @@ export interface VectorBTBacktestResult {
   start_date: string;
   end_date: string;
   equity_curve: number[];
+  equity_timestamps?: string[];
+  closed_trades?: number;
+  open_trades?: number;
+  initial_cash?: number;
+  fees?: number;
+  slippage?: number;
+  position_size?: number;
+  execution_delay_bars?: number;
+  bar_interval_minutes?: number;
+  strategy?: string;
+  provenance?: DataProvenance | null;
 }
 
 // ============================================================================
@@ -322,7 +383,7 @@ export interface HawkesState {
   call_intensity: number;
   put_intensity: number;
   net_toxicity: number;
-  squeeze_probability: number;
+  squeeze_score: number;
   baseline_ready?: boolean;
   confidence_score?: number;
   provider_mode?: 'tradier_rich' | 'yfinance_proxy' | string;

@@ -1,58 +1,44 @@
-"""0DTE GEX Backend - Greeks Throughput Benchmark (NON-GATING).
+"""Non-gating Greeks latency distributions on fixed 1,000/10,000-contract inputs."""
 
-Times ``BlackScholesGreeks.calculate_all_greeks`` on n=1000 0DTE-like
-contracts and prints the median and maximum of five retained timings.
-Only output shape and finiteness gate this test, never hardware speed.
-
-Live market numbers (provider fetch + GEX calc on real chains) are recorded
-in ``docs/BENCHMARKS.md`` — see that file for the Tradier/yFinance runs.
-"""
-
-import time
+import importlib.util
+import json
+from pathlib import Path
 
 import numpy as np
+import pytest
 
 from app.core.greeks import BlackScholesGreeks
 
 
-def _build_0dte_chain(n: int = 1000) -> tuple:
-    """Build a deterministic 0DTE-like chain: tight strikes, hours to expiry."""
-    spot = 6600.0
-    s = np.full(n, spot, dtype=np.float64)
-    k = np.linspace(spot * 0.97, spot * 1.03, n, dtype=np.float64)
-    # ~4 trading hours to expiry, floored to avoid div-by-zero
-    t = np.full(n, 4.0 / (365.25 * 24.0), dtype=np.float64) + 1e-9
-    sigma = np.full(n, 0.18, dtype=np.float64)
-    option_type = np.array(["call"] * (n // 2) + ["put"] * (n - n // 2))
-    return s, k, t, sigma, option_type
+@pytest.mark.parametrize("contracts", [1000, 10000])
+def test_calculate_all_greeks_reports_distribution(contracts):
+    script = Path(__file__).resolve().parents[2] / "scripts/benchmark_pipeline.py"
+    spec = importlib.util.spec_from_file_location("benchmark_pipeline", script)
+    benchmark = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(benchmark)
+    spot, strikes, expiry, sigma, option_type = benchmark.greeks_inputs(contracts)
 
-
-class TestGreeksPerf:
-    """Non-gating throughput probe for the vectorized Greeks path."""
-
-    def test_calculate_all_greeks_1000_contracts_reports_timing(self):
-        s, k, t, sigma, option_type = _build_0dte_chain(1000)
-
-        # Warmup (imports, first-call overhead) — not timed.
-        BlackScholesGreeks.calculate_all_greeks(s, k, t, 0.043, sigma, option_type)
-
-        runs_ms: list[float] = []
-        for _ in range(7):
-            start = time.perf_counter()
-            result = BlackScholesGreeks.calculate_all_greeks(
-                s, k, t, 0.043, sigma, option_type
-            )
-            runs_ms.append((time.perf_counter() - start) * 1000.0)
-
-        # Sanity: outputs are finite and correctly shaped.
-        assert len(result.gamma) == 1000
-        assert bool(np.all(np.isfinite(result.gamma)))
-
-        timed = sorted(runs_ms[2:])  # drop first two timed runs (cache warmup)
-        p50 = float(np.median(timed))
-        max_ms = float(timed[-1])
-        print(
-            f"\n[greeks-perf] n=1000 0DTE-like contracts: "
-            f"p50={p50:.2f}ms max_of_5={max_ms:.2f}ms "
-            f"(runs={[f'{x:.2f}' for x in timed]})"
+    def calculate():
+        return BlackScholesGreeks.calculate_all_greeks(
+            spot, strikes, expiry, 0.043, sigma, option_type
         )
+
+    result = calculate()
+    assert all(len(value) == contracts and np.isfinite(value).all() for value in result)
+    timing = benchmark.measure(calculate, contracts, samples=500)
+    assert len(timing["samples_ms"]) == 500
+    environment = benchmark.environment()
+    print(
+        "\n[greeks-perf] "
+        + json.dumps(
+            {
+                "contracts": contracts,
+                "retained_samples": 500,
+                **{key: value for key, value in timing.items() if key != "samples_ms"},
+                "environment": {
+                    key: environment[key]
+                    for key in ("python", "numpy", "scipy", "cpu", "thread_environment")
+                },
+            }
+        )
+    )

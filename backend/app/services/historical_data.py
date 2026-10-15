@@ -36,7 +36,7 @@ SESSION_OPEN = time(9, 30)
 SESSION_CLOSE = time(16, 0)
 REPLAY_COMPLETE_AFTER = time(15, 55)
 RAW_SNAPSHOT_INTERVAL_SECONDS = 60
-RETENTION_DAYS = 30
+RETENTION_DAYS = 90
 WATCHLIST_SYMBOLS = ("SPX", "SPY", "QQQ", "IWM")
 LATEST_RECORD_SCAN_BATCH_SIZE = 250
 HARD_INVALID_QUALITY_FLAGS = frozenset(
@@ -125,7 +125,12 @@ class HistoricalDataService:
                     net_gex=float(snapshot_dict["net_gex"]),
                     zero_gamma_level=float(snapshot_dict["zero_gamma_level"]),
                     dominant_strike=float(snapshot_dict["dominant_strike"]),
-                    metrics=dict(snapshot_dict.get("metrics") or {}),
+                    metrics={
+                        **dict(snapshot_dict.get("metrics") or {}),
+                        **dict(options_df.attrs.get("source_metadata", {})),
+                    }
+                    if options_df is not None
+                    else dict(snapshot_dict.get("metrics") or {}),
                 )
                 session.add(gex_snapshot)
                 await session.flush()
@@ -238,7 +243,9 @@ class HistoricalDataService:
                         market_session.status = "complete"
                         market_session.completeness_ratio = max(
                             market_session.completeness_ratio,
-                            1.0 if market_session.last_captured_at else market_session.completeness_ratio,
+                            1.0
+                            if market_session.last_captured_at
+                            else market_session.completeness_ratio,
                         )
                         changed = True
 
@@ -356,7 +363,9 @@ class HistoricalDataService:
         if not records and prefer_replay:
             records = self._filter_replay_eligible_records(
                 self._filter_historically_usable_records(
-                    await self._load_latest_replay_snapshot_records(provider=provider, symbol=symbol)
+                    await self._load_latest_replay_snapshot_records(
+                        provider=provider, symbol=symbol
+                    )
                 )
             )
 
@@ -407,12 +416,16 @@ class HistoricalDataService:
                     return None
 
                 iv_rows = (
-                    await session.execute(
-                        select(IVSurfacePointRecord)
-                        .where(IVSurfacePointRecord.raw_snapshot_id == raw_snapshot.id)
-                        .order_by(IVSurfacePointRecord.strike, IVSurfacePointRecord.option_type)
+                    (
+                        await session.execute(
+                            select(IVSurfacePointRecord)
+                            .where(IVSurfacePointRecord.raw_snapshot_id == raw_snapshot.id)
+                            .order_by(IVSurfacePointRecord.strike, IVSurfacePointRecord.option_type)
+                        )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
 
             if not iv_rows:
                 return None
@@ -476,7 +489,9 @@ class HistoricalDataService:
             indicator_names = ["ATR", "RSI", "BBANDS"]
 
         if len(price_data) >= 5:
-            indicator_df = TechnicalIndicatorEngine.compute_indicators(price_data, indicators=indicator_names)
+            indicator_df = TechnicalIndicatorEngine.compute_indicators(
+                price_data, indicators=indicator_names
+            )
         else:
             indicator_df = price_data.copy()
             for column in ("atr", "rsi", "bb_upper", "bb_mid", "bb_lower"):
@@ -528,7 +543,9 @@ class HistoricalDataService:
         if not records and prefer_replay and allow_latest_replay_fallback:
             records = self._filter_replay_eligible_records(
                 self._filter_historically_usable_records(
-                    await self._load_latest_replay_snapshot_records(provider=provider, symbol=symbol)
+                    await self._load_latest_replay_snapshot_records(
+                        provider=provider, symbol=symbol
+                    )
                 )
             )
         if not records:
@@ -537,7 +554,9 @@ class HistoricalDataService:
         frame = pd.DataFrame(
             [
                 {
-                    "captured_at": record.captured_at,
+                    "captured_at": self._normalize_timestamp(
+                        (record.metrics or {}).get("feature_available_at") or record.captured_at
+                    ),
                     "spot_price": record.spot_price,
                     "net_gex": record.net_gex,
                     "total_call_gex": record.total_call_gex,
@@ -552,6 +571,64 @@ class HistoricalDataService:
 
         rule = self._get_resample_rule(interval)
         close_series = frame["spot_price"]
+        complete_clock = all(
+            (record.metrics or {}).get("feature_available_at") for record in records
+        )
+        metadata_keys = (
+            "actual_instrument",
+            "is_proxy",
+            "nominal_options_delay_minutes",
+            "quote_freshness",
+            "open_interest_frequency",
+            "source_received_at",
+        )
+        source_metadata = {}
+        limitations = []
+        for key in metadata_keys:
+            known = {
+                (record.metrics or {}).get(key)
+                for record in records
+                if (record.metrics or {}).get(key) is not None
+            }
+            if len(known) == 1:
+                source_metadata[key] = known.pop()
+            elif len(known) > 1 and key in {"actual_instrument", "is_proxy"}:
+                raise ValueError("Captured history mixes different instrument/proxy identities")
+        versions = sorted(
+            {
+                str((record.metrics or {}).get("calculation_version", "unknown_legacy"))
+                for record in records
+            }
+        )
+        quality_flags = sorted(
+            {
+                str(flag)
+                for record in records
+                for flag in (record.metrics or {}).get("quality_flags", [])
+            }
+        )
+        if quality_flags:
+            limitations.append(
+                "Retained descriptive captures have quality flags: "
+                + ", ".join(quality_flags)
+                + "; the research protocol excludes flagged snapshots."
+            )
+        if "unknown_legacy" in versions:
+            limitations.append("Legacy captures have an unknown calculation version.")
+        if not complete_clock:
+            limitations.append("Some captures lack a completed feature-availability timestamp.")
+        attrs = {
+            "source_metadata": source_metadata,
+            "calculation_versions": versions,
+            "quality_limitations": limitations,
+            "timestamp_basis": "feature completion; bars labeled at end"
+            if complete_clock and rule
+            else (
+                "feature completion"
+                if complete_clock
+                else "capture reference; feature completion unknown"
+            ),
+        }
 
         if rule is None:
             price_data = pd.DataFrame(
@@ -566,16 +643,22 @@ class HistoricalDataService:
             gex_data = frame[
                 ["spot_price", "net_gex", "total_call_gex", "total_put_gex", "zero_gamma_level"]
             ].copy()
+            price_data.attrs.update(attrs)
+            gex_data.attrs.update(attrs)
             return price_data, gex_data
 
-        ohlc = close_series.resample(rule).ohlc().dropna()
+        ohlc = close_series.resample(rule, label="right", closed="left").ohlc().dropna()
+        ohlc = ohlc.loc[: datetime.now(ET)]
         ohlc["volume"] = 0.0
         gex_data = (
             frame[["spot_price", "net_gex", "total_call_gex", "total_put_gex", "zero_gamma_level"]]
-            .resample(rule)
+            .resample(rule, label="right", closed="left")
             .last()
             .dropna()
         )
+        gex_data = gex_data.loc[: datetime.now(ET)]
+        ohlc.attrs.update(attrs)
+        gex_data.attrs.update(attrs)
         return ohlc, gex_data
 
     async def run_backtest(
@@ -695,7 +778,9 @@ class HistoricalDataService:
                     offset += batch_size
                 return None
         except Exception as exc:
-            logger.warning("Latest timestamp lookup failed for %s/%s: %s", provider_name, underlying, exc)
+            logger.warning(
+                "Latest timestamp lookup failed for %s/%s: %s", provider_name, underlying, exc
+            )
             return None
 
     async def get_latest_snapshot(
@@ -882,6 +967,7 @@ class HistoricalDataService:
             source_metadata={
                 "storage_format": "normalized_options_chain",
                 "columns": list(options_df.columns),
+                **dict(options_df.attrs.get("source_metadata", {})),
             },
         )
         session.add(raw_record)
@@ -1081,10 +1167,14 @@ class HistoricalDataService:
     async def _apply_retention(self, session: AsyncSession, *, reference_date: date) -> None:
         cutoff = reference_date - timedelta(days=RETENTION_DAYS)
         stale_session_ids = (
-            await session.execute(
-                select(MarketSessionRecord.id).where(MarketSessionRecord.trading_date < cutoff)
+            (
+                await session.execute(
+                    select(MarketSessionRecord.id).where(MarketSessionRecord.trading_date < cutoff)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         if not stale_session_ids:
             return
@@ -1109,10 +1199,13 @@ class HistoricalDataService:
     def _deserialize_options_payload(raw_record: RawOptionsSnapshotRecord) -> pd.DataFrame:
         payload = list(raw_record.payload or [])
         if not payload:
-            columns = raw_record.source_metadata.get("columns") if raw_record.source_metadata else None
+            columns = (
+                raw_record.source_metadata.get("columns") if raw_record.source_metadata else None
+            )
             return pd.DataFrame(columns=columns or [])
 
         options_df = pd.DataFrame(payload)
+        options_df.attrs["source_metadata"] = dict(raw_record.source_metadata or {})
         if "expiration" not in options_df.columns and raw_record.expiration_date is not None:
             options_df["expiration"] = raw_record.expiration_date.isoformat()
         return options_df
@@ -1139,16 +1232,35 @@ class HistoricalDataService:
         raw_record: RawOptionsSnapshotRecord,
         snapshot: GEXSnapshot,
     ) -> None:
-        """Overwrite the derived snapshot for one raw capture with corrected values."""
+        """Recompute values while retaining the original raw capture's provenance."""
         snapshot_record = await self._find_snapshot_record_for_raw(
             session=session,
             raw_record=raw_record,
         )
 
+        original_metrics = (
+            dict(snapshot_record.metrics or {}) if snapshot_record is not None else {}
+        )
+        source_metadata = dict(raw_record.source_metadata or {})
+        original_completion = (
+            original_metrics.get("original_feature_available_at")
+            or original_metrics.get("feature_available_at")
+            or source_metadata.get("original_feature_available_at")
+            or source_metadata.get("feature_available_at")
+        )
+        # Recomputed values have no trustworthy historical feature-completion clock.
+        snapshot_metrics = {
+            **original_metrics,
+            **source_metadata,
+            **dict(snapshot.metrics or {}),
+            "has_raw_snapshot": True,
+            "is_raw_rebuilt": True,
+            "reconstructed_at": datetime.now(ET).isoformat(),
+            "original_feature_available_at": original_completion,
+            "feature_available_at": None,
+        }
+
         if snapshot_record is None:
-            snapshot_metrics = dict(snapshot.metrics or {})
-            snapshot_metrics["has_raw_snapshot"] = True
-            snapshot_metrics["is_raw_rebuilt"] = True
             snapshot_record = GEXSnapshotRecord(
                 session_id=raw_record.session_id,
                 provider=raw_record.provider,
@@ -1172,9 +1284,6 @@ class HistoricalDataService:
             snapshot_record.net_gex = float(snapshot.net_gex)
             snapshot_record.zero_gamma_level = float(snapshot.zero_gamma_level)
             snapshot_record.dominant_strike = float(snapshot.dominant_strike)
-            snapshot_metrics = dict(snapshot.metrics or {})
-            snapshot_metrics["has_raw_snapshot"] = True
-            snapshot_metrics["is_raw_rebuilt"] = True
             snapshot_record.metrics = snapshot_metrics
             await session.execute(
                 delete(GEXByStrikePointRecord).where(
@@ -1238,7 +1347,10 @@ class HistoricalDataService:
         normalized_captured_at = self._normalize_rebuild_timestamp(raw_record)
         trading_date = self._get_raw_record_trading_date(raw_record)
         for candidate in candidates:
-            if self._normalize_timestamp_for_session(candidate.captured_at, trading_date) == normalized_captured_at:
+            if (
+                self._normalize_timestamp_for_session(candidate.captured_at, trading_date)
+                == normalized_captured_at
+            ):
                 return candidate
         return None
 
@@ -1336,9 +1448,7 @@ class HistoricalDataService:
                 serializable[column] = serializable[column].astype(str)
             elif serializable[column].dtype == object:
                 serializable[column] = serializable[column].map(
-                    lambda value: value.isoformat()
-                    if hasattr(value, "isoformat")
-                    else value
+                    lambda value: value.isoformat() if hasattr(value, "isoformat") else value
                 )
 
         return serializable.fillna(value=pd.NA).replace({pd.NA: None}).to_dict(orient="records")
@@ -1424,7 +1534,9 @@ class HistoricalDataService:
         frame = pd.DataFrame(
             [
                 {
-                    "captured_at": record.captured_at,
+                    "captured_at": cls._normalize_timestamp(
+                        (record.metrics or {}).get("feature_available_at") or record.captured_at
+                    ),
                     "snapshot_id": record.id,
                     "spot_price": record.spot_price,
                     "total_call_gex": record.total_call_gex,
@@ -1439,7 +1551,7 @@ class HistoricalDataService:
         frame["captured_at"] = pd.to_datetime(frame["captured_at"], utc=True).dt.tz_convert(ET)
         frame = frame.set_index("captured_at").sort_index()
         aggregated = (
-            frame.resample(rule)
+            frame.resample(rule, label="right", closed="left")
             .agg(
                 {
                     "snapshot_id": "last",
@@ -1453,6 +1565,7 @@ class HistoricalDataService:
             )
             .dropna(subset=["snapshot_id"])
         )
+        aggregated = aggregated.loc[: datetime.now(ET)]
 
         record_by_id = {record.id: record for record in records}
         snapshots: list[GEXSnapshot] = []
@@ -1479,15 +1592,14 @@ class HistoricalDataService:
     @staticmethod
     def _record_to_snapshot(record: GEXSnapshotRecord) -> GEXSnapshot:
         return GEXSnapshot(
-            timestamp=record.captured_at,
+            timestamp=HistoricalDataService._normalize_timestamp(record.captured_at),
             spot_price=record.spot_price,
             total_call_gex=record.total_call_gex,
             total_put_gex=record.total_put_gex,
             net_gex=record.net_gex,
             zero_gamma_level=record.zero_gamma_level,
             gex_by_strike={
-                float(point.strike): float(point.gex_value)
-                for point in record.strike_points
+                float(point.strike): float(point.gex_value) for point in record.strike_points
             },
             dominant_strike=record.dominant_strike,
             metrics=dict(record.metrics or {}),

@@ -4,17 +4,35 @@ Tests IV-surface, technical-indicators, vectorbt-backtest endpoints
 including parameter validation, error handling, and response schemas.
 """
 
-import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pandas as pd
+import pytest
 from fastapi.testclient import TestClient
 
 from app.core.provider_registry import ProviderUnavailableError
+from app.core.rate_provider import RiskFreeRateProvider
 from app.main import app
 from app.models.schemas import GEXSnapshot
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def offline_rate_provider(monkeypatch):
+    provider = RiskFreeRateProvider()
+    monkeypatch.setattr(provider, "_fetch_from_fred", lambda: 0.05)
+    monkeypatch.setattr("app.core.rate_provider.get_rate_provider", lambda: provider)
+
+
+@pytest.fixture(autouse=True)
+def empty_analytics_history(monkeypatch):
+    history = MagicMock()
+    history.get_iv_surface = AsyncMock(return_value=None)
+    history.get_latest_snapshot = AsyncMock(return_value=None)
+    history.get_technical_indicators = AsyncMock(return_value=None)
+    history.get_time_series_frames = AsyncMock(return_value=(pd.DataFrame(), pd.DataFrame()))
+    monkeypatch.setattr("app.api.routes.analytics.get_historical_data_service", lambda: history)
 
 
 def _build_snapshot(
@@ -39,6 +57,7 @@ def _build_snapshot(
 # ---------------------------------------------------------------------------
 # /api/data/risk-free-rate
 # ---------------------------------------------------------------------------
+
 
 class TestRiskFreeRateEndpoint:
     """Tests for GET /api/data/risk-free-rate."""
@@ -72,6 +91,7 @@ class TestRiskFreeRateEndpoint:
 # /api/analytics/iv-surface
 # ---------------------------------------------------------------------------
 
+
 class TestIVSurfaceEndpoint:
     """Tests for GET /api/analytics/iv-surface."""
 
@@ -86,6 +106,7 @@ class TestIVSurfaceEndpoint:
                 "impliedVolatility": [0.22, 0.20, 0.18, 0.24],
                 "openInterest": [1000, 800, 1200, 900],
                 "expiration": ["2099-01-15"] * 4,
+                "T": [0.01] * 4,
             }
         )
 
@@ -96,28 +117,25 @@ class TestIVSurfaceEndpoint:
         mock_df["implied_vol"] = mock_df["impliedVolatility"]
         mock_df["open_interest"] = mock_df["openInterest"]
 
-        with patch("app.core.yfinance_provider.YFinanceClient") as mock_client_cls:
+        with patch("app.api.routes.analytics.get_data_client") as mock_client_cls:
             instance = AsyncMock()
             instance.get_options_chain_for_gex = AsyncMock(return_value=(mock_df, 585.0))
             mock_client_cls.return_value = instance
 
             resp = client.get("/api/analytics/iv-surface")
-            # 200 (success), 503 (no data), or 404 (empty chain) are all valid
-            assert resp.status_code in (200, 503, 404, 500)
+            assert resp.status_code == 200
 
-    def test_invalid_symbol_returns_error(self):
-        """Invalid symbol should gracefully return an error (not crash the server)."""
-        with patch("app.core.yfinance_provider.YFinanceClient") as mock_client_cls:
+    def test_empty_provider_chain_returns_an_empty_surface(self):
+        with patch("app.api.routes.analytics.get_data_client") as mock_client_cls:
             instance = AsyncMock()
             # Return empty DF to simulate no data for invalid symbol
-            instance.get_options_chain_for_gex = AsyncMock(
-                return_value=(pd.DataFrame(), 0.0)
-            )
+            instance.get_options_chain_for_gex = AsyncMock(return_value=(pd.DataFrame(), 0.0))
             mock_client_cls.return_value = instance
 
             resp = client.get("/api/analytics/iv-surface?symbol=XXXXINVALID")
-            # 404 (empty chain) is the expected outcome with a mock that returns empty
-            assert resp.status_code in (200, 404, 503)
+            assert resp.status_code == 200
+            assert resp.json()["count"] == 0
+            assert resp.json()["surface"] == []
 
     def test_provider_param_keeps_registry_managed_client_open(self):
         """IV surface should honor provider selection without closing the cached provider."""
@@ -142,12 +160,26 @@ class TestIVSurfaceEndpoint:
         mock_client.get_options_chain_for_gex = AsyncMock(return_value=(mock_df, 5005.0))
         mock_client.close = AsyncMock()
 
-        with patch("app.api.routes.analytics.get_data_client", return_value=mock_client) as mock_get_client:
-            with patch("app.api.routes.analytics.get_historical_data_service") as mock_history_service:
+        with patch(
+            "app.api.routes.analytics.get_data_client", return_value=mock_client
+        ) as mock_get_client:
+            with patch(
+                "app.api.routes.analytics.get_historical_data_service"
+            ) as mock_history_service:
                 mock_history_service.return_value.get_iv_surface = AsyncMock(return_value=None)
-                with patch("app.core.vollib_bridge.VolLibBridge.calculate_iv_surface", return_value=mock_df[["strike", "type", "implied_vol", "mid"]].rename(columns={"implied_vol": "iv", "mid": "mid_price"}).assign(moneyness=1.0)):
-                    with patch("app.core.vollib_bridge.VolLibBridge.calculate_iv_skew", return_value=pd.DataFrame()):
-                        with patch("app.core.rate_provider.get_rate_provider") as mock_rate_provider:
+                with patch(
+                    "app.core.vollib_bridge.VolLibBridge.calculate_iv_surface",
+                    return_value=mock_df[["strike", "type", "implied_vol", "mid"]]
+                    .rename(columns={"implied_vol": "iv", "mid": "mid_price"})
+                    .assign(moneyness=1.0),
+                ):
+                    with patch(
+                        "app.core.vollib_bridge.VolLibBridge.calculate_iv_skew",
+                        return_value=pd.DataFrame(),
+                    ):
+                        with patch(
+                            "app.core.rate_provider.get_rate_provider"
+                        ) as mock_rate_provider:
                             mock_rate_provider.return_value.get_rate.return_value = 0.05
                             resp = client.get("/api/analytics/iv-surface?provider=tradier")
 
@@ -168,9 +200,7 @@ class TestIVSurfaceEndpoint:
 
     def test_unavailable_provider_returns_503(self):
         """Unavailable providers should surface as service failures."""
-        with patch(
-            "app.api.routes.analytics.get_historical_data_service"
-        ) as mock_history_service:
+        with patch("app.api.routes.analytics.get_historical_data_service") as mock_history_service:
             mock_history_service.return_value.get_iv_surface = AsyncMock(return_value=None)
             with patch(
                 "app.api.routes.analytics.get_data_client",
@@ -188,9 +218,11 @@ class TestIVSurfaceEndpoint:
 # /api/analytics/technical-indicators
 # ---------------------------------------------------------------------------
 
+
 class TestTechnicalIndicatorsEndpoint:
     """Tests for GET /api/analytics/technical-indicators."""
 
+    @pytest.mark.integration
     def test_valid_request_returns_200_or_503(self):
         """Should return 200 with indicators or 503 if data unavailable."""
         resp = client.get(
@@ -198,11 +230,10 @@ class TestTechnicalIndicatorsEndpoint:
         )
         assert resp.status_code in (200, 503)
 
+    @pytest.mark.integration
     def test_response_schema_on_success(self):
         """On 200 response, schema must contain required fields."""
-        resp = client.get(
-            "/api/analytics/technical-indicators?symbol=SPY&period=5d&interval=1d"
-        )
+        resp = client.get("/api/analytics/technical-indicators?symbol=SPY&period=5d&interval=1d")
         if resp.status_code == 200:
             body = resp.json()
             assert "symbol" in body
@@ -210,12 +241,14 @@ class TestTechnicalIndicatorsEndpoint:
             assert "count" in body
             assert "indicators" in body
 
+    @pytest.mark.integration
     def test_invalid_period_raises_validation_error(self):
         """Unexpected parameter format should be gracefully handled."""
         resp = client.get("/api/analytics/technical-indicators?symbol=BAD&period=999z")
         # Accepts 200, 422, 503 — just no 500 internal unhandled
         assert resp.status_code != 500
 
+    @pytest.mark.integration
     def test_multiple_indicators_requested(self):
         """Should accept comma-separated indicators string."""
         resp = client.get(
@@ -296,8 +329,13 @@ class TestTechnicalIndicatorsEndpoint:
                 assert anchor_snapshot.spot_price == 590.0
                 return synthetic_payload
 
-        with patch("app.api.routes.analytics.get_historical_data_service", return_value=history_service):
-            with patch("app.api.routes.analytics.get_demo_data_service", return_value=_AnchoredDemoService()):
+        with patch(
+            "app.api.routes.analytics.get_historical_data_service", return_value=history_service
+        ):
+            with patch(
+                "app.api.routes.analytics.get_demo_data_service",
+                return_value=_AnchoredDemoService(),
+            ):
                 with patch(
                     "app.api.routes.analytics._load_yfinance_history",
                     return_value=pd.DataFrame(),
@@ -334,22 +372,120 @@ class TestTechnicalIndicatorsEndpoint:
 
         class _FailingDemoService:
             def get_technical_indicators(self, *args, **kwargs):
-                raise AssertionError("synthetic fallback should not be used when real history is available")
+                raise AssertionError(
+                    "synthetic fallback should not be used when real history is available"
+                )
 
         market_history = pd.DataFrame(
             {
-                "Open": [585.0, 586.0, 587.0, 588.0, 589.0, 590.0, 591.0, 592.0, 593.0, 594.0,
-                         595.0, 596.0, 597.0, 598.0, 599.0, 600.0, 601.0, 602.0, 603.0, 604.0,
-                         605.0, 606.0, 607.0, 608.0, 609.0],
-                "High": [586.0, 587.0, 588.0, 589.0, 590.0, 591.0, 592.0, 593.0, 594.0, 595.0,
-                         596.0, 597.0, 598.0, 599.0, 600.0, 601.0, 602.0, 603.0, 604.0, 605.0,
-                         606.0, 607.0, 608.0, 609.0, 610.0],
-                "Low": [584.0, 585.0, 586.0, 587.0, 588.0, 589.0, 590.0, 591.0, 592.0, 593.0,
-                        594.0, 595.0, 596.0, 597.0, 598.0, 599.0, 600.0, 601.0, 602.0, 603.0,
-                        604.0, 605.0, 606.0, 607.0, 608.0],
-                "Close": [585.5, 586.5, 587.5, 588.5, 589.5, 590.5, 591.5, 592.5, 593.5, 594.5,
-                          595.5, 596.5, 597.5, 598.5, 599.5, 600.5, 601.5, 602.5, 603.5, 604.5,
-                          605.5, 606.5, 607.5, 608.5, 609.5],
+                "Open": [
+                    585.0,
+                    586.0,
+                    587.0,
+                    588.0,
+                    589.0,
+                    590.0,
+                    591.0,
+                    592.0,
+                    593.0,
+                    594.0,
+                    595.0,
+                    596.0,
+                    597.0,
+                    598.0,
+                    599.0,
+                    600.0,
+                    601.0,
+                    602.0,
+                    603.0,
+                    604.0,
+                    605.0,
+                    606.0,
+                    607.0,
+                    608.0,
+                    609.0,
+                ],
+                "High": [
+                    586.0,
+                    587.0,
+                    588.0,
+                    589.0,
+                    590.0,
+                    591.0,
+                    592.0,
+                    593.0,
+                    594.0,
+                    595.0,
+                    596.0,
+                    597.0,
+                    598.0,
+                    599.0,
+                    600.0,
+                    601.0,
+                    602.0,
+                    603.0,
+                    604.0,
+                    605.0,
+                    606.0,
+                    607.0,
+                    608.0,
+                    609.0,
+                    610.0,
+                ],
+                "Low": [
+                    584.0,
+                    585.0,
+                    586.0,
+                    587.0,
+                    588.0,
+                    589.0,
+                    590.0,
+                    591.0,
+                    592.0,
+                    593.0,
+                    594.0,
+                    595.0,
+                    596.0,
+                    597.0,
+                    598.0,
+                    599.0,
+                    600.0,
+                    601.0,
+                    602.0,
+                    603.0,
+                    604.0,
+                    605.0,
+                    606.0,
+                    607.0,
+                    608.0,
+                ],
+                "Close": [
+                    585.5,
+                    586.5,
+                    587.5,
+                    588.5,
+                    589.5,
+                    590.5,
+                    591.5,
+                    592.5,
+                    593.5,
+                    594.5,
+                    595.5,
+                    596.5,
+                    597.5,
+                    598.5,
+                    599.5,
+                    600.5,
+                    601.5,
+                    602.5,
+                    603.5,
+                    604.5,
+                    605.5,
+                    606.5,
+                    607.5,
+                    608.5,
+                    609.5,
+                ],
                 "Volume": [1_000_000] * 25,
             }
         )
@@ -362,12 +498,13 @@ class TestTechnicalIndicatorsEndpoint:
             assert symbol == "SPY"
             return _FakeTicker()
 
-        fake_yfinance = MagicMock()
-        fake_yfinance.Ticker.side_effect = _build_fake_ticker
-
-        with patch("app.api.routes.analytics.get_historical_data_service", return_value=history_service):
-            with patch("app.api.routes.analytics.get_demo_data_service", return_value=_FailingDemoService()):
-                with patch.dict(sys.modules, {"yfinance": fake_yfinance}):
+        with patch(
+            "app.api.routes.analytics.get_historical_data_service", return_value=history_service
+        ):
+            with patch(
+                "app.api.routes.analytics.get_demo_data_service", return_value=_FailingDemoService()
+            ):
+                with patch("yfinance.Ticker", side_effect=_build_fake_ticker) as ticker:
                     resp = client.get(
                         "/api/analytics/technical-indicators",
                         params={
@@ -380,7 +517,7 @@ class TestTechnicalIndicatorsEndpoint:
                     )
 
         assert resp.status_code == 200
-        fake_yfinance.Ticker.assert_called_once_with("SPY")
+        ticker.assert_called_once_with("SPY")
         body = resp.json()
         assert body["count"] == 25
         assert any(point["atr"] is not None for point in body["data"])
@@ -392,90 +529,83 @@ class TestTechnicalIndicatorsEndpoint:
 # /api/analytics/vectorbt-backtest
 # ---------------------------------------------------------------------------
 
+
 class TestVectorbtBacktestEndpoint:
-    """Tests for GET /api/analytics/vectorbt-backtest."""
+    """Exercise real execution and response serialization from captured fixtures."""
 
-    def test_valid_request_returns_200_or_503(self):
-        resp = client.get(
-            "/api/analytics/vectorbt-backtest"
-            "?start_date=2025-01-01&end_date=2025-03-01"
-            "&entry_threshold=-1000000000&exit_threshold=0&initial_cash=100000"
-        )
-        assert resp.status_code in (200, 503)
+    @pytest.fixture
+    def captured_client(self, monkeypatch):
+        from app.api.routes import analytics as routes
 
-    def test_response_schema_on_success(self):
-        """On 200, response must include all required backtest metrics."""
-        dummy_result = {
-            "total_return": 0.05,
-            "sharpe_ratio": 1.2,
-            "sortino_ratio": 1.5,
-            "calmar_ratio": 0.8,
-            "max_drawdown": -0.12,
-            "total_trades": 10,
-            "winning_trades": 6,
-            "losing_trades": 4,
-            "win_rate": 0.6,
-            "profit_factor": 1.5,
-            "avg_trade_return": 0.005,
-            "best_trade": 0.02,
-            "worst_trade": -0.01,
-            "avg_trade_duration_minutes": 30.0,
-            "start_date": "2025-01-01T00:00:00",
-            "end_date": "2025-03-01T00:00:00",
-            "equity_curve": [100000.0, 101000.0, 105000.0],
+        index = pd.date_range("2025-01-06 09:30", periods=4, freq="5min", tz="America/New_York")
+        prices = pd.DataFrame({"close": [100, 110, 99, 121]}, index=index)
+        gex = pd.DataFrame({"net_gex": [-2e9, -2e9, 2e9, 2e9]}, index=index)
+        history = MagicMock()
+        history.get_time_series_frames = AsyncMock(return_value=(prices, gex))
+        monkeypatch.setattr(routes, "get_historical_data_service", lambda: history)
+        return TestClient(app), {
+            "start_date": "2025-01-01",
+            "end_date": "2025-03-01",
+            "provider": "yfinance",
+            "symbol": "SPY",
+            "initial_cash": 1000,
+            "fees": 0,
+            "slippage": 0,
         }
 
-        with patch("app.core.vectorbt_backtester.VectorBTBacktester.run_gex_signal_backtest",
-                   return_value=dummy_result):
-            resp = client.get(
-                "/api/analytics/vectorbt-backtest"
-                "?start_date=2025-01-01&end_date=2025-03-01"
-            )
-            if resp.status_code == 200:
-                body = resp.json()
-                required = {
-                    "total_return", "sharpe_ratio", "max_drawdown",
-                    "total_trades", "win_rate", "equity_curve",
-                }
-                assert required.issubset(body.keys())
+    def test_serializes_completed_directional_trade_and_actual_equity(self, captured_client):
+        fixture_client, params = captured_client
+        response = fixture_client.get("/api/analytics/vectorbt-backtest", params=params)
+        assert response.status_code == 200, response.json()
+        body = response.json()
+        assert body["total_return"] == pytest.approx(0.1)
+        assert body["avg_trade_return"] == pytest.approx(0.1)
+        assert body["total_trades"] == body["closed_trades"] == 1
+        assert body["open_trades"] == body["losing_trades"] == 0
+        assert body["winning_trades"] == 1
+        assert body["profit_factor"] is None
+        assert body["avg_trade_duration_minutes"] == 10
+        assert body["equity_curve"] == pytest.approx([1000, 1000, 900, 1100])
+        assert len(body["equity_timestamps"]) == 4
+        assert body["bar_interval_minutes"] == 5
+        assert body["provenance"]["data_kind"] == "captured"
 
-    def test_equity_curve_is_list(self):
-        """equity_curve should be a list of floats."""
-        resp = client.get(
-            "/api/analytics/vectorbt-backtest"
-            "?start_date=2025-01-01&end_date=2025-03-01"
+    def test_request_costs_reduce_the_actual_equity(self, captured_client):
+        fixture_client, params = captured_client
+        response = fixture_client.get(
+            "/api/analytics/vectorbt-backtest", params={**params, "fees": 0.01, "slippage": 0.02}
         )
-        if resp.status_code == 200:
-            curve = resp.json()["equity_curve"]
-            assert isinstance(curve, list)
-            assert all(isinstance(v, int | float) for v in curve)
+        assert response.status_code == 200, response.json()
+        assert response.json()["total_return"] == pytest.approx(0.035934769947582934)
 
-    def test_end_date_before_start_date_handled(self):
-        """Should return error or 503 when date range is invalid."""
-        resp = client.get(
-            "/api/analytics/vectorbt-backtest"
-            "?start_date=2025-06-01&end_date=2025-01-01"
+    def test_invalid_date_order_is_a_client_error(self, captured_client):
+        fixture_client, params = captured_client
+        response = fixture_client.get(
+            "/api/analytics/vectorbt-backtest", params={**params, "start_date": "2025-06-01"}
         )
-        # Should not be a 500 unhandled crash
-        assert resp.status_code != 500
+        assert response.status_code == 400
 
+    @pytest.mark.parametrize(
+        "control,value", [("fees", -0.1), ("position_size", 0), ("execution_delay_bars", 0)]
+    )
+    def test_invalid_execution_controls_are_rejected(self, captured_client, control, value):
+        fixture_client, params = captured_client
+        response = fixture_client.get(
+            "/api/analytics/vectorbt-backtest", params={**params, control: value}
+        )
+        assert response.status_code == 422
 
-# ---------------------------------------------------------------------------
-# /api/analytics/summary-statistics (existing — boundary tests)
-# ---------------------------------------------------------------------------
 
 class TestSummaryStatsEdgeCases:
-    """Edge-case tests for existing summary statistics endpoint."""
+    """Missing captured history must produce an explicit absence response."""
 
-    def test_no_data_in_cache_returns_503_or_200(self):
-        """Without cached data, endpoint should gracefully handle absence."""
-        resp = client.get("/api/analytics/summary-statistics")
-        assert resp.status_code in (200, 503)
+    @pytest.mark.parametrize("params", [{}, {"start_date": "2025-01-01", "end_date": "2025-03-01"}])
+    def test_missing_history_returns_404(self, monkeypatch, params):
+        from app.api.routes import analytics as routes
 
-    def test_accepts_date_params(self):
-        """Should accept optional start_date and end_date params."""
-        resp = client.get(
-            "/api/analytics/summary-statistics"
-            "?start_date=2025-01-01&end_date=2025-03-01"
-        )
-        assert resp.status_code in (200, 503)
+        history = MagicMock()
+        history.get_time_series_frames = AsyncMock(return_value=(pd.DataFrame(), pd.DataFrame()))
+        monkeypatch.setattr(routes, "get_historical_data_service", lambda: history)
+        response = client.get("/api/analytics/summary-statistics", params=params)
+        assert response.status_code == 404
+        assert "history" in response.json()["detail"].lower()

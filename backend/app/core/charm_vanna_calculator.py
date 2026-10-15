@@ -1,10 +1,11 @@
 """0DTE GEX Backend - Charm & Vanna Flow Calculator.
 
-Calculates "hidden" dealer hedging flows from:
+Calculates conditional dollar delta-hedge scenarios from:
 - Charm: Delta decay from time passing (even if spot doesn't move)
 - Vanna: Delta change from IV changing (even if spot doesn't move)
 
-These are the invisible structural forces that move the market.
+These scenarios assume call-positive/put-negative inventory; OI does not
+identify actual dealer positions or executed trading flows.
 """
 
 import logging
@@ -16,6 +17,8 @@ from numpy.typing import NDArray
 from app.core.constants import (
     CHARM_TIME_ADVANCE_MINUTES,
     CONTRACT_MULTIPLIER,
+    MAX_IV,
+    MIN_IV,
     RISK_FREE_RATE,
     SPX_DIVIDEND_YIELD,
     VANNA_IV_BUMP,
@@ -27,18 +30,12 @@ logger = logging.getLogger(__name__)
 
 class CharmVannaCalculator:
     """
-    Calculate dealer Charm & Vanna exposure from options chain data.
+    Dollar hedge changes under fixed-spot time and IV scenarios.
 
-    Charm Flow: Expected dealer hedging volume purely from time decay.
-        "Even if the market doesn't move, dealers must buy/sell X futures
-         because 30 minutes passed."
-
-    Vanna Flow: Expected dealer hedging volume from a 1% IV change.
-        "If IV drops 1%, dealers must buy/sell X futures to rebalance."
-
-    Dealer positioning conventions (same as GEX):
-    - Dealers SHORT calls → Charm/Vanna adjustments are NEGATIVE for calls
-    - Dealers LONG puts → Charm/Vanna adjustments are POSITIVE for puts
+    Inventory follows the GEX convention: calls positive, puts negative.
+    Hedge change is the negative inventory-weighted delta change, times the
+    contract multiplier and spot. Positive means buying underlying notional.
+    Scenario sums are additive diagnostics, not a joint time-and-IV repricing.
     """
 
     def __init__(
@@ -63,20 +60,21 @@ class CharmVannaCalculator:
         spot_price: float,
     ) -> tuple[float, dict[float, float]]:
         """
-        Calculate expected dealer hedging flow from Charm (time decay).
+        Reprice delta after elapsed minutes, capped at each contract's expiry.
+
+        Time to expiration is in years of 365.25 calendar days, as in GEX.
 
         Returns:
             (total_charm_flow, charm_by_strike)
-            - Positive flow = dealers must BUY futures (upward pressure)
-            - Negative flow = dealers must SELL futures (downward pressure)
+            - Positive flow = buy underlying dollar notional
+            - Negative flow = sell underlying dollar notional
         """
         if len(strikes) == 0:
             return 0.0, {}
 
         spot_vector = np.full_like(strikes, spot_price)
 
-        # Calculate Charm for all contracts
-        charms = BlackScholesGreeks.charm(
+        delta_before = BlackScholesGreeks.delta(
             spot_vector,
             strikes,
             time_to_expiration,
@@ -86,12 +84,24 @@ class CharmVannaCalculator:
             q=self.dividend_yield,
         )
 
-        # Charm flow: OI × Charm × 100 (contract multiplier)
-        # Charm already has the per-day rate; scale by time_advance fraction
-        time_fraction = self.time_advance_minutes / (24 * 60)  # fraction of a day
-        charm_flow_raw = open_interest * charms * CONTRACT_MULTIPLIER * time_fraction
+        remaining_time = np.maximum(
+            time_to_expiration - self.time_advance_minutes / (365.25 * 24 * 60), 0.0
+        )
+        delta_after = BlackScholesGreeks.delta(
+            spot_vector,
+            strikes,
+            remaining_time,
+            self.risk_free_rate,
+            implied_vol,
+            option_types,
+            q=self.dividend_yield,
+        )
+        charm_flow_raw = (
+            open_interest * (delta_after - delta_before) * CONTRACT_MULTIPLIER * spot_price
+        )
+        charm_flow_raw = np.where(time_to_expiration > 0, charm_flow_raw, 0.0)
 
-        # Apply dealer positioning: calls negative, puts positive
+        # The delta-neutral hedge changes opposite to assumed signed inventory.
         is_call = option_types == "call"
         charm_flow = np.where(is_call, -charm_flow_raw, charm_flow_raw)
 
@@ -112,34 +122,45 @@ class CharmVannaCalculator:
         spot_price: float,
     ) -> tuple[float, dict[float, float]]:
         """
-        Calculate expected dealer hedging flow from Vanna (IV change).
+        Reprice delta under an absolute annualized-IV bump at unchanged spot/time.
 
-        Simulates what happens if IV changes by self.iv_bump (-1% by default).
+        IV is clamped to the supported bounds; -.01 means one volatility point.
 
         Returns:
             (total_vanna_flow, vanna_by_strike)
-            - Positive flow = dealers must BUY futures (upward pressure)
-            - Negative flow = dealers must SELL futures (downward pressure)
+            - Positive flow = buy underlying dollar notional
+            - Negative flow = sell underlying dollar notional
         """
         if len(strikes) == 0:
             return 0.0, {}
 
         spot_vector = np.full_like(strikes, spot_price)
 
-        # Calculate Vanna for all contracts
-        vannas = BlackScholesGreeks.vanna(
+        delta_before = BlackScholesGreeks.delta(
             spot_vector,
             strikes,
             time_to_expiration,
             self.risk_free_rate,
             implied_vol,
+            option_types,
             q=self.dividend_yield,
         )
 
-        # Vanna flow: OI × Vanna × ΔIV × 100
-        vanna_flow_raw = open_interest * vannas * self.iv_bump * CONTRACT_MULTIPLIER
+        delta_after = BlackScholesGreeks.delta(
+            spot_vector,
+            strikes,
+            time_to_expiration,
+            self.risk_free_rate,
+            np.clip(implied_vol + self.iv_bump, MIN_IV, MAX_IV),
+            option_types,
+            q=self.dividend_yield,
+        )
+        vanna_flow_raw = (
+            open_interest * (delta_after - delta_before) * CONTRACT_MULTIPLIER * spot_price
+        )
+        vanna_flow_raw = np.where(time_to_expiration > 0, vanna_flow_raw, 0.0)
 
-        # Apply dealer positioning: calls negative, puts positive
+        # The delta-neutral hedge changes opposite to assumed signed inventory.
         is_call = option_types == "call"
         vanna_flow = np.where(is_call, -vanna_flow_raw, vanna_flow_raw)
 
@@ -203,8 +224,8 @@ class CharmVannaCalculator:
         net_hidden_flow = charm_flow + vanna_flow
 
         logger.debug(
-            f"Hidden flows: Charm={charm_flow/1e6:.2f}M, "
-            f"Vanna={vanna_flow/1e6:.2f}M, Net={net_hidden_flow/1e6:.2f}M"
+            f"Hidden flows: Charm={charm_flow / 1e6:.2f}M, "
+            f"Vanna={vanna_flow / 1e6:.2f}M, Net={net_hidden_flow / 1e6:.2f}M"
         )
 
         return {
@@ -223,9 +244,6 @@ class CharmVannaCalculator:
         """Aggregate values by strike price."""
         if len(strikes) == 0:
             return {}
-        unique_strikes = np.unique(strikes)
-        result: dict[float, float] = {}
-        for strike in unique_strikes:
-            mask = strikes == strike
-            result[float(strike)] = float(np.sum(values[mask]))
-        return result
+        unique_strikes, inverse = np.unique(strikes, return_inverse=True)
+        totals = np.bincount(inverse, weights=values)
+        return dict(zip(unique_strikes.tolist(), totals.tolist(), strict=True))

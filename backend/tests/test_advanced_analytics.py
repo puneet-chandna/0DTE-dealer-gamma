@@ -173,7 +173,7 @@ class TestAdvancedAnalyticsEnrichment:
                     call_intensity=1.0,
                     put_intensity=0.5,
                     net_toxicity=0.5,
-                    squeeze_probability=0.25,
+                    squeeze_score=0.25,
                 )
 
         class FakeKalmanFilter:
@@ -254,7 +254,7 @@ class TestAdvancedAnalyticsEnrichment:
                     call_intensity=1.0,
                     put_intensity=0.5,
                     net_toxicity=0.5,
-                    squeeze_probability=0.25,
+                    squeeze_score=0.25,
                 )
 
         class FakeKalmanFilter:
@@ -279,7 +279,7 @@ class TestAdvancedAnalyticsEnrichment:
                 call_intensity=9.0,
                 put_intensity=3.0,
                 net_toxicity=6.0,
-                squeeze_probability=0.8,
+                squeeze_score=0.8,
             ),
             smoothed_net_gex=-123.0,
         )
@@ -331,7 +331,7 @@ class TestAdvancedAnalyticsEnrichment:
                     call_intensity=1.0,
                     put_intensity=0.5,
                     net_toxicity=0.5,
-                    squeeze_probability=0.25,
+                    squeeze_score=0.25,
                 )
 
         class FakeKalmanFilter:

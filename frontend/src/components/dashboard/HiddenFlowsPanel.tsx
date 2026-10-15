@@ -108,7 +108,7 @@ function HiddenFlowsPanelComponent({ data, isLoading }: HiddenFlowsPanelProps) {
                 : 'bg-rose-900/50 text-rose-300'
             )}
           >
-            {netIsPositive ? '▲ Dealers Buying' : '▼ Dealers Selling'}
+            {netIsPositive ? '▲ Buy scenario' : '▼ Sell scenario'}
           </div>
         </div>
       </CardHeader>
@@ -124,7 +124,7 @@ function HiddenFlowsPanelComponent({ data, isLoading }: HiddenFlowsPanelProps) {
           label="Vanna Flow"
           value={data.vanna_flow}
           icon={<Waves className="h-4 w-4 text-sky-400" />}
-          description="Hedging pressure if IV drops 1%"
+          description="Hedge notional if IV drops 1 percentage point"
         />
 
         <div className="border-t border-zinc-800 pt-3">
@@ -132,7 +132,7 @@ function HiddenFlowsPanelComponent({ data, isLoading }: HiddenFlowsPanelProps) {
             label="Net Hidden Flow"
             value={data.net_hidden_flow}
             icon={<ArrowUpDown className="h-4 w-4 text-violet-400" />}
-            description="Combined Charm + Vanna pressure on the market"
+            description="Combined fixed-spot scenarios; not observed orders"
           />
         </div>
       </CardContent>

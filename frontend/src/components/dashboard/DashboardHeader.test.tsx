@@ -101,6 +101,12 @@ describe('DashboardHeader', () => {
     expect(screen.getByText(/replay capture: mar 27, 2026 3:34 pm et/i)).toBeInTheDocument();
   });
 
+  it('describes an active WebSocket as transport rather than real-time market data', () => {
+    render(<DashboardHeader isRealtime connectionState="connected" />);
+    expect(screen.getByText('Stream connected')).toBeInTheDocument();
+    expect(screen.queryByText('Real-time')).not.toBeInTheDocument();
+  });
+
   it('avoids a hydration mismatch when the client theme differs from the server render', async () => {
     storeState.state = {
       ...storeState.state,

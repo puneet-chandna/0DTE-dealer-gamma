@@ -20,6 +20,7 @@ from app.core.data_acquisition import (
     RateLimiter,
     get_current_trading_date,
 )
+from app.core.provenance import source_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -82,10 +83,7 @@ class TradierClient(DataProvider):
             timeout=30.0,
         )
 
-        logger.info(
-            f"Initialised TradierClient @ {self._base_url} "
-            f"({calls_per_minute} req/min)"
-        )
+        logger.info(f"Initialised TradierClient @ {self._base_url} ({calls_per_minute} req/min)")
 
     # ------------------------------------------------------------------ #
     #  Internal helpers                                                    #
@@ -164,16 +162,10 @@ class TradierClient(DataProvider):
         if quote is None:
             quote = {}
 
-        price = (
-            quote.get("last")
-            or quote.get("close")
-            or quote.get("prevclose")
-        )
+        price = quote.get("last") or quote.get("close") or quote.get("prevclose")
 
         if price is None:
-            raise ValueError(
-                f"Could not extract spot price for {symbol} from Tradier"
-            )
+            raise ValueError(f"Could not extract spot price for {symbol} from Tradier")
 
         price = float(price)
         logger.info(f"Tradier spot price for {symbol}: {price}")
@@ -195,9 +187,7 @@ class TradierClient(DataProvider):
         if isinstance(dates, str):
             dates = [dates]
 
-        logger.debug(
-            f"Tradier expirations for {underlying}: {len(dates)} dates"
-        )
+        logger.debug(f"Tradier expirations for {underlying}: {len(dates)} dates")
         return dates
 
     async def get_options_chain_snapshot(
@@ -223,19 +213,13 @@ class TradierClient(DataProvider):
 
         target_exp = exp_str
         if exp_str not in expirations:
-            exp_dates = [
-                datetime.strptime(e, "%Y-%m-%d").date()
-                for e in expirations
-            ]
+            exp_dates = [datetime.strptime(e, "%Y-%m-%d").date() for e in expirations]
             closest = min(
                 exp_dates,
                 key=lambda x: abs((x - expiration_date).days),
             )
             target_exp = closest.strftime("%Y-%m-%d")
-            logger.info(
-                f"Target expiration {exp_str} not available, "
-                f"using {target_exp}"
-            )
+            logger.info(f"Target expiration {exp_str} not available, using {target_exp}")
 
         # Fetch chain with Greeks
         data = await self._request(
@@ -251,9 +235,7 @@ class TradierClient(DataProvider):
         option_list = options_raw.get("option", [])
 
         if not option_list:
-            logger.warning(
-                f"Empty chain for {underlying} exp {target_exp}"
-            )
+            logger.warning(f"Empty chain for {underlying} exp {target_exp}")
             return pd.DataFrame()
 
         # Tradier returns a dict for a single contract and a list for
@@ -261,6 +243,7 @@ class TradierClient(DataProvider):
         if isinstance(option_list, dict):
             option_list = [option_list]
 
+        received_at = datetime.now(ET).isoformat()
         # ---- Map to standard DataFrame ----
         rows: list[dict] = []
         for opt in option_list:
@@ -269,28 +252,24 @@ class TradierClient(DataProvider):
             rows.append(
                 {
                     "symbol": opt.get("symbol", ""),
+                    "underlying_symbol": underlying.upper(),
+                    "received_at": received_at,
+                    "bid_timestamp": source_timestamp(opt.get("bid_date"), unix=True),
+                    "ask_timestamp": source_timestamp(opt.get("ask_date"), unix=True),
+                    "last_trade_at": source_timestamp(opt.get("trade_date"), unix=True),
+                    "greeks_updated_at": greeks.get("updated_at"),
+                    "open_interest_asof": None,
                     "strike": self._safe_float(opt.get("strike")),
                     "expiration": opt.get("expiration_date", target_exp),
-                    "type": (
-                        "call"
-                        if opt.get("option_type", "").lower() == "call"
-                        else "put"
-                    ),
+                    "type": ("call" if opt.get("option_type", "").lower() == "call" else "put"),
                     "bid": self._safe_float(opt.get("bid")),
                     "ask": self._safe_float(opt.get("ask")),
-                    "mid": (
-                        self._safe_float(opt.get("bid"))
-                        + self._safe_float(opt.get("ask"))
-                    )
+                    "mid": (self._safe_float(opt.get("bid")) + self._safe_float(opt.get("ask")))
                     / 2,
-                    "open_interest": self._safe_int(
-                        opt.get("open_interest")
-                    ),
+                    "open_interest": self._safe_int(opt.get("open_interest")),
                     "volume": self._safe_int(opt.get("volume")),
                     # Tradier serves ORATS Greeks directly
-                    "implied_vol": self._safe_float(
-                        greeks.get("mid_iv")
-                    ),
+                    "implied_vol": self._safe_float(greeks.get("mid_iv")),
                     "delta": self._safe_float(greeks.get("delta"))
                     if greeks.get("delta") is not None
                     else None,
@@ -307,10 +286,15 @@ class TradierClient(DataProvider):
             )
 
         df = pd.DataFrame(rows)
-        logger.info(
-            f"Tradier: fetched {len(df)} contracts for "
-            f"{underlying} exp {target_exp}"
-        )
+        df.attrs["source_metadata"] = {
+            "actual_instrument": underlying.upper(),
+            "is_proxy": False,
+            "source_received_at": received_at,
+            "quote_freshness": "source clocks preserved when supplied; entitlement and freshness must be checked",
+            "open_interest_frequency": "daily",
+            "open_interest_asof": None,
+        }
+        logger.info(f"Tradier: fetched {len(df)} contracts for {underlying} exp {target_exp}")
         return df
 
     # ---- Filtering helpers (shared logic) ----
@@ -334,10 +318,7 @@ class TradierClient(DataProvider):
         filtered = df[mask].copy()
 
         if len(filtered) < len(df):
-            logger.debug(
-                f"Filtered to {len(filtered)} 0DTE contracts "
-                f"(from {len(df)})"
-            )
+            logger.debug(f"Filtered to {len(filtered)} 0DTE contracts (from {len(df)})")
 
         return filtered.drop(columns=["expiration_date"])
 

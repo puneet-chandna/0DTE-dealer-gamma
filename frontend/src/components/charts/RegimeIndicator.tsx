@@ -33,7 +33,7 @@ const regimeConfig: Record<
   short_gamma: {
     icon: TrendingDown,
     label: 'Short Gamma',
-    description: 'Volatility amplification expected',
+    description: 'Negative signed GEX proxy',
     bgClass: 'bg-rose-500',
     textClass: 'text-rose-400',
     glowClass: 'shadow-rose-500/30',
@@ -41,7 +41,7 @@ const regimeConfig: Record<
   long_gamma: {
     icon: TrendingUp,
     label: 'Long Gamma',
-    description: 'Volatility dampening expected',
+    description: 'Positive signed GEX proxy',
     bgClass: 'bg-emerald-500',
     textClass: 'text-emerald-400',
     glowClass: 'shadow-emerald-500/30',
@@ -49,7 +49,7 @@ const regimeConfig: Record<
   neutral: {
     icon: Activity,
     label: 'Neutral',
-    description: 'Normal volatility expected',
+    description: 'GEX proxy near the regime threshold',
     bgClass: 'bg-amber-500',
     textClass: 'text-amber-400',
     glowClass: 'shadow-amber-500/30',

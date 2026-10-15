@@ -102,6 +102,7 @@ export function formatZeroGammaValue(snapshot?: GEXSnapshot | null): string {
 
     if (relation === 'above_range') return 'Above Range';
     if (relation === 'below_range') return 'Below Range';
+    if (snapshot.metrics?.zero_gamma_method === 'repriced_fixed_contract_iv') return 'No root found';
 
     return 'Unknown';
   }
@@ -119,6 +120,7 @@ export function formatZeroGammaStatus(snapshot?: GEXSnapshot | null): string {
 
     if (relation === 'above_range') return 'Above sampled range';
     if (relation === 'below_range') return 'Below sampled range';
+    if (snapshot.metrics?.zero_gamma_method === 'repriced_fixed_contract_iv') return 'No crossing detected within ±20% of spot';
 
     return 'Unknown';
   }

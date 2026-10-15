@@ -11,6 +11,7 @@ from app.api.routes import gex as gex_routes
 from app.core.advanced_analytics import reset_advanced_analytics_state
 from app.main import app
 from app.models.schemas import GEXSnapshot
+from app.services.cache import GEXCache
 
 client = TestClient(app)
 
@@ -285,7 +286,7 @@ class TestGEXEndpoints:
         assert hawkes_payload["call_intensity"] == 0.0
         assert hawkes_payload["put_intensity"] == 0.0
         assert hawkes_payload["net_toxicity"] == 0.0
-        assert hawkes_payload["squeeze_probability"] == 0.0
+        assert hawkes_payload["squeeze_score"] == 0.0
         assert hawkes_payload["baseline_ready"] is False
         assert hawkes_payload["provider_mode"] == "tradier_rich"
         assert hawkes_payload["event_count"] == 0
@@ -346,7 +347,10 @@ class TestGEXEndpoints:
         mock_client._get_ticker_symbol = lambda symbol: "SPY"
 
         mock_calculator = MagicMock()
-        mock_calculator.calculate_gex_from_chain.side_effect = [live_snapshot, live_snapshot.model_copy(deep=True)]
+        mock_calculator.calculate_gex_from_chain.side_effect = [
+            live_snapshot,
+            live_snapshot.model_copy(deep=True),
+        ]
 
         with patch("app.api.routes.gex.get_data_client", return_value=mock_client):
             with patch("app.api.routes.gex.get_gex_calculator", return_value=mock_calculator):
@@ -363,7 +367,9 @@ class TestGEXEndpoints:
         assert 0.0 < hawkes_payload["confidence_score"] < 0.8
         assert hawkes_payload["event_count"] == 1
 
-    def test_current_gex_low_quality_live_snapshot_uses_persisted_fallback_without_cache_write(self):
+    def test_current_gex_low_quality_live_snapshot_uses_persisted_fallback_without_cache_write(
+        self,
+    ):
         """Low-quality live snapshots should not replace usable provider-specific fallback data."""
         low_quality_snapshot = {
             "timestamp": "2099-01-15T10:30:00-05:00",
@@ -574,10 +580,13 @@ class TestDataEndpoints:
         mock_client.close = AsyncMock()
 
         mock_cache = MagicMock()
+        mock_cache.fetch_once = GEXCache().fetch_once
         mock_cache.get_if_fresh.return_value = None
         mock_cache.get.return_value = None
 
-        with patch("app.api.routes.data.get_data_client", return_value=mock_client) as mock_get_client:
+        with patch(
+            "app.api.routes.data.get_data_client", return_value=mock_client
+        ) as mock_get_client:
             with patch("app.api.routes.data.get_cache", return_value=mock_cache):
                 response = client.get(
                     "/api/data/options-chain",
@@ -601,6 +610,7 @@ class TestDataEndpoints:
         mock_client.close = AsyncMock()
 
         mock_cache = MagicMock()
+        mock_cache.fetch_once = GEXCache().fetch_once
         mock_cache.get_if_fresh.return_value = None
         mock_cache.get.return_value = None
 
@@ -628,7 +638,7 @@ class TestAnalyticsEndpoints:
 
     def test_summary_statistics(self):
         """Summary statistics should work with default dates."""
-        response = client.get("/api/analytics/summary-statistics")
+        response = client.get("/api/analytics/summary-statistics", params={"demo": True})
 
         assert response.status_code == 200
         data = response.json()
@@ -647,7 +657,7 @@ class TestAnalyticsEndpoints:
         """GEX volatility with valid dates returns analysis."""
         response = client.get(
             "/api/analytics/gex-volatility",
-            params={"start_date": "2024-01-01", "end_date": "2024-01-15"},
+            params={"start_date": "2024-01-01", "end_date": "2024-01-15", "demo": True},
         )
 
         assert response.status_code == 200
@@ -671,6 +681,7 @@ class TestAnalyticsEndpoints:
                 "start_date": "2024-01-01",
                 "end_date": "2024-01-15",
                 "entry_threshold": -1e9,
+                "demo": True,
             },
         )
 

@@ -4,7 +4,9 @@
 
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { XAxis } from 'recharts';
 import { ChartErrorBoundary } from './ChartErrorBoundary';
+import { EquityCurveChart } from './EquityCurveChart';
 import { MomentumGauge } from './MomentumGauge';
 import { RegimeIndicator } from './RegimeIndicator';
 import { ZeroGammaLine, zeroGammaReferenceLineConfig } from './ZeroGammaLine';
@@ -22,10 +24,11 @@ vi.mock('framer-motion', () => ({
 
 vi.mock('recharts', () => ({
   ResponsiveContainer: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  AreaChart: ({ children }: React.PropsWithChildren) => <svg>{children}</svg>,
   ComposedChart: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
   Line: () => <div />,
   Area: () => <div />,
-  XAxis: () => <div />,
+  XAxis: vi.fn(() => <div />),
   YAxis: () => <div />,
   CartesianGrid: () => <div />,
   Tooltip: () => <div />,
@@ -83,19 +86,19 @@ describe('RegimeIndicator', () => {
   it('renders short_gamma regime correctly', () => {
     render(<RegimeIndicator regime="short_gamma" />);
     expect(screen.getByText('Short Gamma')).toBeInTheDocument();
-    expect(screen.getByText('Volatility amplification expected')).toBeInTheDocument();
+    expect(screen.getByText('Negative signed GEX proxy')).toBeInTheDocument();
   });
 
   it('renders long_gamma regime correctly', () => {
     render(<RegimeIndicator regime="long_gamma" />);
     expect(screen.getByText('Long Gamma')).toBeInTheDocument();
-    expect(screen.getByText('Volatility dampening expected')).toBeInTheDocument();
+    expect(screen.getByText('Positive signed GEX proxy')).toBeInTheDocument();
   });
 
   it('renders neutral regime correctly', () => {
     render(<RegimeIndicator regime="neutral" />);
     expect(screen.getByText('Neutral')).toBeInTheDocument();
-    expect(screen.getByText('Normal volatility expected')).toBeInTheDocument();
+    expect(screen.getByText('GEX proxy near the regime threshold')).toBeInTheDocument();
   });
 
   it('renders compact mode', () => {
@@ -121,6 +124,32 @@ describe('RegimeIndicator', () => {
 });
 
 describe('MomentumGauge', () => {
+  it('shows the snapshot heuristic as a score rather than a calibrated probability', () => {
+    render(<MomentumGauge data={{
+      call_intensity: 1.2, put_intensity: 0.4, net_toxicity: 0.8,
+      squeeze_score: 0.7, baseline_ready: true,
+    }} />);
+    expect(screen.getByText('Squeeze Score')).toBeInTheDocument();
+    expect(screen.getByText('70 / 100')).toBeInTheDocument();
+    expect(screen.getByText('⚡ SQUEEZE 70 / 100')).toBeInTheDocument();
+    expect(screen.getByText(/uncalibrated snapshot heuristic/i)).toBeInTheDocument();
+    expect(screen.queryByText(/squeeze prob/i)).not.toBeInTheDocument();
+  });
+
+  it('defaults a legacy payload without squeeze_score to zero', () => {
+    render(<MomentumGauge data={JSON.parse('{"call_intensity":1.2,"put_intensity":0.4,"net_toxicity":0.8,"squeeze_probability":0.9}')} />);
+    expect(screen.getByText('0 / 100')).toBeInTheDocument();
+    expect(screen.queryByText(/NaN|⚡ SQUEEZE/)).not.toBeInTheDocument();
+    expect(screen.getByText(/^baselining$/i)).toBeInTheDocument();
+    expect(screen.getByText(/low confidence/i)).toBeInTheDocument();
+  });
+
+  it('preserves the waiting state when data is absent', () => {
+    render(<MomentumGauge />);
+    expect(screen.getByText('Awaiting Hawkes-style data')).toBeInTheDocument();
+    expect(screen.queryByText('Squeeze Score')).not.toBeInTheDocument();
+  });
+
   it('uses the Hawkes-style dual label and shows provider confidence metadata', () => {
     render(
       <MomentumGauge
@@ -128,7 +157,7 @@ describe('MomentumGauge', () => {
           call_intensity: 1.2,
           put_intensity: 0.4,
           net_toxicity: 0.8,
-          squeeze_probability: 0.7,
+          squeeze_score: 0.7,
           baseline_ready: true,
           confidence_score: 0.92,
           provider_mode: 'tradier_rich',
@@ -149,7 +178,7 @@ describe('MomentumGauge', () => {
           call_intensity: 0,
           put_intensity: 0,
           net_toxicity: 0,
-          squeeze_probability: 0,
+          squeeze_score: 0,
           baseline_ready: false,
           confidence_score: 0.2,
           provider_mode: 'yfinance_proxy',
@@ -170,7 +199,7 @@ describe('MomentumGauge', () => {
           call_intensity: 0.4,
           put_intensity: 0.2,
           net_toxicity: 0.2,
-          squeeze_probability: 0.15,
+          squeeze_score: 0.15,
           confidence_score: 0.6,
           provider_mode: 'yfinance_proxy',
           event_count: 2,
@@ -190,7 +219,7 @@ describe('MomentumGauge', () => {
           call_intensity: 0.2,
           put_intensity: 0.3,
           net_toxicity: -0.1,
-          squeeze_probability: 0.1,
+          squeeze_score: 0.1,
           baseline_ready: true,
           confidence_score: 0.2,
           provider_mode: 'yfinance_proxy',
@@ -204,6 +233,23 @@ describe('MomentumGauge', () => {
       'bg-rose-500/10',
       'text-rose-300'
     );
+  });
+});
+
+describe('EquityCurveChart', () => {
+  it('distinguishes the same Eastern market time on dates across the DST change', () => {
+    const timestamps = ['2026-03-06T14:30:00Z', '2026-03-09T13:30:00Z'];
+    render(<EquityCurveChart equityCurve={[100000, 110000]} initialCash={100000} timestamps={timestamps} />);
+    const formatTick = vi.mocked(XAxis).mock.calls.at(-1)![0].tickFormatter!;
+    expect(formatTick(timestamps[0], 0)).toBe('Mar 6, 09:30 AM EST');
+    expect(formatTick(timestamps[1], 1)).toBe('Mar 9, 09:30 AM EDT');
+  });
+
+  it('retains period labels when timestamps are absent', () => {
+    render(<EquityCurveChart equityCurve={[100000, 110000]} initialCash={100000} />);
+    const formatTick = vi.mocked(XAxis).mock.calls.at(-1)![0].tickFormatter!;
+    expect(formatTick(0, 0)).toBe('0');
+    expect(formatTick(1, 1)).toBe('1');
   });
 });
 

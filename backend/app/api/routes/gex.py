@@ -18,6 +18,7 @@ from app.core import (
 )
 from app.core.advanced_analytics import enrich_snapshot_with_advanced_analytics
 from app.core.demo_data import get_demo_data_service
+from app.core.provenance import live_capture_metadata
 from app.core.provider_timeouts import get_live_fetch_timeout_seconds
 from app.core.rate_provider import get_rate_provider
 from app.core.snapshot_quality import annotate_snapshot_quality, is_snapshot_replay_eligible
@@ -48,10 +49,7 @@ def get_gex_calculator() -> GEXCalculator:
     return _gex_calculator
 
 
-async def _get_live_gex_snapshot(
-    symbol: str,
-    provider: str | None = None
-) -> dict:
+async def _get_live_gex_snapshot(symbol: str, provider: str | None = None) -> dict:
     """Fetch live data and calculate GEX snapshot.
 
     Args:
@@ -63,19 +61,15 @@ async def _get_live_gex_snapshot(
 
     # Log appropriate message
     request_symbol = getattr(data_client, "_get_ticker_symbol", lambda s: s)(symbol)
-    logger.info(f"Fetching live options data for {symbol} ({request_symbol}) via {data_client.provider_name}")
-
-    # Fetch filtered data
-    options_df, spot_price = await data_client.get_options_chain_for_gex(
-        underlying=symbol
+    logger.info(
+        f"Fetching live options data for {symbol} ({request_symbol}) via {data_client.provider_name}"
     )
 
+    # Fetch filtered data
+    options_df, spot_price = await get_cache().fetch_gex_chain(data_client, symbol)
+
     if options_df.empty:
-        logger.warning(f"No valid 0DTE options data found for {symbol} (possibly weekend). Falling back to mock data.")
-        mock_snapshot = _generate_mock_gex_snapshot(spot_price=spot_price)
-        raw = mock_snapshot.model_dump()
-        raw["provider"] = f"mock ({data_client.provider_name} empty)"
-        return raw
+        raise RuntimeError(f"{data_client.provider_name} returned no contracts for {symbol}")
 
     # Calculate live GEX
     snapshot = gex_calculator.calculate_gex_from_chain(
@@ -94,6 +88,8 @@ async def _get_live_gex_snapshot(
         symbol=symbol,
         provider=data_client.provider_name,
     )
+
+    snapshot.metrics.update(live_capture_metadata(options_df))
 
     # Add provider info
     raw = snapshot.model_dump()
@@ -184,7 +180,11 @@ def _snapshot_is_mock(snapshot_payload: dict) -> bool:
     """Detect generated fallback snapshots masquerading as live data."""
     metrics = snapshot_payload.get("metrics") or {}
     provider = str(snapshot_payload.get("provider", "")).lower()
-    return bool(metrics.get("is_mock_data") == 1.0 or provider.startswith("mock"))
+    return bool(
+        metrics.get("is_mock_data") == 1.0
+        or metrics.get("is_demo_data") == 1.0
+        or provider.startswith(("mock", "demo:"))
+    )
 
 
 def _coerce_snapshot_payload(snapshot_like, *, provider: str | None = None) -> dict:
@@ -193,7 +193,7 @@ def _coerce_snapshot_payload(snapshot_like, *, provider: str | None = None) -> d
     else:
         payload = dict(snapshot_like)
     if provider is not None:
-        payload["provider"] = payload.get("provider", provider)
+        payload["provider"] = payload.get("provider") or provider
     return payload
 
 
@@ -217,7 +217,7 @@ def _get_cached_snapshot_payload(
             continue
 
         payload = _coerce_snapshot_payload(cached_snapshot, provider=provider)
-        if is_snapshot_replay_eligible(payload):
+        if not _snapshot_is_mock(payload) and is_snapshot_replay_eligible(payload):
             return payload
 
         logger.warning(
@@ -238,11 +238,7 @@ async def _resolve_best_snapshot_payload(
     cache,
 ) -> dict:
     cache_key = f"gex:current:{symbol}:{active_provider}"
-    legacy_key = (
-        f"gex:current:{symbol}"
-        if active_provider == default_provider
-        else None
-    )
+    legacy_key = f"gex:current:{symbol}" if active_provider == default_provider else None
 
     fresh_snapshot = _get_cached_snapshot_payload(
         cache=cache,
@@ -267,6 +263,9 @@ async def _resolve_best_snapshot_payload(
         elif not is_snapshot_replay_eligible(live_snapshot):
             live_error = RuntimeError("live provider returned a low-quality snapshot")
         else:
+            cache.update_spot_price(
+                live_snapshot["spot_price"], symbol=symbol, provider=active_provider,
+            )
             cache.set(cache_key, live_snapshot)
             if legacy_key is not None:
                 cache.set(legacy_key, live_snapshot)
@@ -283,13 +282,16 @@ async def _resolve_best_snapshot_payload(
     )
     if stale_snapshot is not None:
         logger.warning("Returning stale cached GEX snapshot for %s (%s)", symbol, active_provider)
+        stale_snapshot["metrics"] = {**stale_snapshot.get("metrics", {}), "is_stale": True}
         return stale_snapshot
 
     persisted_snapshot = await _get_latest_persisted_snapshot(
         symbol=symbol,
         provider=active_provider,
     )
-    if persisted_snapshot is not None:
+    if persisted_snapshot is not None and not _snapshot_is_mock(
+        _coerce_snapshot_payload(persisted_snapshot)
+    ):
         logger.warning(
             "Returning latest persisted GEX snapshot for %s (%s)",
             symbol,
@@ -304,53 +306,6 @@ async def _resolve_best_snapshot_payload(
         raise live_error
 
     raise RuntimeError("No usable snapshot is available")
-
-
-def _generate_mock_gex_snapshot(spot_price: float = 5950.0) -> GEXSnapshot:
-    """Generate a mock GEX snapshot for demo/testing purposes."""
-    import numpy as np
-
-    now = datetime.now(ET)
-
-    # Generate realistic mock data
-    np.random.seed(int(now.timestamp()) % 10000)
-    net_gex = np.random.uniform(-3e9, 2e9)
-    call_gex = np.random.uniform(-2e9, -0.5e9)
-    put_gex = net_gex - call_gex
-
-    # Generate strike breakdown
-    strikes = np.arange(spot_price - 100, spot_price + 105, 5)
-    gex_by_strike = {}
-    for strike in strikes:
-        distance = abs(strike - spot_price)
-        magnitude = np.exp(-distance / 50) * np.random.uniform(-5e8, 5e8)
-        gex_by_strike[float(strike)] = float(magnitude)
-
-    # Find dominant strike
-    dominant_strike = max(gex_by_strike.keys(), key=lambda k: abs(gex_by_strike[k]))
-
-    # Zero gamma level (mock)
-    zgl = spot_price + np.random.uniform(-20, 20)
-
-    return GEXSnapshot(
-        timestamp=now,
-        spot_price=spot_price,
-        total_call_gex=call_gex,
-        total_put_gex=put_gex,
-        net_gex=net_gex,
-        zero_gamma_level=zgl,
-        gex_by_strike=gex_by_strike,
-        dominant_strike=dominant_strike,
-        metrics={
-            "regime_code": 0.0 if net_gex > 0 else -1.0,
-            "gex_imbalance": abs(call_gex) / max(abs(put_gex), 1),
-            "is_mock_data": 1.0,
-            "capture_quality": 0.0,
-            "quality_flags": ["mock_data"],
-            "meaningful_strike_count": float(len(gex_by_strike)),
-            "is_replay_eligible": False,
-        },
-    )
 
 
 @router.get("/current", response_model=GEXSnapshot)
@@ -426,7 +381,9 @@ async def get_historical_gex(
     Note: Currently returns synthetic data for demonstration.
     """
     if start_date > end_date:
-        raise HTTPException(status_code=400, detail="start_date must be before or equal to end_date")
+        raise HTTPException(
+            status_code=400, detail="start_date must be before or equal to end_date"
+        )
     if (end_date - start_date).days > 365:
         raise HTTPException(status_code=400, detail="Date range cannot exceed 365 days")
 

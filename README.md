@@ -55,7 +55,7 @@
 </table>
 
 > [!NOTE]
-> **Model-based signals. Provider-dependent data.** Yahoo Finance uses SPY options scaled by 10 as an SPX approximation. Configured Tradier can fetch SPX/SPXW options directly. Quote freshness varies by provider and API environment.
+> **Model-based signals. Provider-dependent data.** Yahoo Finance uses SPY options scaled by 10 as an SPX approximation. Configured Tradier can fetch SPX/SPXW options directly. Yahoo publishes a nominal 15-minute delay for US options; open interest is daily information. Source quote freshness and the OI as-of date can remain unknown.
 
 <details>
 <summary><strong>Update timing and data interpretation</strong></summary>
@@ -64,6 +64,8 @@ WebSocket updates have a nominal five-second interval; fetch time and client
 messages can change it. Current GEX REST polling is configurable (30 seconds by
 default). These updates can continue outside market hours. Polling more often
 does not guarantee fresher quotes.
+
+See [Yahoo’s published delay](https://help.yahoo.com/kb/SLN2310.html) and the [offline captured-data research command](scripts/research_gex_volatility.py). Backtests use captured history or explicit synthetic demo mode, identify the tradable instrument, and model delayed close execution with user-supplied costs.
 
 Read the [dashboard guide](docs/UNDERSTANDING_GEX_DASHBOARD.md#data-delays-and-the-spy-proxy)
 for provider caveats and interpretation limits.
@@ -74,7 +76,7 @@ for provider caveats and interpretation limits.
 
 ## Quick Start
 
-**Prerequisites:** Python **3.12+**, Node.js **20+** with **pnpm**, and
+**Prerequisites:** Python **3.12 or 3.13**, Node.js **20+** with **pnpm**, and
 [Bash **5.1+**](https://lists.gnu.org/archive/html/info-gnu/2020-12/msg00003.html)
 on Linux, macOS with a current Bash, or WSL.
 
@@ -90,6 +92,8 @@ cd 0DTE-dealer-gamma
 ```
 
 ### 2. Install and configure
+
+Check `python3 --version` first; use `python3.13` below if your default is 3.14.
 
 ```bash
 python3 -m venv backend/.venv

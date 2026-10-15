@@ -30,6 +30,10 @@ interface BacktestParams {
   entry_threshold: number;
   exit_threshold: number;
   initial_cash: number;
+  fees: number;
+  slippage: number;
+  position_size: number;
+  execution_delay_bars: number;
 }
 
 interface BacktestRunState {
@@ -44,6 +48,10 @@ type BacktestRunAction =
 
 function formatPct(value: number): string {
   return `${(value * 100).toFixed(2)}%`;
+}
+
+function formatRatio(value: number | null): string {
+  return value === null ? '—' : value.toFixed(2);
 }
 
 function backtestRunReducer(
@@ -70,11 +78,15 @@ function backtestRunReducer(
 export default function BacktestPage() {
   const { demoModeEnabled } = useUIStore();
   const [params, setParams] = useState<BacktestParams>({
-    start_date: '2025-01-01',
-    end_date: '2025-03-01',
+    start_date: getCurrentMarketDateString(),
+    end_date: getCurrentMarketDateString(),
     entry_threshold: -1e9,
     exit_threshold: 0,
     initial_cash: 100000,
+    fees: 0.001,
+    slippage: 0.001,
+    position_size: 1,
+    execution_delay_bars: 1,
   });
 
   const [runState, dispatchRun] = useReducer(backtestRunReducer, {
@@ -83,7 +95,7 @@ export default function BacktestPage() {
   });
   const autoStartedDemoRef = useRef(false);
 
-  const { data: result, isLoading, error, isFetching } = useVectorbtBacktest(
+  const { data: result, isLoading, error, isFetching, refetch } = useVectorbtBacktest(
     runState.submitted,
     runState.runEnabled
   );
@@ -95,12 +107,17 @@ export default function BacktestPage() {
       ? `Future dates aren't available for backtests. Choose a date on or before ${marketToday} (New York market date).`
       : null;
   const handleRun = useCallback(() => {
-    if (futureDateError || !params.start_date || !params.end_date) {
+    if (futureDateError || !params.start_date || !params.end_date || params.start_date > params.end_date) {
+      return;
+    }
+
+    if (JSON.stringify(params) === JSON.stringify(runState.submitted)) {
+      void refetch();
       return;
     }
 
     dispatchRun({ type: 'submit', params });
-  }, [futureDateError, params]);
+  }, [futureDateError, params, refetch, runState.submitted]);
 
   const isRunning = isLoading || isFetching;
   const canRunBacktest = !isRunning && !futureDateError && !!params.start_date && !!params.end_date;
@@ -142,7 +159,7 @@ export default function BacktestPage() {
         <div className="mb-8">
           <h1 className="text-2xl font-bold tracking-tight">Strategy Backtester</h1>
           <p className="mt-1 text-sm text-zinc-400">
-            GEX signal-based backtesting powered by vectorbt (long-only; fees/slippage 0.1% each; series freq must match the 1min assumption)
+            Directional long-underlying simulation. Signals execute at a later close; costs and fills are assumptions.
           </p>
         </div>
 
@@ -154,6 +171,7 @@ export default function BacktestPage() {
               <CardTitle>Parameters</CardTitle>
             </CardHeader>
             <CardContent className="space-y-5">
+              <form onSubmit={(event) => { event.preventDefault(); if (event.currentTarget.checkValidity()) handleRun(); }} className="space-y-5">
               {/* Date Range */}
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>
@@ -166,6 +184,8 @@ export default function BacktestPage() {
                   <input
                     id="backtest-start-date"
                     type="date"
+                    required
+                    max={params.end_date || marketToday}
                     value={params.start_date}
                     onChange={(e) => setParams((p) => ({ ...p, start_date: e.target.value }))}
                     className="w-full rounded-lg border border-zinc-700 bg-zinc-800/60 px-3 py-2 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500/30"
@@ -181,6 +201,9 @@ export default function BacktestPage() {
                   <input
                     id="backtest-end-date"
                     type="date"
+                    required
+                    min={params.start_date}
+                    max={marketToday}
                     value={params.end_date}
                     onChange={(e) => setParams((p) => ({ ...p, end_date: e.target.value }))}
                     className="w-full rounded-lg border border-zinc-700 bg-zinc-800/60 px-3 py-2 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500/30"
@@ -196,54 +219,78 @@ export default function BacktestPage() {
 
               {/* Thresholds */}
               <div>
-                <label className="text-xs font-medium text-zinc-400 block mb-1.5">
+                <label htmlFor="backtest-entry" className="text-xs font-medium text-zinc-400 block mb-1.5">
                   Entry Threshold (GEX $)
                 </label>
                 <input
+                  id="backtest-entry"
+                  required
                   type="number"
                   value={params.entry_threshold}
                   onChange={(e) =>
-                    setParams((p) => ({ ...p, entry_threshold: parseFloat(e.target.value) || -1e9 }))
+                    setParams((p) => ({ ...p, entry_threshold: Number(e.target.value) }))
                   }
                   className="w-full rounded-lg border border-zinc-700 bg-zinc-800/60 px-3 py-2 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500/30 font-mono"
-                  step={1e8}
+                  step="any"
                 />
                 <p className="mt-1 text-xs text-zinc-500">Enter long when GEX drops below this</p>
               </div>
 
               <div>
-                <label className="text-xs font-medium text-zinc-400 block mb-1.5">
+                <label htmlFor="backtest-exit" className="text-xs font-medium text-zinc-400 block mb-1.5">
                   Exit Threshold (GEX $)
                 </label>
                 <input
+                  id="backtest-exit"
+                  required
                   type="number"
                   value={params.exit_threshold}
                   onChange={(e) =>
                     setParams((p) => ({ ...p, exit_threshold: parseFloat(e.target.value) || 0 }))
                   }
                   className="w-full rounded-lg border border-zinc-700 bg-zinc-800/60 px-3 py-2 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500/30 font-mono"
-                  step={1e8}
+                  step="any"
                 />
               </div>
 
               <div>
-                <label className="text-xs font-medium text-zinc-400 block mb-1.5">
+                <label htmlFor="backtest-cash" className="text-xs font-medium text-zinc-400 block mb-1.5">
                   Initial Cash
                 </label>
                 <input
+                  id="backtest-cash"
+                  required
+                  min={1}
                   type="number"
                   value={params.initial_cash}
                   onChange={(e) =>
-                    setParams((p) => ({ ...p, initial_cash: parseFloat(e.target.value) || 100000 }))
+                    setParams((p) => ({ ...p, initial_cash: Number(e.target.value) }))
                   }
                   className="w-full rounded-lg border border-zinc-700 bg-zinc-800/60 px-3 py-2 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500/30 font-mono"
-                  step={10000}
+                  step="any"
                 />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                {([
+                  { key: 'fees', label: 'Fee per side (%)', scale: 100, min: 0, max: 99, step: 0.01 },
+                  { key: 'slippage', label: 'Spread/slippage per side (%)', scale: 100, min: 0, max: 99, step: 0.01 },
+                  { key: 'position_size', label: 'Allocation (%)', scale: 100, min: 1, max: 100, step: 1 },
+                  { key: 'execution_delay_bars', label: 'Execution delay (bars)', scale: 1, min: 1, max: 30, step: 1 },
+                ] as const).map(({ key, label, scale, ...bounds }) => (
+                  <div key={key}>
+                    <label htmlFor={`backtest-${key}`} className="block text-xs text-zinc-400 mb-1.5">{label}</label>
+                    <input id={`backtest-${key}`} type="number" required {...bounds}
+                      value={params[key] * scale}
+                      onChange={(event) => setParams((previous) => ({ ...previous, [key]: Number(event.target.value) / scale }))}
+                      className="w-full rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-100" />
+                  </div>
+                ))}
               </div>
 
               {/* Run Button */}
               <button
-                onClick={handleRun}
+                type="submit"
                 disabled={!canRunBacktest}
                 className={cn(
                   'w-full rounded-lg py-2.5 text-sm font-semibold transition-all',
@@ -263,9 +310,10 @@ export default function BacktestPage() {
                   'Run Backtest'
                 )}
               </button>
+              </form>
 
               {error && !futureDateError && (
-                <div className="rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-400">
+                <div role="alert" className="rounded-lg border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-400">
                   {error.message}
                 </div>
               )}
@@ -279,13 +327,34 @@ export default function BacktestPage() {
                 <CardTitle>Results Summary</CardTitle>
               </CardHeader>
               <CardContent>
+                {result?.provenance && (
+                  <section aria-label="Data provenance" className="mb-4 space-y-2 text-xs text-zinc-400">
+                    <p className="font-medium text-zinc-200">
+                      {result.provenance.actual_instrument}{result.provenance.is_proxy ? ' · SPX proxy' : ''}
+                    </p>
+                    <p>{result.provenance.sample_count} {result.provenance.data_kind} observations · {result.provenance.provider}</p>
+                    {result.provenance.actual_start && result.provenance.actual_end && (
+                      <p>Actual coverage: {result.provenance.actual_start.slice(0, 10)} to {result.provenance.actual_end.slice(0, 10)}</p>
+                    )}
+                    {result.closed_trades !== undefined && <p>{result.closed_trades} closed · {result.open_trades ?? 0} open · trade statistics use closed trades</p>}
+                    {result.fees !== undefined && result.slippage !== undefined && (
+                      <p>Assumptions: fee {formatPct(result.fees)} / side · spread/slippage {formatPct(result.slippage)} / side · delay {result.execution_delay_bars} bars</p>
+                    )}
+                    <details>
+                      <summary className="cursor-pointer">Data and simulation limitations</summary>
+                      <ul className="mt-2 list-disc pl-4 space-y-1">
+                        {result.provenance.quality_limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}
+                      </ul>
+                    </details>
+                  </section>
+                )}
                 {!result && !isRunning ? (
                   <div className="flex min-h-[220px] items-center justify-center sm:min-h-[280px] lg:min-h-[340px]">
                     <div className="text-center">
                       <p className="text-sm text-zinc-500">Configure parameters and run a backtest</p>
                       <p className="mt-1 text-xs text-zinc-600">
                         Strategy: Long when Net GEX {'<'} entry threshold, exit when {'>'} exit threshold
-                        {' '}• Long-only, no shorts • Fees/slippage 0.1% each • Input bars must be 1min (freq assumption)
+                        {' '}• Long-only • Requires captured history or explicit demo mode
                       </p>
                     </div>
                   </div>
@@ -300,21 +369,21 @@ export default function BacktestPage() {
                       value={formatPct(result.total_return)}
                       color={result.total_return >= 0 ? 'positive' : 'negative'}
                     />
-                    <MetricTile label="Sharpe Ratio" value={result.sharpe_ratio.toFixed(2)} />
-                    <MetricTile label="Sortino Ratio" value={result.sortino_ratio.toFixed(2)} />
-                    <MetricTile label="Calmar Ratio" value={result.calmar_ratio.toFixed(2)} />
+                    <MetricTile label="Sharpe Ratio" value={formatRatio(result.sharpe_ratio)} />
+                    <MetricTile label="Sortino Ratio" value={formatRatio(result.sortino_ratio)} />
+                    <MetricTile label="Calmar Ratio" value={formatRatio(result.calmar_ratio)} />
                     <MetricTile
                       label="Max Drawdown"
                       value={formatPct(result.max_drawdown)}
                       color="negative"
                     />
-                    <MetricTile label="Total Trades" value={result.total_trades.toString()} />
+                    <MetricTile label="Entries" value={result.total_trades.toString()} />
                     <MetricTile
                       label="Win Rate"
                       value={formatPct(result.win_rate)}
                       color={result.win_rate >= 0.5 ? 'positive' : 'negative'}
                     />
-                    <MetricTile label="Profit Factor" value={result.profit_factor.toFixed(2)} />
+                    <MetricTile label="Profit Factor" value={formatRatio(result.profit_factor)} />
                     <MetricTile
                       label="Best Trade"
                       value={formatPct(result.best_trade)}
@@ -360,7 +429,8 @@ export default function BacktestPage() {
               <ChartErrorBoundary chartName="Equity Curve">
                 <EquityCurveChart
                   equityCurve={result.equity_curve}
-                  initialCash={params.initial_cash}
+                  initialCash={result.initial_cash ?? runState.submitted?.initial_cash ?? 100000}
+                  timestamps={result.equity_timestamps}
                   height={350}
                 />
               </ChartErrorBoundary>
@@ -371,7 +441,7 @@ export default function BacktestPage() {
         {/* Footer */}
         <div className="mt-8 text-center">
           <p className="text-xs text-zinc-600">
-            Backtesting engine: vectorbt • {demoModeEnabled ? 'Running coherent demo session data for reviews' : 'Using current project backtest inputs'}
+            Backtesting engine: vectorbt • {result?.provenance?.data_kind === 'synthetic' ? 'Synthetic demo; no market evidence' : 'Captured history required; results depend on data quality'}
           </p>
         </div>
       </PageShell>

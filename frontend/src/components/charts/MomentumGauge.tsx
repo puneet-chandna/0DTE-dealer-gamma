@@ -55,7 +55,7 @@ function MomentumGaugeComponent({ data, isLoading }: MomentumGaugeProps) {
     return normalized * 90; // -90 to +90 degrees
   }, [data]);
 
-  const squeezePercent = data ? Math.round(data.squeeze_probability * 100) : 0;
+  const squeezePercent = data && Number.isFinite(data.squeeze_score) ? Math.round(data.squeeze_score * 100) : 0;
   const isHighSqueeze = squeezePercent >= 60;
   const baselineReady = data?.baseline_ready ?? false;
   const confidenceScore = data?.confidence_score ?? 0;
@@ -95,7 +95,7 @@ function MomentumGaugeComponent({ data, isLoading }: MomentumGaugeProps) {
           </div>
           {isHighSqueeze && (
             <div className="animate-pulse rounded-md bg-amber-900/60 px-2 py-0.5 text-xs font-bold text-amber-300">
-              ⚡ SQUEEZE {squeezePercent}%
+              ⚡ SQUEEZE {squeezePercent} / 100
             </div>
           )}
         </div>
@@ -209,14 +209,14 @@ function MomentumGaugeComponent({ data, isLoading }: MomentumGaugeProps) {
             </p>
           </div>
           <div>
-            <p className="text-[10px] uppercase tracking-wider text-zinc-500">Squeeze Prob</p>
+            <p className="text-[10px] uppercase tracking-wider text-zinc-500">Squeeze Score</p>
             <p
               className={cn(
                 'text-sm font-bold tabular-nums',
                 isHighSqueeze ? 'text-amber-400' : 'text-zinc-300'
               )}
             >
-              {squeezePercent}%
+              {squeezePercent} / 100
             </p>
           </div>
           <div>
@@ -226,6 +226,7 @@ function MomentumGaugeComponent({ data, isLoading }: MomentumGaugeProps) {
             </p>
           </div>
         </div>
+        <p className="mt-2 text-center text-xs text-zinc-500">Uncalibrated snapshot heuristic; this score is not a probability.</p>
       </CardContent>
     </Card>
   );

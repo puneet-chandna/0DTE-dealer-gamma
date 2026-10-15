@@ -4,6 +4,10 @@ Use the [README quick start](../README.md#quick-start) for the default SQLite ru
 This guide covers configuration, PostgreSQL, native Windows, and alternative
 startup methods. Run commands from the repository root unless stated otherwise.
 
+Use Python 3.12 or 3.13 for the pinned numerical stack. A virtual environment
+created by an older interpreter can break after a host Python upgrade; create a
+fresh environment with the supported interpreter rather than reusing its packages.
+
 ## Environment configuration
 
 The canonical templates are [backend/.env.example](../backend/.env.example) and
@@ -83,7 +87,7 @@ and [deployment guide](DEPLOYMENT.md).
 
 ## Native Windows PowerShell
 
-With Python 3.12+, Node.js 20+, and pnpm available, run from the repository root:
+With Python 3.12 or 3.13, Node.js 20+, and pnpm available, run from the repository root:
 
 ```powershell
 python -m venv backend\.venv

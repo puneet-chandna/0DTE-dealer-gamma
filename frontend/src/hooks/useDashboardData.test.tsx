@@ -33,6 +33,12 @@ const websocketState = vi.hoisted(() => {
           is_stale?: boolean;
           is_mock?: boolean;
           is_demo?: boolean;
+          total_call_gex?: number;
+          total_put_gex?: number;
+          gex_by_strike?: Record<number, number>;
+          dominant_strike?: number;
+          metrics?: Record<string, number | string | boolean | null>;
+          provider?: string;
         }
       | null;
     isConnected: boolean;
@@ -48,6 +54,12 @@ const websocketState = vi.hoisted(() => {
       net_gex_billions: -1.45,
       zero_gamma_level: 5915,
       spot_price: 5898,
+      provider: 'yfinance',
+      total_call_gex: 500000000,
+      total_put_gex: -1950000000,
+      gex_by_strike: { 5898: -1450000000 },
+      dominant_strike: 5898,
+      metrics: { zero_gamma_crossing_found: false, feature_available_at: '2026-03-23T10:30:00.000Z' },
       regime: 'short_gamma' as const,
       timestamp: '2026-03-23T10:30:00.000Z',
     },
@@ -180,6 +192,18 @@ function createProviderWrapper(queryClient: QueryClient) {
 }
 
 describe('useDashboardData', () => {
+  it('keeps streamed totals, strike exposures and provenance from the same snapshot', async () => {
+    vi.mocked(gexAPI.getCurrentGEX).mockResolvedValue(liveCurrentGex);
+    vi.mocked(gexAPI.getCurrentRegime).mockResolvedValue(liveRegime);
+    vi.mocked(gexAPI.getGEXByStrikes).mockResolvedValue(liveStrikes);
+    const { result } = renderHook(() => useDashboardData(), {wrapper:createProviderWrapper(createQueryClient())});
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(result.current.gexData?.total_call_gex).toBe(500000000);
+    expect(result.current.gexData?.total_put_gex).toBe(-1950000000);
+    expect(result.current.gexData?.metrics.feature_available_at).toBe('2026-03-23T10:30:00.000Z');
+    expect(result.current.strikesData?.strikes).toEqual([5898]);
+    expect(result.current.strikesData?.gex_values).toEqual([-1450000000]);
+  });
   beforeEach(() => {
     vi.clearAllMocks();
     storeState.state = {
@@ -444,6 +468,7 @@ describe('useDashboardData', () => {
   });
 
   it('updates only the selected provider cache when websocket data arrives', async () => {
+    websocketState.stream.data!.provider = 'tradier';
     storeState.state = {
       ...storeState.state,
       selectedProvider: 'tradier',

@@ -21,7 +21,6 @@
 'use client';
 
 import { useMemo } from 'react';
-import { format } from 'date-fns';
 import { useQueryClient } from '@tanstack/react-query';
 import { useDashboardData, useIntradayTimeSeries } from '@/hooks/useDashboardData';
 import { useGEXByStrikes, queryKeys } from '@/hooks/useGEXData';
@@ -71,6 +70,7 @@ export default function DashboardPage() {
     lastUpdateTime,
     retryCount,
     reconnect,
+    error,
   } = useDashboardData();
 
   // Intraday time series from WebSocket accumulation
@@ -84,7 +84,7 @@ export default function DashboardPage() {
 
   // Format last update time
   const lastUpdate = lastUpdateTime
-    ? format(new Date(lastUpdateTime), 'h:mm:ss a')
+    ? `${new Date(lastUpdateTime).toLocaleTimeString('en-US', { timeZone: 'America/New_York' })} ET`
     : undefined;
   let captureTimestampLabel: string | undefined;
   if (gexData?.timestamp) {
@@ -150,6 +150,12 @@ export default function DashboardPage() {
         onRefresh={handleRefresh}
       />
 
+      {error && !gexData && (
+        <p role="alert" className="mx-4 mt-4 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-300">
+          Market snapshot unavailable: {error}. Enable Demo to explore a labelled synthetic scenario.
+        </p>
+      )}
+
       {/* Stale Data Warning Banner */}
       {isStale && (
         <div className="px-4 pt-4 sm:px-6 xl:px-8">
@@ -211,7 +217,7 @@ export default function DashboardPage() {
                     {isRealtime && (
                       <span className="inline-flex items-center gap-1 rounded bg-emerald-900/50 px-2 py-0.5 text-xs text-emerald-300">
                         <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
-                        Live
+                        Streaming
                       </span>
                     )}
                     {gexData?.spot_price !== undefined && (
@@ -224,7 +230,7 @@ export default function DashboardPage() {
                         className="rounded bg-amber-900/40 px-1.5 py-0.5 text-[11px] text-amber-300"
                         title="Yahoo Finance has no SPX options: SPY options are fetched and spot, strikes, bid/ask are scaled ×10 as an SPX approximation. Greeks are computed locally. Quote freshness is not guaranteed."
                       >
-                        SPX via SPY x10 proxy
+                        SPX via SPY ×10 · options delayed ~15 min
                       </span>
                     )}
                   </div>

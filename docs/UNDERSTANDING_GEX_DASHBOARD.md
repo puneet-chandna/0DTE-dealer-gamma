@@ -114,7 +114,7 @@ Gamma-based dashboards are informative, but they are still model-driven and data
 
 When the data provider is Yahoo Finance, these caveats apply:
 
-- **No guaranteed freshness.** The app does not measure or enforce a fixed Yahoo quote delay. Frequent polling does not make upstream quotes newer.
+- **No guaranteed freshness.** Yahoo [publishes a nominal 15-minute delay for US options](https://help.yahoo.com/kb/SLN2310.html). The app records receipt times but does not certify each quote’s freshness. Open interest is daily information; its exact as-of date may be unknown. Frequent polling does not make upstream quotes newer.
 - **SPX via SPY ×10 proxy.** Yahoo has no SPX options, so the backend fetches SPY options and scales spot, strikes, bid, and ask by 10. These are approximations of SPX, not real SPX quotes, and all Greeks are computed locally (yfinance provides no Greeks).
 - **Open interest cadence.** OI comes from the provider; it need not change on every poll. Price and IV changes can move GEX without new positioning data.
 

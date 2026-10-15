@@ -38,7 +38,7 @@ const statusConfig: Record<
   connected: {
     color: 'text-emerald-400',
     bgColor: 'bg-emerald-500',
-    label: 'Real-time',
+    label: 'Stream connected',
   },
   disconnected: {
     color: 'text-amber-400',

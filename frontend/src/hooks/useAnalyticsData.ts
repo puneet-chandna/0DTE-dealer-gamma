@@ -64,9 +64,9 @@ export function useIVSurface(symbol: string = 'SPY', enabled: boolean = true) {
     staleTime: 5 * 60 * 1000,
     gcTime: 15 * 60 * 1000,
     refetchInterval: demoModeEnabled ? 5000 : false,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
     retry: 1,
   });
 }
@@ -102,9 +102,9 @@ export function useTechnicalIndicators(
     staleTime: 5 * 60 * 1000,
     gcTime: 15 * 60 * 1000,
     refetchInterval: demoModeEnabled ? 5000 : false,
-    refetchOnMount: false,
-    refetchOnWindowFocus: false,
-    refetchOnReconnect: false,
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
     retry: 1,
   });
 }
@@ -120,12 +120,16 @@ export function useVectorbtBacktest(
     entry_threshold?: number;
     exit_threshold?: number;
     initial_cash?: number;
+    fees?: number;
+    slippage?: number;
+    position_size?: number;
+    execution_delay_bars?: number;
   } | null,
   enabled: boolean = false
 ) {
   const { demoModeEnabled, selectedProvider } = useUIStore();
   const mode = getAppDataMode(demoModeEnabled);
-  const requestParams = params ? { symbol: 'SPX', ...params } : null;
+  const requestParams = params ? { symbol: selectedProvider === 'tradier' ? 'SPY' : 'SPX', ...params } : null;
 
   return useQuery<VectorBTBacktestResult>({
     queryKey: analyticsQueryKeys.vectorbtBacktest(mode, selectedProvider, requestParams ?? {}),
@@ -135,7 +139,10 @@ export function useVectorbtBacktest(
         provider: selectedProvider,
       }),
     enabled: enabled && requestParams !== null,
-    staleTime: Infinity, // Don't auto-refetch backtests
+    staleTime: 0, // Explicit submissions must use the latest captured history.
+    refetchOnMount: false,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     retry: 0,
   });
 }

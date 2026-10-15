@@ -5,6 +5,7 @@
 'use client';
 
 import { memo, useMemo } from 'react';
+import { formatMarketTimestamp } from '@/lib/utils';
 import {
   AreaChart,
   Area,
@@ -19,6 +20,7 @@ import {
 interface EquityCurveChartProps {
   equityCurve: number[];
   initialCash: number;
+  timestamps?: string[];
   height?: number;
   isLoading?: boolean;
 }
@@ -26,6 +28,7 @@ interface EquityCurveChartProps {
 function EquityCurveChartComponent({
   equityCurve,
   initialCash,
+  timestamps,
   height = 300,
   isLoading = false,
 }: EquityCurveChartProps) {
@@ -33,7 +36,7 @@ function EquityCurveChartComponent({
     if (!equityCurve || equityCurve.length === 0) return [];
 
     // Running max for drawdown detection
-    let runningMax = equityCurve[0];
+    let runningMax = initialCash;
 
     return equityCurve.map((value, index) => {
       runningMax = Math.max(runningMax, value);
@@ -41,12 +44,13 @@ function EquityCurveChartComponent({
 
       return {
         index,
+        timestamp: timestamps?.[index] ?? String(index),
         equity: value,
         drawdown,
         isDrawdown: drawdown < -1, // >1% drawdown
       };
     });
-  }, [equityCurve]);
+  }, [equityCurve, timestamps, initialCash]);
 
   const totalReturn = useMemo(() => {
     if (equityCurve.length === 0) return 0;
@@ -89,9 +93,9 @@ function EquityCurveChartComponent({
         </defs>
         <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
         <XAxis
-          dataKey="index"
+          dataKey="timestamp"
           tick={{ fill: '#71717a', fontSize: 10 }}
-          tickFormatter={(v) => `${v}`}
+          tickFormatter={(value) => timestamps ? new Date(String(value)).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', timeZoneName: 'short' }) : String(value)}
           interval="preserveStartEnd"
         />
         <YAxis
@@ -112,7 +116,7 @@ function EquityCurveChartComponent({
             }
             return [value ?? 0, name ?? ''];
           }}
-          labelFormatter={(label) => `Period ${label}`}
+          labelFormatter={(label) => timestamps ? (formatMarketTimestamp(String(label)) ?? String(label)) : `Period ${label}`}
         />
         <ReferenceLine
           y={initialCash}
