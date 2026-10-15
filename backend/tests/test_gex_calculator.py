@@ -187,8 +187,8 @@ class TestGEXCalculator:
         # Zero gamma level should be between the strikes
         assert 5700.0 <= result.zero_gamma_level <= 5750.0
 
-    def test_zero_gamma_marks_above_range_when_no_crossing_exists(self, gex_calculator):
-        """Purely negative cumulative GEX should be marked as above-range."""
+    def test_zero_gamma_uses_spot_fallback_when_no_crossing_exists(self, gex_calculator):
+        """Put-only inventory has no net gamma root and makes no directional claim."""
         timestamp = datetime(2024, 1, 15, 12, 0, 0, tzinfo=ET)
         df = pd.DataFrame([
             {"strike": 5700.0, "type": "put", "open_interest": 1000, "implied_vol": 0.20, "expiration": "2024-01-15T16:00:00"},
@@ -198,24 +198,9 @@ class TestGEXCalculator:
 
         result = gex_calculator.calculate_gex_from_chain(df, 5750.0, timestamp)
 
-        assert result.zero_gamma_level == 5800.0
+        assert result.zero_gamma_level == 5750.0
         assert result.metrics["zero_gamma_crossing_found"] is False
-        assert result.metrics["zero_gamma_relation"] == "above_range"
-
-    def test_zero_gamma_treats_near_zero_cumulative_value_as_exact_crossing(self, gex_calculator):
-        """Floating-point residue near zero should still count as an in-range crossing."""
-        zero_gamma_level, crossing_found, relation = gex_calculator._find_zero_gamma_level(
-            {
-                4000.0: 0.1,
-                4100.0: 0.2,
-                4200.0: -0.299999999999,
-            },
-            spot_price=4100.0,
-        )
-
-        assert zero_gamma_level == 4200.0
-        assert crossing_found is True
-        assert relation == "in_range"
+        assert "zero_gamma_relation" not in result.metrics
 
     def test_dominant_strike(self, sample_options_df, gex_calculator):
         """Test dominant strike is the one with highest absolute GEX."""
@@ -252,7 +237,7 @@ class TestRegimeDetermination:
 
         assert regime == "short_gamma"
         assert color == "red"
-        assert "short gamma" in desc.lower()
+        assert "negative signed gex proxy" in desc.lower()
 
     def test_long_gamma_regime(self, gex_calculator):
         """Test long gamma regime detection."""
@@ -260,7 +245,7 @@ class TestRegimeDetermination:
 
         assert regime == "long_gamma"
         assert color == "green"
-        assert "long gamma" in desc.lower()
+        assert "positive signed gex proxy" in desc.lower()
 
     def test_neutral_regime(self, gex_calculator):
         """Test neutral regime detection."""

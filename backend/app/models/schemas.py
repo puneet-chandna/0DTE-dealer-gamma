@@ -3,7 +3,7 @@
 from datetime import date, datetime
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 # ============================================================================
 # Request Models
@@ -22,9 +22,7 @@ class GEXHistoricalRequest(BaseModel):
 
     start_date: date = Field(..., description="Start date for historical data")
     end_date: date = Field(..., description="End date for historical data")
-    interval: Literal["5m", "15m", "1h", "1d"] = Field(
-        default="1h", description="Data interval"
-    )
+    interval: Literal["5m", "15m", "1h", "1d"] = Field(default="1h", description="Data interval")
 
 
 class MarketStatusResponse(BaseModel):
@@ -77,6 +75,23 @@ class OptionsChainResponse(BaseModel):
     contracts: list[dict[str, float | str | int | None]]
     timestamp: str
     provider: str | None = None
+    is_stale: bool = False
+    age_seconds: float = Field(default=0, ge=0, description="Age of this backend capture")
+    captured_at: str | None = None
+    market_status: Literal["open", "closed"] = "closed"
+
+
+class SpotPriceResponse(BaseModel):
+    """Spot capture with response-time cache freshness and market status."""
+
+    symbol: str
+    price: float
+    timestamp: str
+    provider: str | None = None
+    is_stale: bool = False
+    age_seconds: float = Field(default=0, ge=0, description="Age of this backend capture")
+    captured_at: str | None = None
+    market_status: Literal["open", "closed"] = "closed"
 
 
 class GEXSnapshot(BaseModel):
@@ -84,10 +99,10 @@ class GEXSnapshot(BaseModel):
 
     timestamp: datetime
     spot_price: float
-    total_call_gex: float  # Negative (dealers short)
-    total_put_gex: float  # Positive (dealers long)
+    total_call_gex: float  # Positive signed-inventory convention
+    total_put_gex: float  # Negative signed-inventory convention
     net_gex: float  # Sum of above
-    zero_gamma_level: float  # Price where net_gex = 0
+    zero_gamma_level: float  # Repriced root only when metrics.zero_gamma_crossing_found
     gex_by_strike: dict[float, float]  # Strike-level breakdown
     dominant_strike: float  # Strike with max |GEX|
     metrics: dict[str, Any] = Field(default_factory=dict)
@@ -99,14 +114,14 @@ class CharmVannaSnapshot(BaseModel):
     """Charm & Vanna hidden flow calculation result."""
 
     charm_flow: float = Field(
-        ..., description="Expected dealer hedging flow from time decay (dollars)"
+        ...,
+        description="Fixed-spot signed-inventory hedge scenario from time decay (dollar notional)",
     )
     vanna_flow: float = Field(
-        ..., description="Expected dealer hedging flow from IV change (dollars)"
+        ...,
+        description="Fixed-spot signed-inventory hedge scenario from absolute IV change (dollar notional)",
     )
-    net_hidden_flow: float = Field(
-        ..., description="Combined charm + vanna flow (dollars)"
-    )
+    net_hidden_flow: float = Field(..., description="Combined charm + vanna flow (dollars)")
     charm_by_strike: dict[float, float] = Field(default_factory=dict)
     vanna_by_strike: dict[float, float] = Field(default_factory=dict)
 
@@ -115,16 +130,18 @@ class HawkesStateModel(BaseModel):
     """Current state of the Hawkes-style snapshot flow process."""
 
     call_intensity: float = Field(
-        ..., description="Self-exciting intensity of call order flow"
+        ..., description="Hawkes-style call intensity from snapshot changes"
     )
     put_intensity: float = Field(
-        ..., description="Self-exciting intensity of put order flow"
+        ..., description="Hawkes-style put intensity from snapshot changes"
     )
-    net_toxicity: float = Field(
-        ..., description="call_intensity - put_intensity"
-    )
-    squeeze_probability: float = Field(
-        ..., description="Normalized 0-1 probability of a gamma squeeze"
+    net_toxicity: float = Field(..., description="call_intensity - put_intensity")
+    squeeze_score: float = Field(
+        ...,
+        ge=0.0,
+        le=1.0,
+        validation_alias=AliasChoices("squeeze_score", "squeeze_probability"),
+        description="Uncalibrated 0-1 snapshot imbalance score, not an event probability",
     )
     baseline_ready: bool = Field(
         default=False,
@@ -149,9 +166,7 @@ class AdvancedAnalytics(BaseModel):
 
     charm_vanna: CharmVannaSnapshot | None = None
     hawkes: HawkesStateModel | None = None
-    smoothed_net_gex: float | None = Field(
-        None, description="Kalman-filtered net GEX value"
-    )
+    smoothed_net_gex: float | None = Field(None, description="Kalman-filtered net GEX value")
 
 
 class GEXHistorical(BaseModel):
@@ -183,6 +198,24 @@ class RegimeData(BaseModel):
     timestamp: datetime
 
 
+class DataProvenance(BaseModel):
+    """Observed data coverage and limitations, independent of model performance."""
+
+    provider: str
+    requested_symbol: str
+    actual_instrument: str
+    is_proxy: bool
+    data_kind: Literal["captured", "synthetic"]
+    sample_count: int
+    actual_start: datetime | None = None
+    actual_end: datetime | None = None
+    timestamp_basis: str = "capture reference; source freshness unknown"
+    nominal_options_delay_minutes: int | None = None
+    open_interest_frequency: str = "daily; exact as-of date unknown"
+    calculation_versions: list[str] = Field(default_factory=list)
+    quality_limitations: list[str] = Field(default_factory=list)
+
+
 class AnalyticsResult(BaseModel):
     """Statistical analysis result."""
 
@@ -194,6 +227,7 @@ class AnalyticsResult(BaseModel):
     significant: bool
     sample_size_negative: int
     sample_size_positive: int
+    provenance: DataProvenance | None = None
 
 
 class SummaryStatistics(BaseModel):
@@ -206,6 +240,7 @@ class SummaryStatistics(BaseModel):
     median_gex: float
     pct_negative_days: float
     sample_size: int
+    provenance: DataProvenance | None = None
 
 
 class BacktestResult(BaseModel):
@@ -217,12 +252,24 @@ class BacktestResult(BaseModel):
     win_rate: float
     total_return: float
     average_return: float
-    sharpe_ratio: float
+    sharpe_ratio: float | None
     max_drawdown: float
-    profit_factor: float
+    profit_factor: float | None
     average_trade_duration: float  # in minutes
     start_date: datetime
     end_date: datetime
+    closed_trades: int = 0
+    open_trades: int = 0
+    initial_cash: float = 100_000.0
+    fees: float = 0.001
+    slippage: float = 0.001
+    position_size: float = 1.0
+    execution_delay_bars: int = 1
+    bar_interval_minutes: float = 1.0
+    equity_curve: list[float] = Field(default_factory=list)
+    equity_timestamps: list[datetime] = Field(default_factory=list)
+    strategy: str = "gex_long_underlying"
+    provenance: DataProvenance | None = None
 
 
 class WebSocketMessage(BaseModel):
@@ -299,15 +346,15 @@ class VectorBTBacktestResult(BaseModel):
     """Enhanced backtest results from vectorbt."""
 
     total_return: float
-    sharpe_ratio: float
-    sortino_ratio: float
-    calmar_ratio: float
+    sharpe_ratio: float | None
+    sortino_ratio: float | None
+    calmar_ratio: float | None
     max_drawdown: float
     total_trades: int
     winning_trades: int
     losing_trades: int
     win_rate: float
-    profit_factor: float
+    profit_factor: float | None
     avg_trade_return: float
     best_trade: float
     worst_trade: float
@@ -315,3 +362,14 @@ class VectorBTBacktestResult(BaseModel):
     start_date: datetime
     end_date: datetime
     equity_curve: list[float]
+    equity_timestamps: list[datetime] = Field(default_factory=list)
+    closed_trades: int = 0
+    open_trades: int = 0
+    initial_cash: float = 100_000.0
+    fees: float = 0.001
+    slippage: float = 0.001
+    position_size: float = 1.0
+    execution_delay_bars: int = 1
+    bar_interval_minutes: float = 1.0
+    strategy: str = "gex_long_underlying"
+    provenance: DataProvenance | None = None

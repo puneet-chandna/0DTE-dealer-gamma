@@ -18,7 +18,6 @@ import {
   useEffect,
   useMemo,
   useReducer,
-  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -27,6 +26,8 @@ import { useGEXStream } from './useWebSocket';
 import { useCurrentGEX, useCurrentRegime, useGEXByStrikes, useHistoricalGEX, queryKeys } from './useGEXData';
 import { useMarketStatus } from './useMarketStatus';
 import { getAppDataMode } from '@/lib/appMode';
+import { canReplaceSnapshot, retainLatestSnapshot } from '@/lib/snapshots';
+import { getCurrentMarketDateString } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
 import type { GEXSnapshot, RegimeData, GEXByStrike, ConnectionState } from '@/types';
 
@@ -80,6 +81,12 @@ function useDashboardDataState(): DashboardData {
   const hasUsableRealtimeData = Boolean(
     wsStream.isConnected &&
       wsStream.data &&
+      Number.isFinite(Date.parse(wsStream.data.timestamp ?? '')) &&
+      wsStream.data.provider === selectedProvider &&
+      Boolean(wsStream.data.is_demo) === demoModeEnabled &&
+      typeof wsStream.data.total_call_gex === 'number' &&
+      typeof wsStream.data.total_put_gex === 'number' &&
+      wsStream.data.gex_by_strike && wsStream.data.metrics &&
       !wsStream.data.is_stale &&
       (
         !wsStream.data.is_mock ||
@@ -91,6 +98,12 @@ function useDashboardDataState(): DashboardData {
   const polledGEX = useCurrentGEX();
   const polledRegime = useCurrentRegime();
   const polledStrikes = useGEXByStrikes();
+  const hasRealtimeGEX = hasUsableRealtimeData && (
+    demoModeEnabled || canReplaceSnapshot(polledGEX.data?.timestamp, wsStream.data?.timestamp)
+  );
+  const hasRealtimeRegime = hasUsableRealtimeData && (
+    demoModeEnabled || canReplaceSnapshot(polledRegime.data?.timestamp, wsStream.data?.timestamp)
+  );
 
   const parseSnapshotTimestamp = useCallback((timestamp?: string | null) => {
     if (!timestamp) return null;
@@ -108,99 +121,82 @@ function useDashboardDataState(): DashboardData {
 
   // Sync WebSocket data to React Query cache for consistency
   useEffect(() => {
-    if (wsStream.isConnected && wsStream.data) {
-      const currentGexCache = queryClient.getQueryData<GEXSnapshot>(
-        queryKeys.gex.current(mode, selectedProvider)
-      );
-      const currentRegimeCache = queryClient.getQueryData<RegimeData>(
-        queryKeys.gex.regime(mode, selectedProvider)
-      );
-
-      // Create a GEXSnapshot-like object from WebSocket update
-      const wsGexSnapshot: Partial<GEXSnapshot> = {
+    if (hasUsableRealtimeData && wsStream.data) {
+      const wsGexSnapshot: GEXSnapshot = {
         net_gex: wsStream.data.net_gex,
         zero_gamma_level: wsStream.data.zero_gamma_level,
         spot_price: wsStream.data.spot_price,
         timestamp: wsStream.data.timestamp || new Date().toISOString(),
-        // Pass through advanced analytics from WebSocket
-        ...(wsStream.data.advanced_analytics && {
-          advanced_analytics: wsStream.data.advanced_analytics,
-        }),
-        // Preserve other fields from cached data if available
-        ...(currentGexCache && {
-          total_call_gex: currentGexCache.total_call_gex,
-          total_put_gex: currentGexCache.total_put_gex,
-          gex_by_strike: currentGexCache.gex_by_strike,
-          dominant_strike: currentGexCache.dominant_strike,
-          metrics: currentGexCache.metrics,
-        }),
+        advanced_analytics: wsStream.data.advanced_analytics ?? null,
+        total_call_gex: wsStream.data.total_call_gex!,
+        total_put_gex: wsStream.data.total_put_gex!,
+        gex_by_strike: wsStream.data.gex_by_strike!,
+        dominant_strike: wsStream.data.dominant_strike ?? 0,
+        metrics: wsStream.data.metrics!,
+        provider: wsStream.data.provider,
       };
 
       // Update React Query cache with WebSocket data
-      queryClient.setQueryData(queryKeys.gex.current(mode, selectedProvider), (old: GEXSnapshot | undefined) => ({
-        ...old,
-        ...wsGexSnapshot,
-      }));
+      queryClient.setQueryData<GEXSnapshot>(queryKeys.gex.current(mode, selectedProvider), (previous) =>
+        demoModeEnabled ? wsGexSnapshot : retainLatestSnapshot(previous, wsGexSnapshot)
+      );
 
       // Create regime data from WebSocket update
       if (wsStream.data.regime) {
-        const wsRegimeData: Partial<RegimeData> = {
+        const wsRegimeData: RegimeData = {
           regime: wsStream.data.regime,
           net_gex: wsStream.data.net_gex,
           net_gex_billions: wsStream.data.net_gex_billions,
           timestamp: wsStream.data.timestamp || new Date().toISOString(),
-          // Preserve description and color from cached data
-          ...(currentRegimeCache && {
-            description: currentRegimeCache.description,
-            color: currentRegimeCache.color,
-          }),
+          description: wsStream.data.description ?? '',
+          color: wsStream.data.color ?? 'yellow',
         };
 
-        queryClient.setQueryData(queryKeys.gex.regime(mode, selectedProvider), (old: RegimeData | undefined) => ({
-          ...old,
-          ...wsRegimeData,
-        }));
+        queryClient.setQueryData<RegimeData>(queryKeys.gex.regime(mode, selectedProvider), (previous) =>
+          demoModeEnabled ? wsRegimeData : retainLatestSnapshot(previous, wsRegimeData)
+        );
       }
     }
-  }, [wsStream.data, wsStream.isConnected, queryClient, mode, selectedProvider]);
+  }, [wsStream.data, hasUsableRealtimeData, queryClient, mode, selectedProvider, demoModeEnabled]);
 
   // Determine effective GEX data
   const gexData = useMemo((): GEXSnapshot | null => {
     // Prefer WebSocket data when connected and available
-    if (hasUsableRealtimeData && wsStream.data) {
+    if (hasRealtimeGEX && wsStream.data) {
       // Merge WebSocket update with polled data for complete snapshot
       return {
         timestamp: wsStream.data.timestamp || new Date().toISOString(),
         spot_price: wsStream.data.spot_price,
         net_gex: wsStream.data.net_gex,
         zero_gamma_level: wsStream.data.zero_gamma_level,
-        total_call_gex: polledGEX.data?.total_call_gex ?? 0,
-        total_put_gex: polledGEX.data?.total_put_gex ?? 0,
-        gex_by_strike: polledGEX.data?.gex_by_strike ?? {},
-        dominant_strike: polledGEX.data?.dominant_strike ?? 0,
-        metrics: polledGEX.data?.metrics ?? {},
+        total_call_gex: wsStream.data.total_call_gex!,
+        total_put_gex: wsStream.data.total_put_gex!,
+        gex_by_strike: wsStream.data.gex_by_strike!,
+        dominant_strike: wsStream.data.dominant_strike ?? 0,
+        metrics: wsStream.data.metrics!,
+        provider: wsStream.data.provider,
         // Prefer WebSocket advanced analytics, fall back to polled
-        advanced_analytics: wsStream.data.advanced_analytics ?? polledGEX.data?.advanced_analytics ?? null,
+        advanced_analytics: wsStream.data.advanced_analytics ?? null,
       };
     }
     // Fall back to polled data
     return polledGEX.data ?? null;
-  }, [hasUsableRealtimeData, wsStream.data, polledGEX.data]);
+  }, [hasRealtimeGEX, wsStream.data, polledGEX.data]);
 
   // Determine effective regime data
   const regimeData = useMemo((): RegimeData | null => {
-    if (hasUsableRealtimeData && wsStream.data?.regime) {
+    if (hasRealtimeRegime && wsStream.data?.regime) {
       return {
         regime: wsStream.data.regime,
         net_gex: wsStream.data.net_gex,
         net_gex_billions: wsStream.data.net_gex_billions,
         timestamp: wsStream.data.timestamp || new Date().toISOString(),
-        description: polledRegime.data?.description ?? '',
-        color: polledRegime.data?.color ?? 'yellow',
+        description: wsStream.data.description ?? '',
+        color: wsStream.data.color ?? 'yellow',
       };
     }
     return polledRegime.data ?? null;
-  }, [hasUsableRealtimeData, wsStream.data, polledRegime.data]);
+  }, [hasRealtimeRegime, wsStream.data, polledRegime.data]);
 
   const websocketTimestamp = useMemo(
     () => parseSnapshotTimestamp(wsStream.data?.timestamp) ?? wsStream.lastUpdateTime ?? null,
@@ -215,12 +211,12 @@ function useDashboardDataState(): DashboardData {
   );
 
   const effectiveLastUpdateTime = useMemo(() => {
-    if (hasUsableRealtimeData) {
+    if (hasRealtimeGEX) {
       return websocketTimestamp;
     }
 
     return polledTimestamp ?? websocketTimestamp;
-  }, [hasUsableRealtimeData, polledTimestamp, websocketTimestamp]);
+  }, [hasRealtimeGEX, polledTimestamp, websocketTimestamp]);
 
   // Calculate staleness using state-based current time
   const isStale = useMemo(() => {
@@ -248,9 +244,7 @@ function useDashboardDataState(): DashboardData {
 
   // Calculate loading state
   const isLoading =
-    (!wsStream.isConnected && polledGEX.isLoading) ||
-    (!wsStream.isConnected && polledRegime.isLoading) ||
-    (!wsStream.isConnected && polledStrikes.isLoading);
+    !hasRealtimeGEX && (polledGEX.isLoading || polledRegime.isLoading || polledStrikes.isLoading);
 
   // Determine error state
   const error =
@@ -262,9 +256,13 @@ function useDashboardDataState(): DashboardData {
   return {
     gexData,
     regimeData,
-    strikesData: polledStrikes.data ?? null,
+    strikesData: hasRealtimeGEX && gexData ? {
+      strikes: Object.keys(gexData.gex_by_strike).map(Number),
+      gex_values: Object.values(gexData.gex_by_strike),
+      spot_price: gexData.spot_price, zero_gamma_level: gexData.zero_gamma_level,
+    } : polledStrikes.data ?? null,
 
-    isRealtime: hasUsableRealtimeData,
+    isRealtime: hasRealtimeGEX,
     connectionState: wsStream.connectionState,
     isLoading,
     isStale,
@@ -325,69 +323,61 @@ export function useIntradayTimeSeries(
     [mode, selectedProvider, tradingDateEt]
   );
   const persistedHistory = useHistoricalGEX(tradingDateEt, tradingDateEt, '1m', 'SPX');
-  const previousTimeSeriesKeyRef = useRef(timeSeriesKey);
+  const sourceKey = JSON.stringify(timeSeriesKey);
 
-  // Use reducer for accumulating time series to avoid setState in effect
-  const [timeSeries, dispatch] = useReducer(
+  const [series, dispatch] = useReducer(
     (
-      state: TimeSeriesPoint[],
+      state: { key: string; points: TimeSeriesPoint[] },
       action:
-        | { type: 'seed'; points: TimeSeriesPoint[] }
-        | { type: 'add'; point: TimeSeriesPoint }
-        | { type: 'clear' }
+        | { type: 'seed' | 'replace'; key: string; points: TimeSeriesPoint[] }
+        | { type: 'add'; key: string; point: TimeSeriesPoint }
+        | { type: 'clear'; key: string }
     ) => {
+      if (action.type === 'replace') {
+        return { key: action.key, points: action.points };
+      }
+      if (state.key !== action.key) return state;
       if (action.type === 'clear') {
-        return [];
+        return { ...state, points: [] };
       }
 
       if (action.type === 'seed') {
-        const mergedPoints = [...state, ...action.points];
         const seen = new Set<number>();
-        const deduped = mergedPoints
-          .slice()
+        const points = [...state.points, ...action.points]
           .sort((left, right) => left.timestamp - right.timestamp)
           .filter((point) => {
-            if (seen.has(point.timestamp)) {
-              return false;
-            }
+            if (seen.has(point.timestamp)) return false;
             seen.add(point.timestamp);
             return true;
           });
-        return deduped.slice(-1500);
+        return { ...state, points: points.slice(-1500) };
       }
 
       if (action.type === 'add') {
-        // Only add new data points (deduplicate by timestamp)
-        const exists = state.some(
+        const exists = state.points.some(
           (point) => Math.abs(point.timestamp - action.point.timestamp) < 1000
         );
-
         if (exists) return state;
 
-        const updated = [...state, action.point];
-
-        // Keep only last 2 hours of data (assuming 5s updates = 1440 points)
-        if (updated.length > 1500) {
-          return updated.slice(-1440);
-        }
-
-        return updated;
+        const points = [...state.points, action.point];
+        return { ...state, points: points.length > 1500 ? points.slice(-1440) : points };
       }
-
       return state;
     },
-    queryClient.getQueryData<TimeSeriesPoint[]>(timeSeriesKey) ?? []
+    {
+      key: sourceKey,
+      points: queryClient.getQueryData<TimeSeriesPoint[]>(timeSeriesKey) ?? [],
+    }
   );
+  const timeSeries = series.key === sourceKey ? series.points : [];
 
   useEffect(() => {
-    const cachedSeries = queryClient.getQueryData<TimeSeriesPoint[]>(timeSeriesKey) ?? [];
-    if (cachedSeries.length > 0) {
-      dispatch({ type: 'seed', points: cachedSeries });
-      return;
-    }
-
-    dispatch({ type: 'clear' });
-  }, [queryClient, timeSeriesKey]);
+    dispatch({
+      type: 'replace',
+      key: sourceKey,
+      points: queryClient.getQueryData<TimeSeriesPoint[]>(timeSeriesKey) ?? [],
+    });
+  }, [queryClient, sourceKey, timeSeriesKey]);
 
   useEffect(() => {
     if (!persistedHistory.data?.data?.length) {
@@ -396,19 +386,27 @@ export function useIntradayTimeSeries(
 
     dispatch({
       type: 'seed',
+      key: sourceKey,
       points: persistedHistory.data.data.map((snapshot: GEXSnapshot) => ({
         timestamp: Date.parse(snapshot.timestamp),
         netGex: snapshot.net_gex ?? 0,
         spotPrice: snapshot.spot_price ?? 0,
       })),
     });
-  }, [persistedHistory.data]);
+  }, [persistedHistory.data, sourceKey]);
 
-  // Accumulate data points from WebSocket OR REST updates
+  // Accumulate data points from WebSocket OR REST updates for this source.
   useEffect(() => {
     if (gexData && lastUpdateTime) {
+      const captureTime = new Date(gexData.timestamp);
+      if (!demoModeEnabled && (
+        !Number.isFinite(captureTime.getTime()) ||
+        getCurrentMarketDateString(captureTime) !== tradingDateEt
+      )) return;
+
       dispatch({
         type: 'add',
+        key: sourceKey,
         point: {
           timestamp: lastUpdateTime,
           netGex: gexData.net_gex ?? 0,
@@ -416,22 +414,17 @@ export function useIntradayTimeSeries(
         },
       });
     }
-  }, [gexData, lastUpdateTime]);
+  }, [gexData, lastUpdateTime, sourceKey, demoModeEnabled, tradingDateEt]);
 
   useEffect(() => {
-    if (previousTimeSeriesKeyRef.current !== timeSeriesKey) {
-      previousTimeSeriesKeyRef.current = timeSeriesKey;
-      return;
+    if (series.key === sourceKey) {
+      queryClient.setQueryData(timeSeriesKey, series.points);
     }
+  }, [queryClient, series, sourceKey, timeSeriesKey]);
 
-    queryClient.setQueryData(timeSeriesKey, timeSeries);
-    previousTimeSeriesKeyRef.current = timeSeriesKey;
-  }, [queryClient, timeSeries, timeSeriesKey]);
-
-  // Clear time series (e.g., on market close)
   const clearTimeSeries = useCallback(() => {
-    dispatch({ type: 'clear' });
-  }, []);
+    dispatch({ type: 'clear', key: sourceKey });
+  }, [sourceKey]);
 
   return {
     timeSeries,

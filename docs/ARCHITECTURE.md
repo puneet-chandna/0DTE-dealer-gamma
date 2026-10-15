@@ -121,6 +121,11 @@ sequenceDiagram
 - All API responses cached and managed by React Query
 - Current GEX polling is configurable (30 seconds by default); regime polling defaults to 10 seconds. These frontend timers can continue outside market hours.
 - Stale-while-revalidate pattern for instant UI
+- Live current/regime caches reject older capture timestamps on both HTTP
+  completion and WebSocket writes. Demo replay may move backward in time.
+- Intraday live points must match the selected ET capture date. IV/technical
+  queries refresh stale data on mount, focus and reconnect. Backtests fetch on
+  explicit submission, including repeated or previously cached parameters.
 
 ### Client State (Zustand)
 
@@ -172,11 +177,26 @@ dealer positions.
 
 ### Zero Gamma Level
 
-The calculator sorts strikes, accumulates signed GEX, and interpolates the first
-zero crossing. An exact zero is returned directly. When the curve has no crossing,
-it returns a boundary strike with `zero_gamma_crossing_found=false` and an
-`above_range` or `below_range` relation. Empty or single-strike inputs fall back to
-spot with no crossing, so a displayed fallback is not a verified in-range level.
+The calculator reprices aggregate gamma as spot varies within ±20% of observed
+spot. Strike, expiry, open interest and each contract's implied volatility remain
+fixed (sticky IV). Calls contribute positive signed inventory and puts negative;
+this convention is an assumption, not observed dealer positioning. A bracketed
+root solver chooses the nearest detected crossing. A finite scan can miss
+pathological near-tangent roots. Without a detected crossing,
+`zero_gamma_crossing_found=false`; the numeric spot fallback is never a verified
+zero-gamma level. The UI displays “No root found.”
+
+### Charm and vanna scenarios
+
+Dollar hedge flow is `-signed_OI × 100 × (delta_after - delta_before) × spot`.
+Charm uses a finite time step capped at expiry; vanna applies an absolute IV-point
+bump per contract. Time uses 365.25-day years. Both scenarios hold spot and inventory
+fixed. Their signs describe the assumed hedger's adjustment and are not measured
+orders. `calculation_version=sticky_iv_delta_scenarios_v1` identifies this contract.
+
+The Hawkes-style module is a snapshot imbalance heuristic. `squeeze_score` is an
+uncalibrated score on [0, 1], never a probability; stored legacy
+`squeeze_probability` payloads remain readable.
 
 ### Market Regimes
 
@@ -234,6 +254,18 @@ for i in range(len(contracts)):
 | Current GEX   | 5s  | New calculation |
 | Spot Price    | 1s  | Every tick      |
 | Options Chain | 30s | Spot moves >1%  |
+
+Spot baselines and move invalidation are scoped by provider and symbol. Default
+options-chain keys also include the effective session date and reject expired
+resolved fallbacks. Raw spot/chain responses retain capture times and label stale
+fallbacks explicitly, with response-time age and market status.
+
+Concurrent GEX producers share only their upstream fetch within a backend process;
+each caller gets a private chain copy and retains its own calculation/persistence
+work. Raw spot and options requests also share matching in-flight work. Canceling
+one waiter does not cancel other callers; the last departing waiter cleans up the
+task. This is process-local coordination, so separate workers have separate caches
+and fetch tasks.
 
 ### Frontend Performance
 

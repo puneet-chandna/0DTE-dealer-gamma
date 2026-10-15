@@ -1,5 +1,5 @@
 import axios from 'axios';
-import type { ProviderName, ProvidersResponse } from '@/types';
+import type { OptionsChainResponse, ProviderName, ProvidersResponse, SpotPriceResponse } from '@/types';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
@@ -134,13 +134,13 @@ export const dataAPI = {
     return response.data;
   },
   getOptionsChain: async (symbol?: string, options?: ProviderRequestOptions) => {
-    const response = await api.get('/api/data/options-chain', {
+    const response = await api.get<OptionsChainResponse>('/api/data/options-chain', {
       params: withRequestParams({ symbol }, options),
     });
     return response.data;
   },
   getSpotPrice: async (symbol?: string, options?: ProviderRequestOptions) => {
-    const response = await api.get('/api/data/spot-price', {
+    const response = await api.get<SpotPriceResponse>('/api/data/spot-price', {
       params: withRequestParams({ symbol }, options),
     });
     return response.data;
@@ -201,7 +201,8 @@ export const analyticsAPI = {
     return response.data;
   },
   runVectorbtBacktest: async (params: Record<string, unknown>, options?: ProviderRequestOptions) => {
-    const response = await api.get('/api/analytics/vectorbt-backtest', {
+    try {
+      const response = await api.get('/api/analytics/vectorbt-backtest', {
       params: withRequestParams(
         {
           symbol: 'SPX',
@@ -210,7 +211,13 @@ export const analyticsAPI = {
         options
       ),
     });
-    return response.data;
+      return response.data;
+    } catch (error) {
+      if (axios.isAxiosError(error) && typeof error.response?.data?.detail === 'string') {
+        throw new Error(error.response.data.detail);
+      }
+      throw error;
+    }
   },
   getGexVolatility: async () => {
     const response = await api.get('/api/analytics/gex-volatility');

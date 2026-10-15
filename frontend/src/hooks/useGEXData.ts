@@ -8,7 +8,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { gexAPI, analyticsAPI, healthAPI } from '@/lib/api';
 import { getAppDataMode } from '@/lib/appMode';
+import { retainLatestSnapshot } from '@/lib/snapshots';
 import { useUIStore } from '@/stores/uiStore';
+import type { GEXSnapshot, RegimeData } from '@/types';
 
 /**
  * Query keys for cache management.
@@ -67,6 +69,8 @@ export function useCurrentGEX() {
       }),
     refetchInterval: autoRefreshEnabled ? refreshInterval * 1000 : false,
     staleTime: 10000, // 10 seconds
+    structuralSharing: demoModeEnabled ? true : (previous, incoming) =>
+      retainLatestSnapshot(previous as GEXSnapshot | undefined, incoming as GEXSnapshot),
   });
 }
 
@@ -105,6 +109,8 @@ export function useCurrentRegime() {
       }),
     refetchInterval: autoRefreshEnabled ? 10000 : false, // More frequent for regime
     staleTime: 5000,
+    structuralSharing: demoModeEnabled ? true : (previous, incoming) =>
+      retainLatestSnapshot(previous as RegimeData | undefined, incoming as RegimeData),
   });
 }
 

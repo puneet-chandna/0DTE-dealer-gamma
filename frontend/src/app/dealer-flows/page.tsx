@@ -212,6 +212,8 @@ function getHiddenFlowsInterpretation(
 
   if (!hasCharmVanna && !hasHawkes) return null;
 
+  const squeezeScore = Number.isFinite(hawkes?.squeeze_score) ? hawkes!.squeeze_score : 0;
+
   let hero = '';
   const bullets: string[] = [];
   let takeaway = '';
@@ -221,16 +223,16 @@ function getHiddenFlowsInterpretation(
     const isPositive = netFlow >= 0;
     const charmDominant = Math.abs(charm_vanna!.charm_flow) > Math.abs(charm_vanna!.vanna_flow);
 
-    hero = `Dealers have ${formatM(netFlow)} in net hidden flow — they are ${isPositive ? 'buying' : 'selling'} futures to stay delta-neutral. `;
+    hero = `The signed-inventory scenario estimates ${formatM(netFlow)} in net hedge notional — a ${isPositive ? 'buy' : 'sell'} adjustment at fixed spot. `;
     hero += charmDominant ? `Time decay (Charm) is the primary driver.` : `Volatility sensitivity (Vanna) is the primary driver.`;
 
     bullets.push(`Charm flow: ${formatM(charm_vanna!.charm_flow)} — hedging pressure from time decay in the next 30 minutes.`);
-    bullets.push(`Vanna flow: ${formatM(charm_vanna!.vanna_flow)} — hedging pressure if implied volatility drops 1%.`);
-    bullets.push(`Net hidden flow: ${formatM(netFlow)} — ${isPositive ? 'upward' : 'downward'} pressure on price.`);
+    bullets.push(`Vanna flow: ${formatM(charm_vanna!.vanna_flow)} — hedge notional if implied volatility drops one percentage point.`);
+    bullets.push(`Net hidden flow: ${formatM(netFlow)} — ${isPositive ? 'buy' : 'sell'} scenario, not observed orders.`);
   }
 
   if (hasHawkes) {
-    const squeeze = Math.round(hawkes!.squeeze_probability * 100);
+    const squeeze = Math.round(squeezeScore * 100);
     const intensityThreshold = 0.2;
     const callDominant = hawkes!.call_intensity > hawkes!.put_intensity;
     const putDominant = hawkes!.put_intensity > hawkes!.call_intensity;
@@ -243,24 +245,24 @@ function getHiddenFlowsInterpretation(
 
     if (!hero) {
       hero = isBalanced
-        ? `Order flow momentum is balanced. Hawkes intensities are quiet right now, so there is no active call or put dominance.`
+        ? `Snapshot imbalance proxy is balanced. Hawkes intensities are quiet right now, so there is no active call or put dominance.`
         : isBalancedButElevated
-          ? `Order flow momentum is balanced, but Hawkes intensities are elevated on both sides. Squeeze probability: ${squeeze}%.`
-        : `Order flow momentum is ${callDominant ? 'call-dominant' : 'put-dominant'}. Squeeze probability: ${squeeze}%.`;
+          ? `Snapshot imbalance proxy is balanced, but Hawkes intensities are elevated on both sides. Squeeze score: ${squeeze} / 100.`
+        : `Snapshot imbalance proxy is ${callDominant ? 'call-dominant' : 'put-dominant'}. Squeeze score: ${squeeze} / 100.`;
     }
 
     bullets.push(`Call intensity: ${hawkes!.call_intensity.toFixed(2)} — ${hasBalancedFlow ? 'balanced with puts' : callDominant ? 'dominant' : 'subordinate'} side.`);
     bullets.push(`Put intensity: ${hawkes!.put_intensity.toFixed(2)} — ${hasBalancedFlow ? 'balanced with calls' : putDominant ? 'dominant' : 'subordinate'} side.`);
-    bullets.push(`Squeeze probability: ${squeeze}% — ${squeeze > 60 ? 'high — squeeze conditions detected' : squeeze > 40 ? 'moderate — watch for buildup' : isBalanced ? 'low — no recent flow imbalance' : isBalancedButElevated ? 'low — balanced flow is elevated on both sides' : 'low — normal flow'}.`);
+    bullets.push(`Squeeze score: ${squeeze} / 100 — ${squeeze > 60 ? 'high — elevated proxy imbalance' : squeeze > 40 ? 'moderate — watch for buildup' : isBalanced ? 'low — low snapshot imbalance' : isBalancedButElevated ? 'low — balanced flow is elevated on both sides' : 'low — normal flow'}.`);
   }
 
   if (hasCharmVanna) {
     const isPositive = charm_vanna!.net_hidden_flow >= 0;
     takeaway = isPositive
-      ? `Structural buying pressure from dealer hedging creates a supportive floor. Dips may be shallow.`
-      : `Structural selling pressure from dealer hedging creates a headwind for rallies.`;
+      ? `Positive scenario hedge notional under fixed spot and signed inventory; this does not establish a price floor.`
+      : `Negative scenario hedge notional under fixed spot and signed inventory; price impact has not been validated.`;
   } else {
-    takeaway = `Monitor Hawkes intensities for flow direction. ${hawkes!.squeeze_probability > 0.5 ? 'Elevated squeeze probability suggests potential for rapid reversal.' : 'Normal flow conditions.'}`;
+    takeaway = `Hawkes-style intensities summarize the snapshot proxy. ${squeezeScore > 0.5 ? 'Elevated snapshot imbalance; the squeeze score is an uncalibrated heuristic.' : 'Normal flow conditions.'}`;
   }
 
   return { hero, bullets, takeaway };

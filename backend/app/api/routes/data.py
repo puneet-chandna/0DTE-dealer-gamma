@@ -12,11 +12,12 @@ from fastapi import APIRouter, HTTPException, Query
 
 from app.core import (
     ProviderRegistry,
+    get_current_trading_date,
     get_data_client,
     get_market_status,
     is_market_open,
 )
-from app.models.schemas import MarketStatusResponse, OptionsChainResponse
+from app.models.schemas import MarketStatusResponse, OptionsChainResponse, SpotPriceResponse
 from app.services.cache import get_cache
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,31 @@ router = APIRouter()
 
 # Eastern Time timezone
 ET = ZoneInfo("America/New_York")
+
+
+def _with_freshness(payload: dict, *, is_stale: bool) -> dict:
+    """Describe backend capture age and current status without changing the cached value."""
+    captured_at = payload.get("captured_at") or payload["timestamp"]
+    captured = datetime.fromisoformat(captured_at)
+    if captured.tzinfo is None:
+        captured = captured.replace(tzinfo=ET)
+    return {
+        **payload,
+        "captured_at": captured_at,
+        "age_seconds": max(0, (datetime.now(ET) - captured).total_seconds()),
+        "is_stale": is_stale,
+        "market_status": "open" if is_market_open() else "closed",
+    }
+
+
+def _valid_default_expiration(payload: dict, expiration: str | None) -> bool:
+    if expiration is not None:
+        return True
+    try:
+        resolved = date.fromisoformat(payload["expiration_date"][:10])
+        return resolved >= get_current_trading_date(datetime.now(ET))
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 @router.get("/market-status", response_model=MarketStatusResponse)
@@ -68,7 +94,7 @@ async def get_providers():
 @router.get("/options-chain", response_model=OptionsChainResponse, tags=["Data"])
 async def get_options_chain(
     symbol: str = Query("SPX", description="Underlying symbol (default: SPX)"),
-    expiration: str | None = Query(None, description="Expiration date (YYYY-MM-DD), default is next trading day"),
+    expiration: str | None = Query(None, description="Expiration date (YYYY-MM-DD), defaults to the effective trading session's nearest available expiry"),
     provider: str | None = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
 ):
     """
@@ -76,6 +102,10 @@ async def get_options_chain(
 
     Returns standard GEX dataset including bid/ask, volume, open interest, and implied volatility.
     """
+    cache = get_cache()
+    cache_key = None
+    symbol = symbol.strip().upper()
+    expiration = expiration or None
     try:
         # Use provider registry
         client = get_data_client(provider)
@@ -96,22 +126,27 @@ async def get_options_chain(
         logger.info(f"Fetching complete options chain for {symbol} ({request_symbol}) exp={expiration} via {client.provider_name}")
 
         # Check cache
-        cache = get_cache()
-        today = datetime.now(ET).date().isoformat()
-        cache_key = f"options:chain:{symbol}:{expiration or 'today'}:{client.provider_name}"
+        session_date = get_current_trading_date(datetime.now(ET)).isoformat()
+        expiration_key = expiration or f"default:{session_date}"
+        cache_key = f"options:chain:{symbol}:{expiration_key}:{client.provider_name}"
 
         cached = cache.get_if_fresh(cache_key)
-        if cached is not None:
+        if cached is not None and _valid_default_expiration(cached, expiration):
             logger.debug(f"Returning cached options chain for {symbol} from {client.provider_name}")
-            return OptionsChainResponse(**cached)
+            return OptionsChainResponse(**_with_freshness(cached, is_stale=False))
 
         # Fetch the full snapshot for the requested expiration, not the
         # provider's filtered GEX subset.
-        options_df = await client.get_options_chain_snapshot(
-            underlying=symbol,
-            expiration_date=expiration_date,
+        options_df = await cache.fetch_once(
+            f"fetch:{cache_key}",
+            lambda: client.get_options_chain_snapshot(
+                underlying=symbol, expiration_date=expiration_date,
+            ),
         )
-        spot_price = await client.get_spot_price(symbol=symbol)
+        spot_price = await cache.fetch_once(
+            f"fetch:spot:{symbol}:{client.provider_name}",
+            lambda: client.get_spot_price(symbol=symbol),
+        )
 
         # Convert DataFrame to list of dicts
         options_list = []
@@ -136,7 +171,7 @@ async def get_options_chain(
         if expiration_date is not None:
             resolved_expiration = expiration_date.isoformat()
         else:
-            resolved_expiration = today
+            resolved_expiration = session_date
 
         if not options_df.empty and "expiration" in options_df.columns:
             first_expiration = options_df.iloc[0]["expiration"]
@@ -155,9 +190,11 @@ async def get_options_chain(
             "timestamp": datetime.now(ET).isoformat(),
             "provider": client.provider_name,
         }
+        if not _valid_default_expiration(result, expiration):
+            raise RuntimeError("Provider returned an expired default options chain")
 
-        response = OptionsChainResponse(**result)
-        cache.update_spot_price(response.spot_price, symbol=symbol)
+        response = OptionsChainResponse(**_with_freshness(result, is_stale=False))
+        cache.update_spot_price(response.spot_price, symbol=symbol, provider=client.provider_name)
         cache.set(cache_key, response.model_dump())
         logger.info(f"Fetched {len(options_list)} contracts for {symbol} via {client.provider_name}")
 
@@ -169,10 +206,10 @@ async def get_options_chain(
         logger.error(f"Failed to fetch options chain: {e}")
 
         # Try stale cache
-        stale = cache.get(cache_key)
-        if stale is not None:
+        stale = cache.get(cache_key) if cache_key is not None else None
+        if stale is not None and _valid_default_expiration(stale, expiration):
             logger.warning("Returning stale cached options chain")
-            return OptionsChainResponse(**stale)
+            return OptionsChainResponse(**_with_freshness(stale, is_stale=True))
 
         raise HTTPException(
             status_code=503,
@@ -180,7 +217,7 @@ async def get_options_chain(
         )
 
 
-@router.get("/spot-price", tags=["Data"])
+@router.get("/spot-price", response_model=SpotPriceResponse, tags=["Data"])
 async def get_spot_price(
     symbol: str = Query("SPX", description="Symbol to get price for (default: SPX)"),
     provider: str | None = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
@@ -190,23 +227,28 @@ async def get_spot_price(
     Returns the latest underlying price.
     """
 
+    cache = get_cache()
+    cache_key = None
+    symbol = symbol.strip().upper()
     try:
         # Use provider registry
         client = get_data_client(provider)
 
         # Check cache (short TTL for spot price)
-        cache = get_cache()
         cache_key = f"spot:{symbol}:{client.provider_name}"
 
         cached = cache.get_if_fresh(cache_key)
         if cached is not None:
             logger.debug(f"Returning cached spot price for {symbol} from {client.provider_name}")
-            return cached
+            return _with_freshness(cached, is_stale=False)
 
-        spot_price = await client.get_spot_price(symbol=symbol)
+        spot_price = await cache.fetch_once(
+            f"fetch:spot:{symbol}:{client.provider_name}",
+            lambda: client.get_spot_price(symbol=symbol),
+        )
 
         # Update cache (and check for invalidation)
-        cache.update_spot_price(spot_price, symbol=symbol)
+        cache.update_spot_price(spot_price, symbol=symbol, provider=client.provider_name)
 
         result = {
             "symbol": symbol,
@@ -216,6 +258,7 @@ async def get_spot_price(
             "provider": client.provider_name,
         }
 
+        result = _with_freshness(result, is_stale=False)
         cache.set(cache_key, result)
         return result
 
@@ -223,11 +266,10 @@ async def get_spot_price(
         logger.error(f"Failed to fetch spot price: {e}")
 
         # Try stale cache (without provider key fallback for simplicity here)
-        cache = get_cache()
-        stale = cache.get(f"spot:{symbol}:{client.provider_name}" if client else f"spot:{symbol}:yfinance")
+        stale = cache.get(cache_key) if cache_key is not None else None
         if stale is not None:
             logger.warning("Returning stale cached spot price")
-            return stale
+            return _with_freshness(stale, is_stale=True)
 
         raise HTTPException(
             status_code=503,

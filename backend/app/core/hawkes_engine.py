@@ -98,7 +98,7 @@ class HawkesState:
     call_intensity: float = 0.0
     put_intensity: float = 0.0
     net_toxicity: float = 0.0
-    squeeze_probability: float = 0.0
+    squeeze_score: float = 0.0
     baseline_ready: bool = False
     confidence_score: float = 0.0
     provider_mode: str = "tradier_rich"
@@ -255,7 +255,7 @@ class HawkesEngine:
             "squeeze_prob=%.4f, provider_mode=%s, baseline_ready=%s, events=%s",
             state.call_intensity,
             state.put_intensity,
-            state.squeeze_probability,
+            state.squeeze_score,
             state.provider_mode,
             state.baseline_ready,
             state.event_count,
@@ -267,7 +267,7 @@ class HawkesEngine:
         """Get the current Hawkes-style state without updating."""
         net_toxicity = self._call_intensity - self._put_intensity
         total_intensity = self._call_intensity + self._put_intensity
-        squeeze_probability = self._calculate_squeeze_probability(
+        squeeze_score = self._calculate_squeeze_score(
             net_toxicity=net_toxicity,
             total_intensity=total_intensity,
         )
@@ -276,7 +276,7 @@ class HawkesEngine:
             call_intensity=round(self._call_intensity, 6),
             put_intensity=round(self._put_intensity, 6),
             net_toxicity=round(net_toxicity, 6),
-            squeeze_probability=round(squeeze_probability, 6),
+            squeeze_score=round(squeeze_score, 6),
             baseline_ready=self._baseline_ready,
             confidence_score=round(self._confidence_score, 6),
             provider_mode=self._provider_mode,
@@ -663,7 +663,7 @@ class HawkesEngine:
         self._rolling_imbalance.append(abs(net_toxicity))
         self._rolling_total_intensity.append(total_intensity)
 
-    def _calculate_squeeze_probability(
+    def _calculate_squeeze_score(
         self,
         *,
         net_toxicity: float,

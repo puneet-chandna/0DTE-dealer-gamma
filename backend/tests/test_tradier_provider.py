@@ -27,9 +27,7 @@ async def test_get_spot_price_uses_last_close_or_prevclose():
 async def test_get_expirations_normalizes_single_date_response():
     """Single expiration string payloads should be normalized to a list."""
     client = TradierClient(api_key="test-key")
-    client._request = AsyncMock(
-        return_value={"expirations": {"date": "2099-01-15"}}
-    )
+    client._request = AsyncMock(return_value={"expirations": {"date": "2099-01-15"}})
 
     try:
         expirations = await client.get_expirations("SPX")
@@ -71,15 +69,20 @@ async def test_get_options_chain_snapshot_maps_tradier_payload_to_standard_colum
     )
 
     try:
-        result = await client.get_options_chain_snapshot(
-            "SPX", expiration_date=date(2099, 1, 15)
-        )
+        result = await client.get_options_chain_snapshot("SPX", expiration_date=date(2099, 1, 15))
     finally:
         await client.close()
 
     assert isinstance(result, pd.DataFrame)
     assert list(result.columns) == [
         "symbol",
+        "underlying_symbol",
+        "received_at",
+        "bid_timestamp",
+        "ask_timestamp",
+        "last_trade_at",
+        "greeks_updated_at",
+        "open_interest_asof",
         "strike",
         "expiration",
         "type",
@@ -96,6 +99,13 @@ async def test_get_options_chain_snapshot_maps_tradier_payload_to_standard_colum
     ]
     assert result.iloc[0].to_dict() == {
         "symbol": "SPXW20990115C05000000",
+        "underlying_symbol": "SPX",
+        "received_at": result.iloc[0]["received_at"],
+        "bid_timestamp": None,
+        "ask_timestamp": None,
+        "last_trade_at": None,
+        "greeks_updated_at": None,
+        "open_interest_asof": None,
         "strike": 5000.0,
         "expiration": "2099-01-15",
         "type": "call",

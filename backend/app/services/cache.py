@@ -4,7 +4,10 @@ Provides caching for GEX calculations, spot prices, and options chain data
 to reduce API calls and improve response times.
 """
 
+import asyncio
 import logging
+from collections.abc import Awaitable, Callable
+from copy import deepcopy
 from datetime import datetime, timedelta
 from typing import Any, TypeVar
 
@@ -14,6 +17,7 @@ from app.core.constants import (
     OPTIONS_CHAIN_CACHE_TTL,
     SPOT_CACHE_TTL,
 )
+from app.core.data_acquisition import get_current_trading_date
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +44,7 @@ class GEXCache:
         self._cache: dict[str, tuple[datetime, Any]] = {}
         self._last_spot_price: float | None = None
         self._last_spot_prices: dict[str, float] = {}
+        self._inflight: dict[str, tuple[asyncio.Future, int]] = {}
 
         # TTL configuration by key prefix
         self._ttl_config: dict[str, timedelta] = {
@@ -123,6 +128,35 @@ class GEXCache:
         self._cache[key] = (datetime.now(), data)
         logger.debug(f"Cache set: '{key}'")
 
+    async def fetch_once(self, key: str, fetch: Callable[[], Awaitable[T]]) -> T:
+        """Share an in-flight fetch; each waiter receives its own mutable result."""
+        if key not in self._inflight:
+            task = asyncio.ensure_future(fetch())
+            # Retrieve late errors if every waiter has already canceled.
+            task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+            self._inflight[key] = (task, 0)
+        task, waiters = self._inflight[key]
+        self._inflight[key] = (task, waiters + 1)
+        try:
+            return deepcopy(await asyncio.shield(task))
+        finally:
+            _, waiters = self._inflight[key]
+            if waiters == 1:
+                del self._inflight[key]
+                if not task.done():
+                    task.cancel()
+            else:
+                self._inflight[key] = (task, waiters - 1)
+
+    async def fetch_gex_chain(self, client, symbol: str = "SPX"):
+        """Coalesce all GEX producers without sharing their calculation or persistence."""
+        symbol = self._normalize_symbol(symbol)
+        session_date = get_current_trading_date().isoformat()
+        return await self.fetch_once(
+            f"fetch:gex:{symbol}:{client.provider_name}:{session_date}",
+            lambda: client.get_options_chain_for_gex(underlying=symbol),
+        )
+
     def is_stale(self, key: str) -> bool:
         """Check if cache entry is stale (beyond TTL).
 
@@ -187,6 +221,7 @@ class GEXCache:
         threshold_pct: float = 0.01,
         *,
         symbol: str | None = None,
+        provider: str | None = None,
     ) -> bool:
         """Invalidate GEX-related caches if spot price moves significantly.
 
@@ -208,7 +243,21 @@ class GEXCache:
 
         if move_pct > threshold_pct:
             normalized_symbol = self._normalize_symbol(symbol)
-            if symbol is None:
+            if provider is not None:
+                count = int(self.invalidate(f"gex:current:{normalized_symbol}:{provider}"))
+                options_prefix = f"options:chain:{normalized_symbol}:"
+                for key in list(self._cache):
+                    if key.startswith(options_prefix) and key.endswith(f":{provider}"):
+                        count += int(self.invalidate(key))
+                legacy_key = f"gex:current:{normalized_symbol}"
+                legacy = self.get(legacy_key)
+                legacy_provider = (
+                    legacy.get("provider") if isinstance(legacy, dict)
+                    else getattr(legacy, "provider", None)
+                )
+                if legacy_provider == provider:
+                    count += int(self.invalidate(legacy_key))
+            elif symbol is None:
                 count = self.invalidate_prefix("gex:")
                 count += self.invalidate_prefix("options:")
             else:
@@ -225,7 +274,9 @@ class GEXCache:
 
         return False
 
-    def update_spot_price(self, spot_price: float, *, symbol: str | None = None) -> bool:
+    def update_spot_price(
+        self, spot_price: float, *, symbol: str | None = None, provider: str | None = None
+    ) -> bool:
         """Update spot price and check for cache invalidation.
 
         Args:
@@ -237,11 +288,14 @@ class GEXCache:
             True if cache was invalidated due to significant move.
         """
         normalized_symbol = self._normalize_symbol(symbol)
+        if provider is not None:
+            provider = provider.strip().lower()
+        baseline_key = f"{normalized_symbol}:{provider}" if provider is not None else normalized_symbol
         invalidated = False
 
         previous_spot = (
-            self._last_spot_prices.get(normalized_symbol)
-            if symbol is not None
+            self._last_spot_prices.get(baseline_key)
+            if symbol is not None or provider is not None
             else self._last_spot_price
         )
         if previous_spot is not None:
@@ -249,12 +303,13 @@ class GEXCache:
                 previous_spot,
                 spot_price,
                 symbol=normalized_symbol if symbol is not None else None,
+                provider=provider,
             )
 
-        self._last_spot_prices[normalized_symbol] = spot_price
-        self.set(f"spot:price:{normalized_symbol}", spot_price)
+        self._last_spot_prices[baseline_key] = spot_price
+        self.set(f"spot:price:{baseline_key}", spot_price)
 
-        if symbol is None or normalized_symbol == "SPX":
+        if provider is None and (symbol is None or normalized_symbol == "SPX"):
             self._last_spot_price = spot_price
             self.set("spot:price", spot_price)
 

@@ -21,7 +21,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
-import { Badge, ConnectionStatus, ProviderSelector } from '@/components/ui';
+import { Badge, ProviderSelector } from '@/components/ui';
 import type { ConnectionState } from '@/types';
 
 const pageLinks = [
@@ -115,7 +115,7 @@ function DashboardHeaderComponent({
           {isRealtime ? (
             <Badge variant="live" pulse>
               <Radio className="h-3 w-3" />
-              Real-time
+              Stream connected
             </Badge>
           ) : isConnected ? (
             <Badge variant="success">
@@ -138,12 +138,6 @@ function DashboardHeaderComponent({
               Polling
             </Badge>
           )}
-
-          <ConnectionStatus
-            connectionState={connectionState}
-            isRealtime={isRealtime}
-            retryCount={retryCount}
-          />
 
           {(lastUpdate || captureTimestampLabel) && (
             <div className="flex flex-col items-start gap-0.5 text-xs">

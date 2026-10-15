@@ -3,6 +3,8 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // Output standalone build for optimized Docker/Vercel deployment
   output: "standalone",
+  outputFileTracingRoot: __dirname,
+  turbopack: { root: __dirname },
 
   // Enable React strict mode for better development experience
   reactStrictMode: true,

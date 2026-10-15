@@ -12,6 +12,7 @@ from app.config import get_settings
 from app.core.advanced_analytics import enrich_snapshot_with_advanced_analytics
 from app.core.data_acquisition import is_market_open
 from app.core.gex_calculator import GEXCalculator
+from app.core.provenance import live_capture_metadata
 from app.core.provider_registry import ProviderRegistry, get_data_client
 from app.core.provider_timeouts import get_live_fetch_timeout_seconds
 from app.core.snapshot_quality import annotate_snapshot_quality, is_snapshot_replay_eligible
@@ -74,22 +75,22 @@ async def periodic_gex_refresh() -> None:
 
             try:
                 # Fetch options chain and spot price
-                options_df, spot_price = await data_client.get_options_chain_for_gex()
-
-                # Update spot price in cache (may trigger invalidation)
-                cache.update_spot_price(spot_price, symbol="SPX")
+                options_df, spot_price = await cache.fetch_gex_chain(data_client)
 
                 # Calculate GEX
                 timestamp = datetime.now(ET)
                 if options_df.empty:
-                    from app.api.routes.gex import _generate_mock_gex_snapshot
-                    snapshot = _generate_mock_gex_snapshot(spot_price=spot_price)
-                else:
-                    snapshot = gex_calculator.calculate_gex_from_chain(
-                        options_df=options_df,
-                        spot_price=spot_price,
-                        timestamp=timestamp,
-                    )
+                    raise RuntimeError("live provider returned no contracts")
+                snapshot = gex_calculator.calculate_gex_from_chain(
+                    options_df=options_df,
+                    spot_price=spot_price,
+                    timestamp=timestamp,
+                )
+                snapshot = annotate_snapshot_quality(
+                    snapshot,
+                    options_df=options_df,
+                    provider=data_client.provider_name,
+                )
 
                 snapshot = enrich_snapshot_with_advanced_analytics(
                     snapshot,
@@ -98,6 +99,11 @@ async def periodic_gex_refresh() -> None:
                     provider=data_client.provider_name,
                     timestamp_seconds=timestamp.timestamp(),
                 )
+                snapshot.metrics.update(live_capture_metadata(options_df))
+                snapshot.provider = data_client.provider_name
+                if not is_snapshot_replay_eligible(snapshot):
+                    raise RuntimeError("live provider returned a low-quality snapshot")
+                cache.update_spot_price(spot_price, symbol="SPX", provider=data_client.provider_name)
 
                 # Cache the result
                 settings = get_settings()
@@ -108,7 +114,7 @@ async def periodic_gex_refresh() -> None:
                 cache.set("gex:current:SPX", snapshot)
 
                 logger.debug(
-                    f"GEX refreshed: net_gex={snapshot.net_gex/1e9:.3f}B, "
+                    f"GEX refreshed: net_gex={snapshot.net_gex / 1e9:.3f}B, "
                     f"spot={snapshot.spot_price:.2f} via {data_client.provider_name}"
                 )
 
@@ -154,8 +160,11 @@ async def periodic_spot_refresh() -> None:
             data_client = get_data_client()
 
             try:
-                spot_price = await data_client.get_spot_price()
-                cache.update_spot_price(spot_price, symbol="SPX")
+                spot_price = await cache.fetch_once(
+                    f"fetch:spot:SPX:{data_client.provider_name}",
+                    lambda: data_client.get_spot_price(),
+                )
+                cache.update_spot_price(spot_price, symbol="SPX", provider=data_client.provider_name)
                 logger.debug(f"Spot price refreshed: {spot_price:.2f}")
 
             except Exception as e:
@@ -188,7 +197,7 @@ async def _capture_symbol_for_provider(
 
     try:
         options_df, spot_price = await asyncio.wait_for(
-            data_client.get_options_chain_for_gex(underlying=symbol),
+            cache.fetch_gex_chain(data_client, symbol),
             timeout=max(capture_timeout_seconds, get_live_fetch_timeout_seconds(provider_name)),
         )
     except TimeoutError:
@@ -207,8 +216,6 @@ async def _capture_symbol_for_provider(
             exc,
         )
         return False
-
-    cache.update_spot_price(spot_price, symbol=symbol)
 
     if options_df.empty:
         logger.warning(
@@ -235,7 +242,11 @@ async def _capture_symbol_for_provider(
         provider=provider_name,
     )
 
+    snapshot.metrics.update(live_capture_metadata(options_df))
+    snapshot.provider = data_client.provider_name
+
     if is_snapshot_replay_eligible(snapshot):
+        cache.update_spot_price(spot_price, symbol=symbol, provider=provider_name)
         cache.set(f"gex:current:{symbol}:{provider_name}", snapshot)
         if provider_name == default_provider:
             cache.set(f"gex:current:{symbol}", snapshot)
@@ -410,19 +421,32 @@ async def cache_warmup() -> None:
 
     try:
         # Fetch initial data
-        options_df, spot_price = await data_client.get_options_chain_for_gex()
-        cache.update_spot_price(spot_price, symbol="SPX")
+        options_df, spot_price = await cache.fetch_gex_chain(data_client)
 
         # Calculate and cache GEX
         if options_df.empty:
-            from app.api.routes.gex import _generate_mock_gex_snapshot
-            snapshot = _generate_mock_gex_snapshot(spot_price=spot_price)
-        else:
-            snapshot = gex_calculator.calculate_gex_from_chain(
-                options_df=options_df,
-                spot_price=spot_price,
-                timestamp=datetime.now(ET),
-            )
+            raise RuntimeError("live provider returned no contracts")
+        snapshot = gex_calculator.calculate_gex_from_chain(
+            options_df=options_df,
+            spot_price=spot_price,
+            timestamp=datetime.now(ET),
+        )
+        snapshot = annotate_snapshot_quality(
+            snapshot,
+            options_df=options_df,
+            provider=data_client.provider_name,
+        )
+        snapshot = enrich_snapshot_with_advanced_analytics(
+            snapshot,
+            options_df=options_df,
+            symbol="SPX",
+            provider=data_client.provider_name,
+        )
+        snapshot.metrics.update(live_capture_metadata(options_df))
+        snapshot.provider = data_client.provider_name
+        if not is_snapshot_replay_eligible(snapshot):
+            raise RuntimeError("live provider returned a low-quality snapshot")
+        cache.update_spot_price(spot_price, symbol="SPX", provider=data_client.provider_name)
         settings = get_settings()
         default_provider = ProviderRegistry.resolve_provider_name(
             default_provider=settings.data_provider,
@@ -431,7 +455,7 @@ async def cache_warmup() -> None:
         cache.set("gex:current:SPX", snapshot)
 
         logger.info(
-            f"Cache warmup complete: net_gex={snapshot.net_gex/1e9:.3f}B, "
+            f"Cache warmup complete: net_gex={snapshot.net_gex / 1e9:.3f}B, "
             f"spot={spot_price:.2f}, contracts={len(options_df)} via {data_client.provider_name}"
         )
 
@@ -493,6 +517,7 @@ async def stop_background_tasks() -> None:
 
     # Close data provider instances
     from app.core.provider_registry import ProviderRegistry
+
     await ProviderRegistry.close_all()
     await dispose_engine()
 

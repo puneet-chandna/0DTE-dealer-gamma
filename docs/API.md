@@ -136,7 +136,7 @@ Get current market regime based on GEX.
 ```json
 {
   "regime": "short_gamma",
-  "description": "Negative gamma environment - expect amplified market moves",
+  "description": "Negative signed GEX proxy; volatility amplification is a hypothesis.",
   "color": "red",
   "net_gex": -1500000000,
   "net_gex_billions": -1.5,
@@ -148,9 +148,9 @@ Get current market regime based on GEX.
 
 | Regime        | Condition             | Description              |
 | ------------- | --------------------- | ------------------------ |
-| `short_gamma` | Net GEX < -$1B        | High volatility expected |
-| `long_gamma`  | Net GEX > +$1B        | Low volatility expected  |
-| `neutral`     | -$1B ≤ Net GEX ≤ +$1B | Normal conditions        |
+| `short_gamma` | Net GEX < -$1B        | Negative signed GEX proxy |
+| `long_gamma`  | Net GEX > +$1B        | Positive signed GEX proxy  |
+| `neutral`     | -$1B ≤ Net GEX ≤ +$1B | GEX proxy near the regime threshold |
 
 ---
 
@@ -195,42 +195,49 @@ Analyze relationship between GEX and realized volatility.
 
 ### `GET /api/analytics/backtest`
 
-Backtest trading strategy based on GEX signals.
+Both `/api/analytics/backtest` and `/api/analytics/vectorbt-backtest` simulate a
+directional long position in the underlying. The legacy strategy name
+`volatility_breakout` is accepted as an alias; responses identify
+`gex_long_underlying`. This is not a long-volatility options trade.
 
-**Parameters:**
+Required query parameters: `start_date` and `end_date`. Optional parameters:
+`provider`, `symbol`, `demo=false`, `entry_threshold=-1e9`, `exit_threshold=0`,
+`initial_cash=100000`, `position_size=1` (fraction of available cash),
+`fees=0.001`, `slippage=0.001` (fraction per side), `execution_delay_bars=1`.
+The legacy route additionally accepts `stop_loss_pct=0.02` and
+`take_profit_pct=0.05`. The engine infers the nominal bar interval from the modal
+within-session price delta; the shorter mode wins ties. It still requires at
+least one within-session delta.
 
-| Name              | Type   | Default               | Description             |
-| ----------------- | ------ | --------------------- | ----------------------- |
-| `start_date`      | date   | -                     | Backtest start date     |
-| `end_date`        | date   | -                     | Backtest end date       |
-| `strategy`        | string | `volatility_breakout` | Strategy to test        |
-| `entry_threshold` | float  | `-1000000000`         | GEX threshold for entry |
-| `stop_loss_pct`   | float  | `0.02`                | Stop loss (2%)          |
-| `take_profit_pct` | float  | `0.05`                | Take profit (5%)        |
+Signals detected at a close fill at a later eligible close in the same session.
+Positions can carry overnight; old signals cannot. Stops/targets also fill after
+detection, so gaps can exceed a stop. Costs affect both entry and exit; fractional
+units are permitted. Marked-to-market equity includes open positions. Entry counts
+include open trades; win/loss statistics use closed trades. Undefined risk ratios
+and profit factor are JSON `null`.
 
-**Response:**
+Missing or off-grid price bars break signal continuity. Pending entries, exits,
+stops and targets cannot execute across a break, and pre-gap GEX is not carried
+forward until a fresh observation arrives after resumption. Open positions still
+mark every observed price change across the gap. Regime comparisons exclude
+returns spanning a break; portfolio risk ratios retain nominal-interval
+annualization. The separate captured-data research/cost diagnostic still rejects
+irregular sessions for qualification.
 
-```json
-{
-  "strategy": "volatility_breakout",
-  "period": {
-    "start": "2026-01-01",
-    "end": "2026-01-30"
-  },
-  "results": {
-    "total_trades": 25,
-    "win_rate": 0.64,
-    "avg_return": 0.023,
-    "sharpe_ratio": 1.85,
-    "max_drawdown": -0.08
-  }
-}
-```
+Non-demo routes return **404** when captured history is insufficient. Explicit demo
+mode returns labelled synthetic scenarios. Yahoo SPX history models **SPY** after
+undoing the ×10 proxy price scale; direct Tradier SPX index backtests return **422**
+and ask for captured SPY history. Costs and fill timing are assumptions, not
+validated exchange execution.
 
-> **Backtest caveats (vectorbt engine):** long-only (enter long in short-gamma,
-> exit on recovery — no shorts); fees and slippage default to 0.1% each;
-> `freq` is assumed `1min`, so the bar `interval` of the input series must match
-> minute-level data or Sharpe/duration stats will be mis-scaled.
+Responses include equity values and `equity_timestamps`, closed/open trade counts,
+submitted costs/delay, and `provenance`: provider, requested symbol, actual
+instrument, proxy flag, captured/synthetic kind, actual coverage, sample count,
+calculation versions, timestamp basis and quality limitations. Summary statistics
+and GEX/volatility analysis use the same provenance/history boundary. The latter
+is descriptive: overlapping backward volatility windows do not establish forward
+prediction. See the [offline research command](../scripts/research_gex_volatility.py)
+for the held-out study implementation.
 
 ---
 
@@ -322,6 +329,11 @@ Get list of all supported dynamic data providers and the active default.
 
 Get current 0DTE options chain. Supports different API sources dynamically.
 
+Default requests use the effective trading session in their cache key. Before
+09:30 ET this is the previous weekday; providers may resolve a later available
+expiry. An expired resolved default chain cannot be reused after the session
+advances. Explicit `expiration` requests retain their separate dated keys.
+
 **Parameters:**
 
 | Name         | Type   | Default | Description                            |
@@ -352,7 +364,12 @@ Get current 0DTE options chain. Supports different API sources dynamically.
       "implied_vol": 0.18
     }
   ],
-  "timestamp": "2026-01-30T10:30:00-05:00"
+  "timestamp": "2026-01-30T10:30:00-05:00",
+  "captured_at": "2026-01-30T10:30:00-05:00",
+  "provider": "tradier",
+  "is_stale": false,
+  "age_seconds": 0,
+  "market_status": "open"
 }
 ```
 
@@ -376,9 +393,21 @@ Get current spot price based on active provider.
   "symbol": "SPX",
   "price": 5950.25,
   "timestamp": "2026-01-30T10:30:00-05:00",
+  "captured_at": "2026-01-30T10:30:00-05:00",
+  "provider": "tradier",
+  "is_stale": false,
+  "age_seconds": 0,
   "market_status": "open"
 }
 ```
+
+Both raw-data routes expose backend capture age on every response. `timestamp`
+and `captured_at` retain the original backend capture time; `age_seconds` is
+recomputed when serving the response. Failed fetches may return a cached payload
+up to one hour old with `is_stale: true`. `market_status` describes the response
+time, including when the cached quote predates the close. Capture age does not
+measure vendor quote freshness. Unusable or expired default-chain fallbacks
+return HTTP 503.
 
 ---
 

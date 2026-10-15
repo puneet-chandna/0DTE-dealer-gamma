@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
@@ -270,7 +270,9 @@ async def test_historical_route_uses_database_when_history_exists(history_servic
 
 
 @pytest.mark.asyncio
-async def test_current_route_falls_back_to_latest_persisted_snapshot_when_live_fetch_fails(history_service):
+async def test_current_route_falls_back_to_latest_persisted_snapshot_when_live_fetch_fails(
+    history_service,
+):
     service, _ = history_service
     captured_at = datetime(2026, 3, 20, 13, 45, 0, tzinfo=ET)
 
@@ -307,7 +309,9 @@ async def test_current_route_falls_back_to_latest_persisted_snapshot_when_live_f
 
 
 @pytest.mark.asyncio
-async def test_backfill_from_raw_overwrites_legacy_yfinance_snapshot_and_marks_it_ineligible(history_service):
+async def test_backfill_from_raw_overwrites_legacy_yfinance_snapshot_and_marks_it_ineligible(
+    history_service,
+):
     service, session_factory = history_service
     captured_at = datetime(2026, 3, 27, 15, 34, 43, tzinfo=ET)
 
@@ -321,7 +325,9 @@ async def test_backfill_from_raw_overwrites_legacy_yfinance_snapshot_and_marks_i
 
     async with session_factory() as session:
         snapshot_record = (
-            await session.execute(select(GEXSnapshotRecord).where(GEXSnapshotRecord.provider == "yfinance"))
+            await session.execute(
+                select(GEXSnapshotRecord).where(GEXSnapshotRecord.provider == "yfinance")
+            )
         ).scalar_one()
         snapshot_record.total_call_gex = -3.992868594729168e11
         snapshot_record.total_put_gex = 1.2024523512576514e13
@@ -702,8 +708,7 @@ async def test_latest_snapshot_skips_hard_invalid_outlier_rows_for_persisted_rea
     async with session_factory() as session:
         latest_record = (
             await session.execute(
-                select(GEXSnapshotRecord)
-                .where(
+                select(GEXSnapshotRecord).where(
                     GEXSnapshotRecord.provider == "tradier",
                     GEXSnapshotRecord.symbol == "SPX",
                     GEXSnapshotRecord.captured_at == later_capture,
@@ -769,8 +774,7 @@ async def test_latest_timestamp_scans_limited_batches_until_it_finds_usable_reco
     async with session_factory() as session:
         latest_record = (
             await session.execute(
-                select(GEXSnapshotRecord)
-                .where(
+                select(GEXSnapshotRecord).where(
                     GEXSnapshotRecord.provider == "tradier",
                     GEXSnapshotRecord.symbol == "SPX",
                     GEXSnapshotRecord.captured_at == later_capture,
@@ -845,8 +849,7 @@ async def test_historical_snapshots_exclude_hard_invalid_outlier_rows_from_non_r
     async with session_factory() as session:
         outlier_record = (
             await session.execute(
-                select(GEXSnapshotRecord)
-                .where(
+                select(GEXSnapshotRecord).where(
                     GEXSnapshotRecord.provider == "yfinance",
                     GEXSnapshotRecord.symbol == "SPX",
                     GEXSnapshotRecord.captured_at == base_capture.replace(minute=41),
@@ -874,7 +877,9 @@ async def test_historical_snapshots_exclude_hard_invalid_outlier_rows_from_non_r
     )
 
     assert [snapshot.spot_price for snapshot in snapshots] == [6349.0, 6341.2]
-    assert all("provider_gex_outlier" not in snapshot.metrics["quality_flags"] for snapshot in snapshots)
+    assert all(
+        "provider_gex_outlier" not in snapshot.metrics["quality_flags"] for snapshot in snapshots
+    )
 
 
 @pytest.mark.asyncio
@@ -1006,7 +1011,9 @@ async def test_demo_vectorbt_backtest_honors_requested_range_when_replay_window_
     demo_gex_data["net_gex"] = 2.0e9
 
     class _DemoService:
-        def get_time_series(self, symbol, start_date, end_date, interval="1min", *, anchor_snapshot=None):
+        def get_time_series(
+            self, symbol, start_date, end_date, interval="1min", *, anchor_snapshot=None
+        ):
             assert symbol == "SPX"
             assert start_date == date(2025, 1, 1)
             assert end_date == date(2025, 3, 1)
@@ -1070,7 +1077,9 @@ async def test_demo_legacy_backtest_honors_requested_range_when_replay_window_is
     demo_gex_data["net_gex"] = 2.0e9
 
     class _DemoService:
-        def get_time_series(self, symbol, start_date, end_date, interval="1min", *, anchor_snapshot=None):
+        def get_time_series(
+            self, symbol, start_date, end_date, interval="1min", *, anchor_snapshot=None
+        ):
             assert symbol == "SPX"
             assert start_date == date(2025, 1, 1)
             assert end_date == date(2025, 3, 1)
@@ -1194,9 +1203,7 @@ async def test_demo_current_falls_back_to_synthetic_without_cross_provider_repla
     )
 
     async with session_factory() as session:
-        sessions = (
-            await session.execute(select(MarketSessionRecord))
-        ).scalars().all()
+        sessions = (await session.execute(select(MarketSessionRecord))).scalars().all()
         for market_session in sessions:
             market_session.status = "complete"
         await session.commit()
@@ -1264,3 +1271,151 @@ async def test_get_technical_indicators_returns_null_indicators_for_short_histor
     assert all(point["atr"] is None for point in indicators["data"])
     assert all(point["rsi"] is None for point in indicators["data"])
     assert all(point["bb_upper"] is None for point in indicators["data"])
+
+
+@pytest.mark.asyncio
+async def test_captured_bars_use_et_completion_time_and_end_labels(history_service):
+    service, _ = history_service
+    captured_at = datetime(2025, 1, 6, 9, 30, 10, tzinfo=ET)
+    snapshot = _build_snapshot(captured_at)
+    snapshot.metrics["feature_available_at"] = "2025-01-06T09:30:40-05:00"
+    snapshot.metrics["quality_flags"] = ["put_iv_corrupted"]
+    await service.persist_capture(
+        provider="yfinance", symbol="SPX", snapshot=snapshot, options_df=None
+    )
+    prices, gex = await service.get_time_series_frames(
+        provider="yfinance",
+        symbol="SPX",
+        start_date=date(2025, 1, 6),
+        end_date=date(2025, 1, 6),
+        interval="1m",
+    )
+    assert prices.index[0] == pd.Timestamp("2025-01-06T09:31:00-05:00")
+    assert gex.index[0] == prices.index[0]
+    assert gex.attrs["timestamp_basis"] == "feature completion; bars labeled at end"
+    assert "put_iv_corrupted" in " ".join(gex.attrs["quality_limitations"])
+    snapshots = await service.get_historical_snapshots(
+        provider="yfinance",
+        symbol="SPX",
+        start_date=date(2025, 1, 6),
+        end_date=date(2025, 1, 6),
+        interval="1m",
+    )
+    assert snapshots[0].timestamp == datetime(2025, 1, 6, 9, 31, tzinfo=ET)
+    latest = await service.get_latest_snapshot(provider="yfinance", symbol="SPX")
+    assert latest.timestamp == captured_at
+
+
+@pytest.mark.asyncio
+async def test_open_minute_is_not_published_as_a_completed_backtest_bar(
+    history_service, monkeypatch
+):
+    service, _ = history_service
+    now = datetime(2025, 1, 6, 9, 31, 20, tzinfo=ET)
+
+    class DateTimeMeta(type):
+        def __instancecheck__(cls, value):
+            return isinstance(value, datetime)
+
+    class FrozenDateTime(datetime, metaclass=DateTimeMeta):
+        @classmethod
+        def now(cls, tz=None):
+            return now.astimezone(tz) if tz else now.replace(tzinfo=None)
+
+    monkeypatch.setattr(historical_data_module, "datetime", FrozenDateTime)
+    for minute in (30, 31):
+        capture = datetime(2025, 1, 6, 9, minute, 10, tzinfo=ET)
+        snapshot = _build_snapshot(capture)
+        snapshot.metrics["feature_available_at"] = capture.isoformat()
+        await service.persist_capture(
+            provider="yfinance", symbol="SPX", snapshot=snapshot, options_df=None
+        )
+    prices, gex = await service.get_time_series_frames(
+        provider="yfinance", symbol="SPX", start_date=now.date(), end_date=now.date(), interval="1m"
+    )
+    assert list(prices.index) == [pd.Timestamp("2025-01-06T09:31:00-05:00")]
+    assert list(gex.index) == list(prices.index)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("keep_derived", [True, False])
+async def test_raw_rebuild_preserves_source_identity_but_invalidates_feature_asof_clock(
+    history_service, keep_derived
+):
+    service, session_factory = history_service
+    captured_at = datetime(2026, 3, 27, 15, 34, 43, tzinfo=ET)
+    original_completion = "2026-03-27T15:34:44-04:00"
+    source = {
+        "actual_instrument": "SPY",
+        "is_proxy": True,
+        "source_received_at": "2026-03-27T15:34:42-04:00",
+        "nominal_options_delay_minutes": 15,
+        "quote_freshness": "unknown",
+        "open_interest_frequency": "daily",
+        "open_interest_asof": None,
+    }
+    options = _build_concentrated_yfinance_options_df()
+    options.attrs["source_metadata"] = {**source, "feature_available_at": original_completion}
+    snapshot = _with_metrics(
+        _build_snapshot(captured_at, spot_price=6351.8),
+        feature_available_at=original_completion,
+        calculation_version="legacy_cumulative_strikes",
+        audit_note="retain original capture evidence",
+    )
+    await service.persist_capture(
+        provider="yfinance",
+        symbol="SPX",
+        snapshot=snapshot,
+        options_df=options,
+        force_raw_capture=True,
+    )
+    if not keep_derived:
+        async with session_factory() as session:
+            record = (await session.execute(select(GEXSnapshotRecord))).scalar_one()
+            await session.delete(record)
+            await session.commit()
+
+    before_rebuild = datetime.now(ET)
+    for _ in range(2):
+        assert await service.rebuild_gex_snapshots_from_raw(provider="yfinance", symbol="SPX") == 1
+        rebuilt = await service.get_latest_snapshot(
+            provider="yfinance",
+            symbol="SPX",
+            replay_eligible_only=False,
+        )
+        assert rebuilt.timestamp == captured_at
+        for key, value in source.items():
+            assert rebuilt.metrics[key] == value
+        assert rebuilt.metrics["feature_available_at"] is None
+        assert rebuilt.metrics["original_feature_available_at"] == original_completion
+        assert datetime.fromisoformat(rebuilt.metrics["reconstructed_at"]) >= before_rebuild
+        assert rebuilt.metrics["calculation_version"] == "sticky_iv_delta_scenarios_v1"
+        if keep_derived:
+            assert rebuilt.metrics["audit_note"] == "retain original capture evidence"
+        prices, gex = await service.get_time_series_frames(
+            provider="yfinance",
+            symbol="SPX",
+            start_date=captured_at.date(),
+            end_date=captured_at.date(),
+            interval="1m",
+        )
+        assert prices.index[0] == pd.Timestamp(captured_at).ceil("min")
+        assert gex.attrs["timestamp_basis"] == "capture reference; feature completion unknown"
+
+
+@pytest.mark.asyncio
+async def test_retention_keeps_enough_calendar_history_for_30_trading_sessions(history_service):
+    service, session_factory = history_service
+    reference = date(2026, 10, 14)
+    for days_ago in (91, 90, 45):
+        captured = datetime.combine(
+            reference - timedelta(days=days_ago), datetime.min.time(), ET
+        ).replace(hour=10)
+        await service.persist_capture(
+            provider="yfinance", symbol="SPY", snapshot=_build_snapshot(captured), options_df=None
+        )
+    async with session_factory() as session:
+        await service._apply_retention(session, reference_date=reference)
+        await session.commit()
+        days = (await session.execute(select(MarketSessionRecord.trading_date))).scalars().all()
+    assert sorted(days) == [reference - timedelta(days=90), reference - timedelta(days=45)]

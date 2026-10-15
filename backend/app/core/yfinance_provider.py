@@ -1,7 +1,7 @@
 """0DTE GEX Backend - YFinance Data Provider.
 
 Alternative data provider using Yahoo Finance via yfinance library.
-Provides free real-time options chain data for SPX/SPY options.
+Provides delayed Yahoo options data; SPY may be used as an SPX proxy.
 """
 
 import asyncio
@@ -18,6 +18,7 @@ from app.core.data_acquisition import (
     RateLimiter,
     get_current_trading_date,
 )
+from app.core.provenance import source_timestamp
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ class YFinanceClient(DataProvider):
     """
     Yahoo Finance API client for options data via yfinance library.
 
-    Provides free real-time options chain data. Note that yfinance is an
+    Yahoo publishes a 15-minute OPRA options delay; per-quote freshness is unknown. yfinance is an
     unofficial API and may be subject to rate limiting or changes.
 
     Key characteristics:
@@ -125,22 +126,16 @@ class YFinanceClient(DataProvider):
         try:
             # Run yfinance in thread pool to avoid blocking
             loop = asyncio.get_event_loop()
-            ticker = await loop.run_in_executor(
-                None, yf.Ticker, ticker_symbol
-            )
+            ticker = await loop.run_in_executor(None, yf.Ticker, ticker_symbol)
 
             # Get current price from fast_info or history
-            info = await loop.run_in_executor(
-                None, lambda: ticker.fast_info
-            )
+            info = await loop.run_in_executor(None, lambda: ticker.fast_info)
 
             price = info.get("lastPrice") or info.get("regularMarketPrice")
 
             if price is None:
                 # Fallback to history
-                hist = await loop.run_in_executor(
-                    None, lambda: ticker.history(period="1d")
-                )
+                hist = await loop.run_in_executor(None, lambda: ticker.history(period="1d"))
                 if not hist.empty:
                     price = float(hist["Close"].iloc[-1])
 
@@ -175,13 +170,9 @@ class YFinanceClient(DataProvider):
 
         try:
             loop = asyncio.get_event_loop()
-            ticker = await loop.run_in_executor(
-                None, yf.Ticker, ticker_symbol
-            )
+            ticker = await loop.run_in_executor(None, yf.Ticker, ticker_symbol)
 
-            expirations = await loop.run_in_executor(
-                None, lambda: ticker.options
-            )
+            expirations = await loop.run_in_executor(None, lambda: ticker.options)
 
             logger.debug(f"Available expirations for {ticker_symbol}: {expirations}")
             return list(expirations)
@@ -216,14 +207,10 @@ class YFinanceClient(DataProvider):
 
         try:
             loop = asyncio.get_event_loop()
-            ticker = await loop.run_in_executor(
-                None, yf.Ticker, ticker_symbol
-            )
+            ticker = await loop.run_in_executor(None, yf.Ticker, ticker_symbol)
 
             # Get available expirations
-            expirations = await loop.run_in_executor(
-                None, lambda: ticker.options
-            )
+            expirations = await loop.run_in_executor(None, lambda: ticker.options)
 
             if not expirations:
                 logger.warning(f"No expirations available for {ticker_symbol}")
@@ -239,10 +226,9 @@ class YFinanceClient(DataProvider):
                 logger.info(f"Target expiration {exp_str} not available, using {target_exp}")
 
             # Fetch options chain
-            chain = await loop.run_in_executor(
-                None, lambda: ticker.option_chain(target_exp)
-            )
+            chain = await loop.run_in_executor(None, lambda: ticker.option_chain(target_exp))
 
+            received_at = datetime.now(ET).isoformat()
             # Combine calls and puts into single DataFrame
             calls_df = chain.calls.copy()
             calls_df["type"] = "call"
@@ -273,25 +259,42 @@ class YFinanceClient(DataProvider):
                     bid *= self.SPY_TO_SPX_RATIO
                     ask *= self.SPY_TO_SPX_RATIO
 
-                options_data.append({
-                    "symbol": row.get("contractSymbol", ""),
-                    "strike": strike,
-                    "expiration": target_exp,
-                    "type": row["type"],
-                    "bid": bid,
-                    "ask": ask,
-                    "mid": (bid + ask) / 2 if (bid + ask) > 0 else 0,
-                    "open_interest": self._safe_int(row.get("openInterest")),
-                    "volume": self._safe_int(row.get("volume")),
-                    # yfinance provides IV but not other Greeks
-                    "implied_vol": self._safe_float(row.get("impliedVolatility")),
-                    "delta": None,  # Must be calculated
-                    "gamma": None,  # Must be calculated
-                    "vega": None,   # Must be calculated
-                    "theta": None,  # Must be calculated
-                })
+                options_data.append(
+                    {
+                        "symbol": row.get("contractSymbol", ""),
+                        "underlying_symbol": ticker_symbol,
+                        "received_at": received_at,
+                        "last_trade_at": source_timestamp(row.get("lastTradeDate")),
+                        "bid_timestamp": None,
+                        "ask_timestamp": None,
+                        "open_interest_asof": None,
+                        "strike": strike,
+                        "expiration": target_exp,
+                        "type": row["type"],
+                        "bid": bid,
+                        "ask": ask,
+                        "mid": (bid + ask) / 2 if (bid + ask) > 0 else 0,
+                        "open_interest": self._safe_int(row.get("openInterest")),
+                        "volume": self._safe_int(row.get("volume")),
+                        # yfinance provides IV but not other Greeks
+                        "implied_vol": self._safe_float(row.get("impliedVolatility")),
+                        "delta": None,  # Must be calculated
+                        "gamma": None,  # Must be calculated
+                        "vega": None,  # Must be calculated
+                        "theta": None,  # Must be calculated
+                    }
+                )
 
             df = pd.DataFrame(options_data)
+            df.attrs["source_metadata"] = {
+                "actual_instrument": ticker_symbol,
+                "is_proxy": underlying.upper() == "SPX" and ticker_symbol == "SPY",
+                "source_received_at": received_at,
+                "nominal_options_delay_minutes": 15,
+                "quote_freshness": "unknown; last trade is not a bid/ask timestamp",
+                "open_interest_frequency": "daily",
+                "open_interest_asof": None,
+            }
             logger.info(f"Fetched {len(df)} contracts for {underlying} exp {target_exp}")
 
             return df
@@ -332,10 +335,7 @@ class YFinanceClient(DataProvider):
         filtered_df = df[mask].copy()
 
         if len(filtered_df) < len(df):
-            logger.debug(
-                f"Filtered to {len(filtered_df)} 0DTE contracts "
-                f"(from {len(df)} total)"
-            )
+            logger.debug(f"Filtered to {len(filtered_df)} 0DTE contracts (from {len(df)} total)")
 
         return filtered_df.drop(columns=["expiration_date"])
 
@@ -368,7 +368,7 @@ class YFinanceClient(DataProvider):
         if len(filtered_df) < len(df):
             logger.debug(
                 f"Filtered to {len(filtered_df)} strikes within "
-                f"±{range_percent*100:.0f}% of spot (from {len(df)})"
+                f"±{range_percent * 100:.0f}% of spot (from {len(df)})"
             )
 
         return filtered_df

@@ -15,6 +15,7 @@ from app.config import Settings
 from app.core.advanced_analytics import reset_advanced_analytics_state
 from app.main import app
 from app.models.schemas import GEXSnapshot
+from app.services.cache import GEXCache
 
 client = TestClient(app)
 ET = ZoneInfo("America/New_York")
@@ -22,6 +23,13 @@ ET = ZoneInfo("America/New_York")
 
 class TestWebSocketEndpoints:
     """Test WebSocket connection and streaming."""
+
+    @pytest.fixture(autouse=True)
+    def isolated_demo_history(self, monkeypatch):
+        history = MagicMock()
+        history.get_historical_snapshots = AsyncMock(return_value=[])
+        history.get_latest_snapshot = AsyncMock(return_value=None)
+        monkeypatch.setattr("app.api.websocket.get_historical_data_service", lambda: history)
 
     def test_websocket_connections_count(self):
         """Test that connection count endpoint works."""
@@ -36,7 +44,7 @@ class TestWebSocketEndpoints:
 
     def test_websocket_gex_stream_connects(self):
         """Test WebSocket connection establishment."""
-        with client.websocket_connect("/ws/gex-stream") as websocket:
+        with client.websocket_connect("/ws/gex-stream?demo=true") as websocket:
             # Should receive initial connection message
             data = websocket.receive_json()
 
@@ -49,7 +57,7 @@ class TestWebSocketEndpoints:
 
     def test_websocket_receives_gex_update(self):
         """Test that WebSocket receives GEX updates after connection."""
-        with client.websocket_connect("/ws/gex-stream") as websocket:
+        with client.websocket_connect("/ws/gex-stream?demo=true") as websocket:
             # Skip initial connection message
             websocket.receive_json()
 
@@ -69,7 +77,7 @@ class TestWebSocketEndpoints:
 
     def test_websocket_gex_update_format(self):
         """Test GEX update data has correct types and ranges."""
-        with client.websocket_connect("/ws/gex-stream") as websocket:
+        with client.websocket_connect("/ws/gex-stream?demo=true") as websocket:
             # Skip connection message
             websocket.receive_json()
 
@@ -92,7 +100,7 @@ class TestWebSocketEndpoints:
 
     def test_websocket_handles_client_messages(self):
         """Test that WebSocket can receive client messages (e.g., ping)."""
-        with client.websocket_connect("/ws/gex-stream") as websocket:
+        with client.websocket_connect("/ws/gex-stream?demo=true") as websocket:
             # Skip connection message
             websocket.receive_json()
 
@@ -110,7 +118,7 @@ class TestWebSocketEndpoints:
         initial_count = initial_response.json()["active_connections"]
 
         # Open a WebSocket connection
-        with client.websocket_connect("/ws/gex-stream") as websocket:
+        with client.websocket_connect("/ws/gex-stream?demo=true") as websocket:
             websocket.receive_json()  # Wait for connection
 
             # Count should increase (or stay same in blocking tests)
@@ -124,7 +132,7 @@ class TestWebSocketEndpoints:
 
     def test_websocket_market_open_status(self):
         """Test that market open status is included in messages."""
-        with client.websocket_connect("/ws/gex-stream") as websocket:
+        with client.websocket_connect("/ws/gex-stream?demo=true") as websocket:
             # Connection message should have market_open
             connection_data = websocket.receive_json()
             assert "market_open" in connection_data["data"]
@@ -135,17 +143,16 @@ class TestWebSocketEndpoints:
             assert "market_open" in update_data
             assert isinstance(update_data["market_open"], bool)
 
-    def test_websocket_mock_data_flag(self):
-        """Test that is_mock flag is set when using mock data."""
-        with client.websocket_connect("/ws/gex-stream") as websocket:
+    def test_websocket_explicit_demo_data_flag(self):
+        """Explicit demo streams identify generated scenarios."""
+        with client.websocket_connect("/ws/gex-stream?demo=true") as websocket:
             websocket.receive_json()  # Skip connection
 
             data = websocket.receive_json()
             gex_data = data["data"]
 
-            # Without API key, should be mock data
             assert "is_mock" in gex_data
-            assert isinstance(gex_data["is_mock"], bool)
+            assert gex_data["is_mock"] is True
 
     def test_websocket_passes_provider_query_param_to_update_fetch(self):
         """Provider-aware websocket connections should fetch using the selected provider."""
@@ -195,6 +202,7 @@ class TestGEXUpdateHelper:
         refreshed_snapshot.timestamp = datetime(2026, 3, 23, 14, 20, tzinfo=ET)
 
         mock_cache = MagicMock()
+        mock_cache.fetch_gex_chain = GEXCache().fetch_gex_chain
         mock_cache.get_if_fresh.return_value = None
         mock_cache.get.side_effect = (
             lambda key: stale_snapshot if key == "gex:current:SPX:yfinance" else None
@@ -242,6 +250,7 @@ class TestGEXUpdateHelper:
             }
         )
         mock_cache = MagicMock()
+        mock_cache.fetch_gex_chain = GEXCache().fetch_gex_chain
         mock_cache.get_if_fresh.return_value = None
         mock_cache.get.side_effect = (
             lambda key: cached_snapshot if key == "gex:current:SPX:tradier" else None
@@ -279,6 +288,7 @@ class TestGEXUpdateHelper:
             "metrics": {},
         }
         mock_cache = MagicMock()
+        mock_cache.fetch_gex_chain = GEXCache().fetch_gex_chain
         mock_cache.get_if_fresh.side_effect = (
             lambda key: cached_snapshot if key == "gex:current:SPX:yfinance" else None
         )
@@ -311,6 +321,7 @@ class TestGEXUpdateHelper:
             "metrics": {},
         }
         mock_cache = MagicMock()
+        mock_cache.fetch_gex_chain = GEXCache().fetch_gex_chain
         mock_cache.get_if_fresh.side_effect = (
             lambda key: cached_snapshot if key == "gex:current:QQQ" else None
         )
@@ -328,8 +339,8 @@ class TestGEXUpdateHelper:
         mock_cache.get_if_fresh.assert_any_call("gex:current:QQQ")
 
     @pytest.mark.asyncio
-    async def test_unreasonable_cached_payload_falls_back_to_mock_data(self):
-        """Sanity checks should prevent obviously broken cached payloads reaching clients."""
+    async def test_unreasonable_cached_payload_is_unavailable_without_captured_fallback(self):
+        """Broken cached payloads cannot become a generated live update."""
         cached_snapshot = {
             "timestamp": "2099-01-15T10:30:00-05:00",
             "spot_price": 50.0,
@@ -342,31 +353,25 @@ class TestGEXUpdateHelper:
             "metrics": {},
         }
         mock_cache = MagicMock()
+        mock_cache.fetch_gex_chain = GEXCache().fetch_gex_chain
         mock_cache.get_if_fresh.side_effect = (
             lambda key: cached_snapshot if key == "gex:current:SPX:yfinance" else None
         )
         mock_cache.is_stale.return_value = False
-        mock_fallback = {
-            "net_gex": 0.0,
-            "net_gex_billions": 0.0,
-            "zero_gamma_level": 5000.0,
-            "spot_price": 5000.0,
-            "regime": "neutral",
-            "is_mock": True,
-        }
+        mock_cache.get.return_value = None
+        mock_client = AsyncMock()
+        mock_client.provider_name = "yfinance"
+        mock_client.get_options_chain_for_gex.side_effect = RuntimeError("provider unavailable")
+        mock_history = MagicMock()
+        mock_history.get_latest_snapshot = AsyncMock(return_value=None)
 
         with patch("app.api.websocket.get_cache", return_value=mock_cache):
             with patch(
-                "app.api.websocket._generate_mock_gex_data",
-                return_value=mock_fallback,
-            ) as mock_generate:
-                payload = await _get_gex_update(
-                    Settings(data_provider="yfinance"),
-                    symbol="SPX",
-                )
-
-        mock_generate.assert_called_once()
-        assert payload == mock_fallback
+                "app.api.websocket.get_data_client", return_value=mock_client,
+            ):
+                with patch("app.api.websocket.get_historical_data_service", return_value=mock_history):
+                    with pytest.raises(RuntimeError, match="provider unavailable"):
+                        await _get_gex_update(Settings(data_provider="yfinance"), symbol="SPX")
 
     @pytest.mark.asyncio
     async def test_large_but_finite_live_gex_payload_is_not_rejected(self):
@@ -383,6 +388,7 @@ class TestGEXUpdateHelper:
             "metrics": {},
         }
         mock_cache = MagicMock()
+        mock_cache.fetch_gex_chain = GEXCache().fetch_gex_chain
         mock_cache.get_if_fresh.side_effect = (
             lambda key: cached_snapshot if key == "gex:current:SPX:yfinance" else None
         )
@@ -420,6 +426,7 @@ class TestGEXUpdateHelper:
         persisted_snapshot.advanced_analytics = None
 
         mock_cache = MagicMock()
+        mock_cache.fetch_gex_chain = GEXCache().fetch_gex_chain
         mock_cache.get_if_fresh.return_value = None
         mock_cache.get.return_value = None
 
@@ -481,6 +488,7 @@ class TestGEXUpdateHelper:
         )
 
         mock_cache = MagicMock()
+        mock_cache.fetch_gex_chain = GEXCache().fetch_gex_chain
         mock_cache.get_if_fresh.return_value = None
         mock_client = AsyncMock()
         mock_client.provider_name = "yfinance"
@@ -506,7 +514,7 @@ class TestGEXUpdateHelper:
         assert hawkes_payload["call_intensity"] == 0.0
         assert hawkes_payload["put_intensity"] == 0.0
         assert hawkes_payload["net_toxicity"] == 0.0
-        assert hawkes_payload["squeeze_probability"] == 0.0
+        assert hawkes_payload["squeeze_score"] == 0.0
         assert hawkes_payload["baseline_ready"] is False
         assert hawkes_payload["provider_mode"] == "yfinance_proxy"
         assert hawkes_payload["event_count"] == 0
@@ -565,6 +573,7 @@ class TestGEXUpdateHelper:
         )
 
         mock_cache = MagicMock()
+        mock_cache.fetch_gex_chain = GEXCache().fetch_gex_chain
         mock_cache.get_if_fresh.return_value = None
         mock_client = AsyncMock()
         mock_client.provider_name = "yfinance"
@@ -623,7 +632,7 @@ class TestWebSocketErrorHandling:
 
     def test_websocket_handles_rapid_messages(self):
         """Test that WebSocket handles rapid client messages."""
-        with client.websocket_connect("/ws/gex-stream") as websocket:
+        with client.websocket_connect("/ws/gex-stream?demo=true") as websocket:
             websocket.receive_json()  # Skip connection
 
             # Send multiple rapid messages
@@ -640,10 +649,10 @@ class TestWebSocketBroadcast:
 
     def test_multiple_clients_receive_updates(self):
         """Test that multiple WebSocket clients receive updates."""
-        with client.websocket_connect("/ws/gex-stream") as ws1:
+        with client.websocket_connect("/ws/gex-stream?demo=true") as ws1:
             ws1.receive_json()  # Connection message
 
-            with client.websocket_connect("/ws/gex-stream") as ws2:
+            with client.websocket_connect("/ws/gex-stream?demo=true") as ws2:
                 ws2.receive_json()  # Connection message
 
                 # Both should receive updates

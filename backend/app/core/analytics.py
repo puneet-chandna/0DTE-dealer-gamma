@@ -1,11 +1,11 @@
 """0DTE GEX Backend - Analytics Module.
 
 Statistical analysis of GEX-volatility relationships and
-backtesting of volatility-based trading strategies.
+backtesting of directional underlying strategies.
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 import numpy as np
@@ -28,12 +28,22 @@ class BacktestResult:
     win_rate: float
     total_return: float
     average_return: float
-    sharpe_ratio: float
+    sharpe_ratio: float | None
     max_drawdown: float
-    profit_factor: float
+    profit_factor: float | None
     average_trade_duration: float  # in minutes
     start_date: datetime
     end_date: datetime
+    equity_curve: list[float] = field(default_factory=list)
+    equity_timestamps: list[datetime] = field(default_factory=list)
+    closed_trades: int = 0
+    open_trades: int = 0
+    bar_interval_minutes: float = 0.0
+    initial_cash: float = 100_000.0
+    fees: float = 0.001
+    slippage: float = 0.001
+    position_size: float = 1.0
+    execution_delay_bars: int = 1
 
 
 class VolatilityAnalyzer:
@@ -222,11 +232,7 @@ class VolatilityAnalyzer:
 
 
 class TradingStrategy:
-    """
-    Backtesting trading strategies based on GEX signals.
-
-    Primary strategy: Enter long volatility when Net GEX < threshold.
-    """
+    """Compatibility entry points for directional GEX-conditioned simulations."""
 
     @staticmethod
     def volatility_breakout_strategy(
@@ -234,169 +240,57 @@ class TradingStrategy:
         price_data: pd.DataFrame,
         entry_threshold: float = SHORT_GAMMA_THRESHOLD,
         exit_threshold: float = 0.0,
-        stop_loss_pct: float = 0.02,  # 2% stop loss
-        take_profit_pct: float = 0.05,  # 5% take profit
+        stop_loss_pct: float = 0.02,
+        take_profit_pct: float = 0.05,
+        initial_cash: float = 100_000.0,
+        fees: float = 0.001,
+        slippage: float = 0.001,
+        position_size: float = 1.0,
+        execution_delay_bars: int = 1,
     ) -> BacktestResult:
+        """Legacy strategy name for long underlying PnL with delayed close exits.
+
+        Stops and targets observe signed close-to-entry returns and execute at
+        the next eligible close. This does not simulate options or long volatility.
         """
-        Backtest volatility breakout strategy conditioned on GEX.
+        from app.core.vectorbt_backtester import VectorBTBacktester
 
-        Strategy:
-        - Enter long volatility (long VIX, long straddle, etc.) when Net GEX < threshold
-        - Exit when Net GEX > exit_threshold or stop/target hit
-        - Assumes we can capture a fraction of the realized move
-
-        Args:
-            gex_data: DataFrame with 'net_gex' column and datetime index.
-            price_data: DataFrame with 'close', 'high', 'low' columns and datetime index.
-            entry_threshold: GEX threshold to enter trade.
-            exit_threshold: GEX threshold to exit trade.
-            stop_loss_pct: Stop loss percentage.
-            take_profit_pct: Take profit percentage.
-
-        Returns:
-            BacktestResult with strategy performance metrics.
-        """
-        # Validate inputs
-        if gex_data.empty or price_data.empty:
-            raise ValueError("gex_data and price_data must not be empty")
-
-        # Align data
-        merged = pd.merge(
-            gex_data[["net_gex"]],
-            price_data[["close", "high", "low"]] if "high" in price_data.columns else price_data[["close"]],
-            left_index=True,
-            right_index=True,
-            how="inner",
+        result = VectorBTBacktester.run_gex_signal_backtest(
+            price_data=price_data,
+            gex_data=gex_data,
+            entry_threshold=entry_threshold,
+            exit_threshold=exit_threshold,
+            initial_cash=initial_cash,
+            fees=fees,
+            slippage=slippage,
+            position_size=position_size,
+            execution_delay_bars=execution_delay_bars,
+            stop_loss_pct=stop_loss_pct,
+            take_profit_pct=take_profit_pct,
         )
-
-        if len(merged) < 10:
-            raise ValueError("Insufficient data for backtesting")
-
-        # Track trades
-        trades = []
-        in_trade = False
-        entry_price = 0.0
-        entry_time = None
-        entry_idx = 0
-
-        for i, (idx, row) in enumerate(merged.iterrows()):
-            net_gex = row["net_gex"]
-            close = row["close"]
-
-            if not in_trade:
-                # Check entry condition
-                if net_gex < entry_threshold:
-                    in_trade = True
-                    entry_price = close
-                    entry_time = idx
-                    entry_idx = i
-            else:
-                # Check exit conditions
-                pnl_pct = (close - entry_price) / entry_price
-
-                # For volatility strategy, we profit from moves in either direction
-                # Simplified: use absolute return as proxy
-                abs_pnl_pct = abs(pnl_pct)
-
-                exit_trade = False
-                exit_reason = ""
-
-                # Stop loss
-                if abs_pnl_pct < -stop_loss_pct:
-                    exit_trade = True
-                    exit_reason = "stop_loss"
-
-                # Take profit
-                elif abs_pnl_pct >= take_profit_pct:
-                    exit_trade = True
-                    exit_reason = "take_profit"
-
-                # GEX exit signal
-                elif net_gex > exit_threshold:
-                    exit_trade = True
-                    exit_reason = "gex_exit"
-
-                if exit_trade:
-                    # Calculate trade duration (approximate by index difference)
-                    duration = i - entry_idx
-
-                    trades.append({
-                        "entry_time": entry_time,
-                        "exit_time": idx,
-                        "entry_price": entry_price,
-                        "exit_price": close,
-                        "pnl_pct": abs_pnl_pct,  # Volatility strategy profits from move magnitude
-                        "duration": duration,
-                        "exit_reason": exit_reason,
-                    })
-
-                    in_trade = False
-                    entry_price = 0.0
-                    entry_time = None
-
-        # Calculate metrics
-        if not trades:
-            return BacktestResult(
-                total_trades=0,
-                winning_trades=0,
-                losing_trades=0,
-                win_rate=0.0,
-                total_return=0.0,
-                average_return=0.0,
-                sharpe_ratio=0.0,
-                max_drawdown=0.0,
-                profit_factor=0.0,
-                average_trade_duration=0.0,
-                start_date=merged.index[0],
-                end_date=merged.index[-1],
-            )
-
-        trades_df = pd.DataFrame(trades)
-        returns = trades_df["pnl_pct"].values
-
-        # Basic metrics
-        total_trades = len(trades)
-        winning_trades = int((returns > 0).sum())
-        losing_trades = int((returns < 0).sum())
-        win_rate = winning_trades / total_trades if total_trades > 0 else 0.0
-
-        # Return metrics
-        total_return = float(returns.sum())
-        average_return = float(returns.mean())
-
-        # Sharpe ratio (simplified, assuming risk-free rate = 0)
-        if returns.std() > 0:
-            sharpe_ratio = float(returns.mean() / returns.std() * np.sqrt(252))  # Annualized
-        else:
-            sharpe_ratio = 0.0
-
-        # Max drawdown
-        cumulative_returns = np.cumsum(returns)
-        running_max = np.maximum.accumulate(cumulative_returns)
-        drawdowns = cumulative_returns - running_max
-        max_drawdown = float(np.abs(drawdowns.min())) if len(drawdowns) > 0 else 0.0
-
-        # Profit factor
-        gross_profit = float(returns[returns > 0].sum()) if (returns > 0).any() else 0.0
-        gross_loss = float(np.abs(returns[returns < 0].sum())) if (returns < 0).any() else 0.0
-        profit_factor = gross_profit / gross_loss if gross_loss > 0 else float("inf")
-
-        # Average trade duration
-        average_trade_duration = float(trades_df["duration"].mean())
-
         return BacktestResult(
-            total_trades=total_trades,
-            winning_trades=winning_trades,
-            losing_trades=losing_trades,
-            win_rate=win_rate,
-            total_return=total_return,
-            average_return=average_return,
-            sharpe_ratio=sharpe_ratio,
-            max_drawdown=max_drawdown,
-            profit_factor=profit_factor,
-            average_trade_duration=average_trade_duration,
-            start_date=merged.index[0],
-            end_date=merged.index[-1],
+            total_trades=result.total_trades,
+            winning_trades=result.winning_trades,
+            losing_trades=result.losing_trades,
+            win_rate=result.win_rate,
+            total_return=result.total_return,
+            average_return=result.avg_trade_return,
+            sharpe_ratio=result.sharpe_ratio,
+            max_drawdown=result.max_drawdown,
+            profit_factor=result.profit_factor,
+            average_trade_duration=result.avg_trade_duration_minutes,
+            start_date=result.start_date,
+            end_date=result.end_date,
+            equity_curve=result.equity_curve,
+            equity_timestamps=result.equity_timestamps,
+            closed_trades=result.closed_trades,
+            open_trades=result.open_trades,
+            bar_interval_minutes=result.bar_interval_minutes,
+            initial_cash=result.initial_cash,
+            fees=result.fees,
+            slippage=result.slippage,
+            position_size=result.position_size,
+            execution_delay_bars=result.execution_delay_bars,
         )
 
     @staticmethod
@@ -417,31 +311,24 @@ class TradingStrategy:
         Returns:
             Dictionary with regime-based statistics.
         """
-        merged = pd.merge(
-            gex_data[["net_gex"]],
-            price_data[["close"]],
-            left_index=True,
-            right_index=True,
-            how="inner",
-        )
-
-        if merged.empty:
+        if gex_data.empty or price_data.empty:
             return {}
+        from app.core.vectorbt_backtester import VectorBTBacktester
 
-        # Calculate forward returns
-        merged["fwd_return"] = merged["close"].pct_change().shift(-1)
-
-        # Define regimes
-        merged["regime"] = "neutral"
-        merged.loc[merged["net_gex"] < SHORT_GAMMA_THRESHOLD, "regime"] = "short_gamma"
-        merged.loc[merged["net_gex"] > LONG_GAMMA_THRESHOLD, "regime"] = "long_gamma"
-
-        # Group by regime
-        regime_stats = merged.groupby("regime")["fwd_return"].agg(
-            ["mean", "std", "count"]
-        ).to_dict("index")
-
-        return regime_stats
+        comparison = VectorBTBacktester.run_regime_comparison(
+            price_data,
+            gex_data,
+            short_gamma_threshold=SHORT_GAMMA_THRESHOLD,
+            long_gamma_threshold=LONG_GAMMA_THRESHOLD,
+        )
+        return {
+            name: {
+                "mean": values["mean_return"],
+                "std": values["std_return"],
+                "count": values["count"],
+            }
+            for name, values in comparison.items()
+        }
 
 
 def generate_synthetic_gex_data(
@@ -493,9 +380,7 @@ def generate_synthetic_gex_data(
 
         gex[i] = gex[i - 1] + reversion + shock
 
-    return pd.DataFrame(
-        {"net_gex": gex, "timestamp": date_range}
-    ).set_index("timestamp")
+    return pd.DataFrame({"net_gex": gex, "timestamp": date_range}).set_index("timestamp")
 
 
 def generate_synthetic_price_data(

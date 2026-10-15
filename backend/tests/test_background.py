@@ -23,7 +23,7 @@ from app.services.background import (
     start_background_tasks,
     stop_background_tasks,
 )
-from app.services.cache import reset_cache
+from app.services.cache import GEXCache, reset_cache
 
 ET = ZoneInfo("America/New_York")
 
@@ -129,6 +129,8 @@ class TestCacheWarmup:
                 with patch("app.services.background.get_gex_calculator", return_value=mock_calculator):
                     with patch("app.services.background.get_cache") as mock_get_cache:
                         mock_cache = MagicMock()
+                        mock_cache.fetch_gex_chain = GEXCache().fetch_gex_chain
+                        mock_cache.fetch_once = GEXCache().fetch_once
                         mock_get_cache.return_value = mock_cache
                         with patch("app.services.background.get_settings") as mock_get_settings:
                             mock_get_settings.return_value.data_provider = "yfinance"
@@ -138,6 +140,7 @@ class TestCacheWarmup:
                             mock_cache.update_spot_price.assert_called_once_with(
                                 5900.0,
                                 symbol="SPX",
+                                provider="yfinance",
                             )
                             assert mock_cache.set.call_count == 2
                             mock_cache.set.assert_any_call(
@@ -225,6 +228,8 @@ class TestPeriodicGEXRefresh:
                 with patch("app.services.background.get_gex_calculator", return_value=mock_calc):
                     with patch("app.services.background.get_cache") as mock_get_cache:
                         mock_cache = MagicMock()
+                        mock_cache.fetch_gex_chain = GEXCache().fetch_gex_chain
+                        mock_cache.fetch_once = GEXCache().fetch_once
                         mock_get_cache.return_value = mock_cache
                         with patch("asyncio.sleep", side_effect=mock_sleep):
                             await asyncio.wait_for(periodic_gex_refresh(), timeout=2.0)
@@ -296,6 +301,7 @@ class TestPeriodicSpotRefresh:
         background._shutdown_event = asyncio.Event()
 
         mock_client = AsyncMock()
+        mock_client.provider_name = "yfinance"
         mock_client.get_spot_price = AsyncMock(return_value=5910.0)
 
         async def mock_sleep(duration):
@@ -305,11 +311,13 @@ class TestPeriodicSpotRefresh:
             with patch("app.services.background.get_data_client", return_value=mock_client):
                 with patch("app.services.background.get_cache") as mock_get_cache:
                     mock_cache = MagicMock()
+                    mock_cache.fetch_gex_chain = GEXCache().fetch_gex_chain
+                    mock_cache.fetch_once = GEXCache().fetch_once
                     mock_get_cache.return_value = mock_cache
                     with patch("asyncio.sleep", side_effect=mock_sleep):
                         await asyncio.wait_for(periodic_spot_refresh(), timeout=2.0)
 
-        mock_cache.update_spot_price.assert_called_with(5910.0, symbol="SPX")
+        mock_cache.update_spot_price.assert_called_with(5910.0, symbol="SPX", provider="yfinance")
 
     @pytest.mark.asyncio
     async def test_handles_spot_fetch_error(self):
@@ -351,6 +359,8 @@ class TestHistoricalCaptureHelpers:
         mock_calculator.calculate_gex_from_chain.return_value = mock_snapshot
 
         mock_cache = MagicMock()
+        mock_cache.fetch_gex_chain = GEXCache().fetch_gex_chain
+        mock_cache.fetch_once = GEXCache().fetch_once
         mock_history_service = MagicMock()
         mock_history_service.persist_capture = AsyncMock(return_value=True)
 

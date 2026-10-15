@@ -18,7 +18,7 @@ import {
   ResponsiveContainer,
   ReferenceLine,
 } from 'recharts';
-import { format, parseISO } from 'date-fns';
+import { formatMarketTimestamp } from '@/lib/utils';
 
 interface TimeSeriesDataPoint {
   timestamp: string;
@@ -51,7 +51,7 @@ const CustomTooltip = ({
   let formattedTime = label || '';
   try {
     if (label) {
-      formattedTime = format(parseISO(label), 'h:mm a');
+      formattedTime = formatMarketTimestamp(label) ?? label;
     }
   } catch {
     // Keep original label if parsing fails
@@ -152,7 +152,7 @@ function TimeSeriesChartComponent({
           axisLine={{ stroke: '#3f3f46' }}
           tickFormatter={(value: string) => {
             try {
-              return format(parseISO(value), 'H:mm');
+              return new Date(value).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false });
             } catch {
               return '';
             }

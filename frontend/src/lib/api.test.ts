@@ -44,7 +44,6 @@ describe('gexAPI', () => {
     it('throws error on API failure', async () => {
       const error = new Error('Network error');
       vi.mocked(axios.get).mockRejectedValueOnce(error);
-      vi.mocked(axios.isAxiosError).mockReturnValue(false);
 
       await expect(gexAPI.getCurrentGEX()).rejects.toThrow('Network error');
     });
@@ -148,6 +147,17 @@ describe('gexAPI', () => {
         })
       );
     });
+  });
+});
+
+describe('backtest history errors', () => {
+  it('preserves the server explanation instead of showing only HTTP status', async () => {
+    vi.mocked(axios.isAxiosError).mockReturnValueOnce(true);
+    vi.mocked(axios.get).mockRejectedValueOnce({ message: 'Request failed with status code 404', response: { data: {
+      detail: 'Insufficient captured history. Capture sessions first.',
+    } } });
+    await expect(analyticsAPI.runVectorbtBacktest({ start_date: '2025-01-01', end_date: '2025-01-10' }))
+      .rejects.toThrow('Insufficient captured history. Capture sessions first.');
   });
 });
 

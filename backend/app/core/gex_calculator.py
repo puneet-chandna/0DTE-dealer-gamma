@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
+from scipy.optimize import brentq
 
 from app.core.charm_vanna_calculator import CharmVannaCalculator
 from app.core.constants import (
@@ -23,6 +24,7 @@ from app.core.constants import (
     MIN_IV,
     RISK_FREE_RATE,
     SPX_DIVIDEND_YIELD,
+    STRIKE_RANGE_PERCENT,
 )
 from app.core.greeks import BlackScholesGreeks
 from app.models.schemas import AdvancedAnalytics, CharmVannaSnapshot, GEXSnapshot
@@ -31,6 +33,7 @@ logger = logging.getLogger(__name__)
 
 ET = ZoneInfo("America/New_York")
 ONE_PERCENT_MOVE = 0.01
+CALCULATION_VERSION = "sticky_iv_delta_scenarios_v1"
 
 
 class GEXCalculator:
@@ -133,25 +136,20 @@ class GEXCalculator:
 
         # Vectorized spot price
         spot_vector = np.full_like(strikes, spot_price)
+        risk_free_rate = self.risk_free_rate
 
         # Calculate gamma for all contracts WITH dividend yield
         gammas = BlackScholesGreeks.gamma(
             spot_vector,
             strikes,
             time_to_expiration,
-            self.risk_free_rate,
+            risk_free_rate,
             implied_vol,
             q=self.dividend_yield,
         )
 
         # Calculate GEX per contract on a 1% underlying move basis.
-        gex_raw = (
-            open_interest
-            * gammas
-            * CONTRACT_MULTIPLIER
-            * (spot_price**2)
-            * ONE_PERCENT_MOVE
-        )
+        gex_raw = open_interest * gammas * CONTRACT_MULTIPLIER * (spot_price**2) * ONE_PERCENT_MOVE
 
         # Apply the standard baseline sign convention: calls positive, puts negative.
         is_call = option_types == "call"
@@ -167,7 +165,15 @@ class GEXCalculator:
 
         # Find zero gamma level
         zero_gamma_level, zero_gamma_crossing_found, zero_gamma_relation = (
-            self._find_zero_gamma_level(gex_by_strike, spot_price)
+            self._find_zero_gamma_level(
+                strikes,
+                option_types,
+                open_interest,
+                implied_vol,
+                time_to_expiration,
+                spot_price,
+                risk_free_rate,
+            )
         )
 
         # Find dominant strike (highest absolute GEX)
@@ -190,6 +196,7 @@ class GEXCalculator:
 
         # Calculate Charm & Vanna hidden flows
         try:
+            self._charm_vanna.risk_free_rate = risk_free_rate
             cv_result = self._charm_vanna.calculate_all(
                 options_df=df,
                 spot_price=spot_price,
@@ -231,8 +238,7 @@ class GEXCalculator:
         `captured_at` is stored in UTC.
         """
         normalized_values = [
-            self._normalize_expiration_value(raw_value)
-            for raw_value in expiration_values.tolist()
+            self._normalize_expiration_value(raw_value) for raw_value in expiration_values.tolist()
         ]
         return pd.Series(normalized_values, index=expiration_values.index)
 
@@ -271,16 +277,22 @@ class GEXCalculator:
         Filter out invalid contracts.
 
         Removes contracts with:
-        - OI = 0 (no exposure)
+        - Non-finite or non-positive strike/OI
+        - Unsupported option types
         - IV outside valid bounds
         - NaN values in critical columns
         """
         original_len = len(df)
 
-        # Filter OI = 0
-        df = df[df["open_interest"] > 0]
+        df = df[
+            np.isfinite(df["open_interest"])
+            & (df["open_interest"] > 0)
+            & np.isfinite(df["strike"])
+            & (df["strike"] > 0)
+            & df["type"].isin(["call", "put"])
+        ]
         if len(df) < original_len:
-            logger.debug(f"Removed {original_len - len(df)} contracts with OI=0")
+            logger.debug(f"Removed {original_len - len(df)} contracts with invalid strike/OI/type")
 
         # Filter NaN implied_vol
         df = df[df["implied_vol"].notna()]
@@ -313,6 +325,10 @@ class GEXCalculator:
                 "call_put_ratio": 0.0,
                 "regime_code": 0.0,  # neutral
                 "num_strikes": 0.0,
+                "zero_gamma_crossing_found": False,
+                "calculation_version": CALCULATION_VERSION,
+                "zero_gamma_method": "repriced_fixed_contract_iv",
+                "inventory_convention": "call_positive_put_negative",
             },
         )
 
@@ -325,78 +341,115 @@ class GEXCalculator:
         if len(strikes) == 0:
             return {}
 
-        unique_strikes = np.unique(strikes)
-        gex_by_strike: dict[float, float] = {}
-
-        for strike in unique_strikes:
-            mask = strikes == strike
-            gex_by_strike[float(strike)] = float(np.sum(gex_values[mask]))
-
-        return gex_by_strike
+        unique_strikes, inverse = np.unique(strikes, return_inverse=True)
+        totals = np.bincount(inverse, weights=gex_values)
+        return dict(zip(unique_strikes.tolist(), totals.tolist(), strict=True))
 
     def _find_zero_gamma_level(
         self,
-        gex_by_strike: dict[float, float],
+        strikes: NDArray[np.float64],
+        option_types: NDArray[np.str_],
+        open_interest: NDArray[np.float64],
+        implied_vol: NDArray[np.float64],
+        time_to_expiration: NDArray[np.float64],
         spot_price: float,
+        risk_free_rate: float,
     ) -> tuple[float, bool, str | None]:
         """
-        Find the Zero Gamma Level using linear interpolation.
+        Find the nearest sign-changing net-gamma root within ±20% of spot.
 
-        The ZGL is where the cumulative GEX curve crosses zero.
-        If the curve never crosses zero, return the nearest boundary strike and
-        mark the relation so the UI can avoid presenting it as a true in-range
-        crossing.
+        Each active contract keeps its observed IV, expiry and signed OI as spot
+        changes. Scaling gamma by a common positive factor preserves roots and
+        prevents underflow in the tails from masquerading as exact zero gamma.
+        No crossing (including identically cancelled inventory) uses spot only
+        as a finite compatibility value and carries no directional relation.
         """
-        if not gex_by_strike:
+        active = time_to_expiration > 0
+        if not np.any(active):
             return spot_price, False, None
 
-        # Sort strikes
-        sorted_strikes = sorted(gex_by_strike.keys())
-
-        if len(sorted_strikes) < 2:
+        signs = np.where(option_types[active] == "call", 1.0, -1.0)
+        if np.all(signs == signs[0]):
             return spot_price, False, None
 
-        # Calculate cumulative GEX from lowest to highest strike
-        gex_values = np.array([gex_by_strike[k] for k in sorted_strikes])
-        cumulative_gex = np.cumsum(gex_values)
-
-        zero_crossing_tolerance = 1e-8
-        exact_crossing_mask = np.isclose(
-            cumulative_gex,
-            0.0,
-            atol=zero_crossing_tolerance,
-            rtol=0.0,
+        # Identical pricing inputs share gamma; combine only their signed inventory.
+        kernels, inverse = np.unique(
+            np.column_stack((strikes[active], implied_vol[active], time_to_expiration[active])),
+            axis=0,
+            return_inverse=True,
         )
-        exact_crossings = np.where(exact_crossing_mask)[0]
-        if exact_crossings.size > 0:
-            return sorted_strikes[int(exact_crossings[0])], True, "in_range"
+        signed_interest = np.bincount(inverse, weights=signs * open_interest[active])
+        exposed = signed_interest != 0
+        if not np.any(exposed):
+            return spot_price, False, None
+        kernels = kernels[exposed]
+        signed_interest = signed_interest[exposed]
+        signs = np.sign(signed_interest)
+        if np.all(signs == signs[0]):
+            return spot_price, False, None
+        active_strikes = kernels[:, 0]
+        sigma = kernels[:, 1]
+        active_time = np.maximum(kernels[:, 2], 1e-10)
+        width = sigma * np.sqrt(active_time)
+        log_centers = (
+            np.log(active_strikes)
+            - (risk_free_rate - self.dividend_yield + 0.5 * sigma**2) * active_time
+        )
+        log_weights = (
+            np.log(np.abs(signed_interest)) - self.dividend_yield * active_time - np.log(width)
+        )
 
-        # Check if all positive or all negative (no crossing possible)
-        if np.all(cumulative_gex >= 0):
-            return sorted_strikes[0], False, "below_range"
+        def signed_gamma(candidate: float) -> float:
+            d1 = (np.log(candidate) - log_centers) / width
+            log_gamma = log_weights - 0.5 * d1**2
+            scaled_gamma = np.exp(log_gamma - np.max(log_gamma))
+            return float(np.dot(signs, scaled_gamma) / np.sum(scaled_gamma))
 
-        if np.all(cumulative_gex <= 0):
-            return sorted_strikes[-1], False, "above_range"
-
-        # Find zero crossing
-        for i in range(len(cumulative_gex) - 1):
-            if cumulative_gex[i] * cumulative_gex[i + 1] < 0:
-                # Linear interpolation
-                x1, x2 = sorted_strikes[i], sorted_strikes[i + 1]
-                y1, y2 = cumulative_gex[i], cumulative_gex[i + 1]
-
-                # Avoid division by zero
-                if y2 - y1 == 0:
-                    continue
-
-                zero_level = x1 - y1 * (x2 - x1) / (y2 - y1)
-                return float(zero_level), True, "in_range"
-
-        # Fall back to the closest boundary if we somehow miss the crossing.
-        closest_idx = int(np.argmin(np.abs(cumulative_gex)))
-        closest_strike = sorted_strikes[closest_idx]
-        relation = "below_range" if closest_strike <= spot_price else "above_range"
-        return closest_strike, False, relation
+        lower = spot_price * (1 - STRIKE_RANGE_PERCENT)
+        upper = spot_price * (1 + STRIKE_RANGE_PERCENT)
+        # Sample centers and both one-sigma flanks to resolve narrow 0DTE mixtures.
+        centers = np.exp(log_centers[:, None] + width[:, None] * [-1, 0, 1]).ravel()
+        points = np.unique(
+            np.concatenate(
+                (
+                    np.geomspace(lower, upper, 257),
+                    [spot_price],
+                    active_strikes[(active_strikes >= lower) & (active_strikes <= upper)],
+                    centers[(centers >= lower) & (centers <= upper)],
+                )
+            )
+        )
+        values = np.empty(points.size)
+        # Bound temporary matrices while sampling many distinct contract kernels.
+        chunk_size = max(1, 65536 // width.size)
+        for start in range(0, points.size, chunk_size):
+            stop = start + chunk_size
+            log_gamma = (np.log(points[start:stop, None]) - log_centers) / width
+            np.square(log_gamma, out=log_gamma)
+            log_gamma *= -0.5
+            log_gamma += log_weights
+            log_gamma -= np.max(log_gamma, axis=1, keepdims=True)
+            scaled_gamma = np.exp(log_gamma, out=log_gamma)
+            values[start:stop] = np.sum(signs * scaled_gamma, axis=1) / np.sum(scaled_gamma, axis=1)
+        cancellation_tolerance = 64 * np.finfo(float).eps
+        nonzero = np.flatnonzero(np.abs(values) > cancellation_tolerance)
+        roots = []
+        # Verify an endpoint zero locally; a zero without a sign flip is not a crossing.
+        for boundary, value in ((lower, values[0]), (upper, values[-1])):
+            if nonzero.size and abs(value) <= cancellation_tolerance:
+                step = boundary * np.sqrt(np.finfo(float).eps)
+                left_value = signed_gamma(boundary - step)
+                right_value = signed_gamma(boundary + step)
+                if left_value * right_value < 0:
+                    root = brentq(signed_gamma, boundary - step, boundary + step, xtol=1e-9)
+                    if lower - 1e-9 <= root <= upper + 1e-9:
+                        roots.append(float(np.clip(root, lower, upper)))
+        for left, right in zip(nonzero[:-1], nonzero[1:], strict=True):
+            if np.signbit(values[left]) != np.signbit(values[right]):
+                roots.append(brentq(signed_gamma, points[left], points[right], xtol=1e-9))
+        if not roots:
+            return spot_price, False, None
+        return float(min(roots, key=lambda root: (abs(root - spot_price), root))), True, "in_range"
 
     def _calculate_metrics(
         self,
@@ -426,7 +479,7 @@ class GEXCalculator:
         # Map regime to numeric code for the float-only metrics dict
         regime_code = {"short_gamma": -1.0, "neutral": 0.0, "long_gamma": 1.0}.get(regime, 0.0)
 
-        return {
+        metrics: dict[str, float | bool | str] = {
             "gex_billions": net_gex / 1e9,
             "call_put_ratio": call_put_ratio,
             "zgl_distance": zgl_distance,
@@ -434,8 +487,13 @@ class GEXCalculator:
             "regime_code": regime_code,  # -1=short, 0=neutral, 1=long
             "num_strikes": float(len(gex_by_strike)),
             "zero_gamma_crossing_found": zero_gamma_crossing_found,
-            "zero_gamma_relation": zero_gamma_relation or "unknown",
+            "calculation_version": CALCULATION_VERSION,
+            "zero_gamma_method": "repriced_fixed_contract_iv",
+            "inventory_convention": "call_positive_put_negative",
         }
+        if zero_gamma_relation is not None:
+            metrics["zero_gamma_relation"] = zero_gamma_relation
+        return metrics
 
     def determine_regime(
         self,
@@ -452,19 +510,19 @@ class GEXCalculator:
         if gex_billions < -threshold_billions:
             return (
                 "short_gamma",
-                "Dealers are short gamma - expect amplified volatility",
+                "Negative signed GEX proxy; volatility amplification is a hypothesis.",
                 "red",
             )
         elif gex_billions > threshold_billions:
             return (
                 "long_gamma",
-                "Dealers are long gamma - expect dampened volatility",
+                "Positive signed GEX proxy; volatility dampening is a hypothesis.",
                 "green",
             )
         else:
             return (
                 "neutral",
-                "Neutral positioning",
+                "Near-zero signed GEX proxy; no volatility prediction.",
                 "yellow",
             )
 

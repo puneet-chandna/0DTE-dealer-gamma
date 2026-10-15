@@ -143,7 +143,7 @@ export function AlertBanner({
  * Default descriptions for each regime
  */
 export const regimeDescriptions: Record<RegimeType, string> = {
-  short_gamma: 'Dealers are short gamma. Volatility amplification expected.',
-  long_gamma: 'Dealers are long gamma. Volatility dampening expected.',
-  neutral: 'Near neutral gamma positioning. Normal volatility expected.',
+  short_gamma: 'Negative signed GEX proxy; volatility amplification is a hypothesis.',
+  long_gamma: 'Positive signed GEX proxy; volatility dampening is a hypothesis.',
+  neutral: 'Signed GEX proxy is near the regime threshold.',
 };

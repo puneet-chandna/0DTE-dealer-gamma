@@ -140,6 +140,12 @@ describe('zero gamma helpers', () => {
     expect(formatZeroGammaStatus(snapshot)).toBe('Unknown');
   });
 
+  it('distinguishes a completed repricing scan with no detected root from legacy unknown metadata', () => {
+    const snapshot = createSnapshot({ metrics: { zero_gamma_crossing_found: false, zero_gamma_method: 'repriced_fixed_contract_iv' } });
+    expect(formatZeroGammaValue(snapshot)).toBe('No root found');
+    expect(formatZeroGammaStatus(snapshot)).toBe('No crossing detected within ±20% of spot');
+  });
+
   it('returns Above Range and Above sampled range for above-range snapshots', () => {
     const snapshot = createSnapshot({
       metrics: {

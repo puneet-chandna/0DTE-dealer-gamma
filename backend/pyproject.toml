@@ -3,7 +3,7 @@ name = "odte-gex-backend"
 version = "1.0.0"
 description = "0DTE Dealer Gamma Exposure Analysis Backend"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.12,<3.14"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

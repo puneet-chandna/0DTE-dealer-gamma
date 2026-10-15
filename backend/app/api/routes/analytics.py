@@ -4,7 +4,8 @@ Provides GEX-volatility analysis, backtesting, and summary statistics.
 """
 
 import logging
-from datetime import date, datetime
+from dataclasses import asdict
+from datetime import date
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -18,13 +19,16 @@ from app.core import (
     get_current_trading_date,
     get_data_client,
 )
-from app.core.analytics import (
-    generate_synthetic_gex_data,
-    generate_synthetic_price_data,
-)
 from app.core.demo_data import get_demo_data_service
+from app.core.provenance import data_provenance
 from app.core.provider_registry import ProviderUnavailableError
-from app.models.schemas import AnalyticsResult, BacktestResult, IVSurfaceResponse, SummaryStatistics
+from app.models.schemas import (
+    AnalyticsResult,
+    BacktestResult,
+    IVSurfaceResponse,
+    SummaryStatistics,
+    VectorBTBacktestResult,
+)
 from app.services.cache import get_cache
 from app.services.historical_data import get_historical_data_service
 
@@ -130,311 +134,186 @@ def _reject_future_backtest_dates(start_date: date, end_date: date) -> None:
                 f"({market_date.isoformat()})."
             ),
         )
-@router.get("/gex-volatility", response_model=AnalyticsResult)
-async def analyze_gex_volatility(
-    start_date: date = Query(..., description="Start date for analysis"),
-    end_date: date = Query(..., description="End date for analysis"),
-) -> AnalyticsResult:
-    """Analyze relationship between GEX and realized volatility.
 
-    Performs a statistical analysis (Welch's t-test) to test the hypothesis
-    that negative GEX (short gamma) corresponds to higher realized volatility.
 
-    Note: Currently uses synthetic data for demonstration.
-    Database storage will enable real historical analysis.
-    """
-    # Validate date range
-    if start_date > end_date:
+async def _analytics_frames(
+    *, provider: str, symbol: str, start_date: date, end_date: date, demo: bool
+):
+    if demo:
+        return await _get_demo_backtest_series(
+            provider=provider, symbol=symbol, start_date=start_date, end_date=end_date
+        )
+    frames = await get_historical_data_service().get_time_series_frames(
+        provider=provider,
+        symbol=symbol,
+        start_date=start_date,
+        end_date=end_date,
+        interval="1m",
+        prefer_replay=True,
+        allow_latest_replay_fallback=False,
+    )
+    if len(frames[0]) < 2 or len(frames[1]) < 2:
         raise HTTPException(
-            status_code=400,
-            detail="start_date must be before or equal to end_date",
+            status_code=404,
+            detail="Insufficient quality-eligible captured history for the requested provider, symbol and dates. Capture sessions first or explicitly enable demo mode.",
         )
+    return frames
 
-    if (end_date - start_date).days > 365:
+
+def _backtest_instrument(provider: str, symbol: str, demo: bool) -> None:
+    if symbol.upper() == "SPX" and provider != "yfinance" and not demo:
         raise HTTPException(
-            status_code=400,
-            detail="Date range cannot exceed 365 days",
+            status_code=422,
+            detail="SPX is an index, not a tradable stock. Use captured SPY history for a long-underlying simulation.",
         )
 
-    if (end_date - start_date).days < 5:
+
+def _backtest_prices(prices: pd.DataFrame, *, provider: str, symbol: str) -> pd.DataFrame:
+    if provider == "yfinance" and symbol.upper() == "SPX":
+        prices = prices.copy()
+        columns = prices.columns.intersection(["open", "high", "low", "close"])
+        prices[columns] = prices[columns] / 10.0
+    return prices
+
+
+def _validate_analytics_dates(start_date: date, end_date: date) -> None:
+    if start_date > end_date or (end_date - start_date).days > 365:
         raise HTTPException(
-            status_code=400,
-            detail="Date range must be at least 5 days for statistical analysis",
+            status_code=400, detail="Choose an ordered date range of at most 365 days."
         )
-
-    # Check cache
-    cache = get_cache()
-    cache_key = f"analytics:gex-vol:{start_date}:{end_date}"
-    cached = cache.get_if_fresh(cache_key)
-    if cached is not None:
-        return cached
-
-    try:
-        # Generate synthetic data for demo
-        start_dt = datetime.combine(start_date, datetime.min.time())
-        end_dt = datetime.combine(end_date, datetime.max.time())
-
-        gex_data = generate_synthetic_gex_data(start_dt, end_dt)
-        price_data = generate_synthetic_price_data(start_dt, end_dt)
-
-        # Perform analysis
-        result = VolatilityAnalyzer.analyze_gex_volatility_relationship(
-            gex_data=gex_data,
-            price_data=price_data,
-        )
-
-        # Cache and return
-        cache.set(cache_key, result)
-        return result
-
-    except ValueError as e:
-        logger.warning(f"Analysis failed due to data issue: {e}")
-        raise HTTPException(
-            status_code=400,
-            detail=str(e),
-        )
-    except Exception as e:
-        logger.error(f"Failed to perform GEX-volatility analysis: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Analysis failed: {str(e)}",
-        )
-
-
-@router.get("/backtest", response_model=BacktestResult)
-async def backtest_strategy(
-    symbol: str = Query("SPX", description="Underlying symbol (default: SPX)"),
-    provider: str | None = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
-    strategy: str = Query("volatility_breakout", description="Strategy name"),
-    start_date: date = Query(..., description="Backtest start date"),
-    end_date: date = Query(..., description="Backtest end date"),
-    entry_threshold: float = Query(-1e9, description="GEX threshold for entry (dollars)"),
-    exit_threshold: float = Query(0.0, description="GEX threshold for exit (dollars)"),
-    stop_loss_pct: float = Query(0.02, description="Stop loss percentage (0.02 = 2%)"),
-    take_profit_pct: float = Query(0.05, description="Take profit percentage (0.05 = 5%)"),
-    demo: bool = Query(False, description="Return deterministic demo data"),
-) -> BacktestResult:
-    """Backtest trading strategy based on GEX signals.
-
-    Supported strategies:
-    - volatility_breakout: Enter long volatility when Net GEX < entry_threshold
-
-    Demo mode always uses requested-range deterministic demo data anchored to
-    the latest same-provider snapshot when available, rather than substituting
-    a later replay session. Future dates are rejected against the current New
-    York market date.
-    """
-    # Validate strategy
-    if strategy not in ["volatility_breakout"]:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unknown strategy: {strategy}. Supported: volatility_breakout",
-        )
-
-    # Validate date range
-    if start_date > end_date:
-        raise HTTPException(
-            status_code=400,
-            detail="start_date must be before or equal to end_date",
-        )
-
     _reject_future_backtest_dates(start_date, end_date)
 
-    if not demo and (end_date - start_date).days < 5:
-        raise HTTPException(
-            status_code=400,
-            detail="Backtest period must be at least 5 days",
-        )
 
-    if (end_date - start_date).days > 365:
-        raise HTTPException(
-            status_code=400,
-            detail="Backtest period cannot exceed 365 days",
-        )
-
-    # Validate thresholds
-    if entry_threshold >= exit_threshold:
-        raise HTTPException(
-            status_code=400,
-            detail="entry_threshold must be less than exit_threshold",
-        )
-
-    if stop_loss_pct <= 0 or stop_loss_pct > 0.5:
-        raise HTTPException(
-            status_code=400,
-            detail="stop_loss_pct must be between 0 and 0.5 (50%)",
-        )
-
-    if take_profit_pct <= 0 or take_profit_pct > 1.0:
-        raise HTTPException(
-            status_code=400,
-            detail="take_profit_pct must be between 0 and 1.0 (100%)",
-        )
-
+@router.get("/gex-volatility", response_model=AnalyticsResult)
+async def analyze_gex_volatility(
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    symbol: str = Query("SPX"),
+    provider: str | None = Query(None),
+    demo: bool = Query(False),
+) -> AnalyticsResult:
+    """Descriptive GEX/volatility association; predictive evidence requires the held-out study."""
+    _validate_analytics_dates(start_date, end_date)
     try:
-        settings = get_settings()
-        active_provider = ProviderRegistry.resolve_provider_name(
-            provider,
-            default_provider=settings.data_provider,
-        )
-
-        if demo:
-            price_data, gex_data = await _get_demo_backtest_series(
-                provider=active_provider,
-                symbol=symbol,
-                start_date=start_date,
-                end_date=end_date,
-            )
-        else:
-            persisted_result = await get_historical_data_service().run_backtest(
-                provider=active_provider,
-                symbol=symbol,
-                start_date=start_date,
-                end_date=end_date,
-                strategy=strategy,
-                entry_threshold=entry_threshold,
-                exit_threshold=exit_threshold,
-                stop_loss_pct=stop_loss_pct,
-                take_profit_pct=take_profit_pct,
-                prefer_replay=False,
-                allow_latest_replay_fallback=False,
-            )
-            if persisted_result is not None:
-                return BacktestResult(
-                    total_trades=persisted_result.total_trades,
-                    winning_trades=persisted_result.winning_trades,
-                    losing_trades=persisted_result.losing_trades,
-                    win_rate=persisted_result.win_rate,
-                    total_return=persisted_result.total_return,
-                    average_return=persisted_result.average_return,
-                    sharpe_ratio=persisted_result.sharpe_ratio,
-                    max_drawdown=persisted_result.max_drawdown,
-                    profit_factor=persisted_result.profit_factor,
-                    average_trade_duration=persisted_result.average_trade_duration,
-                    start_date=persisted_result.start_date,
-                    end_date=persisted_result.end_date,
-                )
-
-            start_dt = datetime.combine(start_date, datetime.min.time())
-            end_dt = datetime.combine(end_date, datetime.max.time())
-            gex_data = generate_synthetic_gex_data(start_dt, end_dt)
-            price_data = generate_synthetic_price_data(start_dt, end_dt)
-
-        # Run backtest
-        result = TradingStrategy.volatility_breakout_strategy(
-            gex_data=gex_data,
-            price_data=price_data,
-            entry_threshold=entry_threshold,
-            exit_threshold=exit_threshold,
-            stop_loss_pct=stop_loss_pct,
-            take_profit_pct=take_profit_pct,
-        )
-
-        return BacktestResult(
-            total_trades=result.total_trades,
-            winning_trades=result.winning_trades,
-            losing_trades=result.losing_trades,
-            win_rate=result.win_rate,
-            total_return=result.total_return,
-            average_return=result.average_return,
-            sharpe_ratio=result.sharpe_ratio,
-            max_drawdown=result.max_drawdown,
-            profit_factor=result.profit_factor,
-            average_trade_duration=result.average_trade_duration,
-            start_date=result.start_date,
-            end_date=result.end_date,
-        )
-
-    except ValueError as e:
-        logger.warning(f"Backtest failed due to data issue: {e}")
-        raise HTTPException(
-            status_code=400,
-            detail=str(e),
-        )
-    except Exception as e:
-        logger.error(f"Failed to run backtest: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Backtest failed: {str(e)}",
-        )
-
-
-@router.get("/summary-statistics", response_model=SummaryStatistics)
-async def get_summary_stats(
-    symbol: str = Query("SPX", description="Underlying symbol (default: SPX)"),
-    provider: str | None = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
-    start_date: date | None = Query(None, description="Start date"),
-    end_date: date | None = Query(None, description="End date"),
-    demo: bool = Query(False, description="Return deterministic demo data"),
-) -> SummaryStatistics:
-    """Get summary statistics of GEX over time period.
-
-    If dates not provided, returns stats for last 30 days (synthetic data).
-
-    Note: Currently uses synthetic data for demonstration.
-    """
-    # Default to last 30 days if not specified
-    if end_date is None:
-        end_date = date.today()
-    if start_date is None:
-        start_date = date.today().replace(day=1)  # First of current month
-
-    # Validate date range
-    if start_date > end_date:
-        raise HTTPException(
-            status_code=400,
-            detail="start_date must be before or equal to end_date",
-        )
-
-    # Check cache
-    cache = get_cache()
-    settings = get_settings()
-    active_provider = ProviderRegistry.resolve_provider_name(
-        provider,
-        default_provider=settings.data_provider,
-    )
-    cache_key = (
-        f"analytics:summary:{'demo' if demo else 'live'}:"
-        f"{active_provider}:{symbol}:{start_date}:{end_date}"
-    )
-    cached = cache.get_if_fresh(cache_key)
-    if cached is not None:
-        return cached
-
-    try:
-        persisted_result = await get_historical_data_service().get_summary_statistics(
+        active_provider = ProviderRegistry.resolve_provider_name(provider)
+        prices, gex = await _analytics_frames(
             provider=active_provider,
             symbol=symbol,
             start_date=start_date,
             end_date=end_date,
-            prefer_replay=demo,
+            demo=demo,
         )
-        if persisted_result is not None:
-            cache.set(cache_key, persisted_result)
-            return persisted_result
+        result = VolatilityAnalyzer.analyze_gex_volatility_relationship(gex, prices)
+        provenance = data_provenance(gex, provider=active_provider, symbol=symbol, synthetic=demo)
+        provenance.quality_limitations.append(
+            "Descriptive association with overlapping volatility windows; the nominal Welch p-value is not dependence-corrected and is not predictive evidence."
+        )
+        return result.model_copy(update={"provenance": provenance})
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        if demo:
-            result = get_demo_data_service().get_summary_statistics(
-                symbol=symbol,
-                start_date=start_date,
-                end_date=end_date,
-            )
-        else:
-            start_dt = datetime.combine(start_date, datetime.min.time())
-            end_dt = datetime.combine(end_date, datetime.max.time())
-            gex_data = generate_synthetic_gex_data(start_dt, end_dt)
-            result = VolatilityAnalyzer.compute_summary_statistics(gex_data)
 
-        # Cache and return
-        cache.set(cache_key, result)
-        return result
-
-    except Exception as e:
-        logger.error(f"Failed to compute summary statistics: {e}")
+@router.get("/backtest", response_model=BacktestResult)
+async def backtest_strategy(
+    symbol: str = Query("SPX"),
+    provider: str | None = Query(None),
+    strategy: str = Query(
+        "gex_long_underlying",
+        description="Directional long underlying; volatility_breakout is a deprecated name",
+    ),
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    entry_threshold: float = Query(-1e9, allow_inf_nan=False),
+    exit_threshold: float = Query(0.0, allow_inf_nan=False),
+    stop_loss_pct: float = Query(0.02, gt=0, le=0.5, allow_inf_nan=False),
+    take_profit_pct: float = Query(0.05, gt=0, le=1.0, allow_inf_nan=False),
+    initial_cash: float = Query(100_000.0, gt=0, allow_inf_nan=False),
+    fees: float = Query(0.001, ge=0, lt=1, allow_inf_nan=False),
+    slippage: float = Query(0.001, ge=0, lt=1, allow_inf_nan=False),
+    position_size: float = Query(1.0, gt=0, le=1, allow_inf_nan=False),
+    execution_delay_bars: int = Query(1, ge=1, le=30),
+    demo: bool = Query(False),
+) -> BacktestResult:
+    """Directional equity simulation with close-observed stops; no long-volatility claim."""
+    _validate_analytics_dates(start_date, end_date)
+    if (
+        strategy not in {"gex_long_underlying", "volatility_breakout"}
+        or entry_threshold >= exit_threshold
+    ):
         raise HTTPException(
-            status_code=500,
-            detail=f"Summary statistics failed: {str(e)}",
+            status_code=400,
+            detail="Use gex_long_underlying with entry_threshold below exit_threshold.",
         )
+    try:
+        active_provider = ProviderRegistry.resolve_provider_name(provider)
+        _backtest_instrument(active_provider, symbol, demo)
+        prices, gex = await _analytics_frames(
+            provider=active_provider,
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            demo=demo,
+        )
+        result = TradingStrategy.volatility_breakout_strategy(
+            gex_data=gex,
+            price_data=_backtest_prices(prices, provider=active_provider, symbol=symbol),
+            entry_threshold=entry_threshold,
+            exit_threshold=exit_threshold,
+            stop_loss_pct=stop_loss_pct,
+            take_profit_pct=take_profit_pct,
+            initial_cash=initial_cash,
+            fees=fees,
+            slippage=slippage,
+            position_size=position_size,
+            execution_delay_bars=execution_delay_bars,
+        )
+        payload = asdict(result)
+        provenance = data_provenance(gex, provider=active_provider, symbol=symbol, synthetic=demo)
+        provenance.quality_limitations.append(
+            "Long-underlying simulation: sampled close fills, assumed fees/slippage, delayed close-observed stops and overnight positions; no verified executable quote or market-impact model."
+        )
+        payload.update(strategy="gex_long_underlying", provenance=provenance)
+        return BacktestResult(**payload)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/summary-statistics", response_model=SummaryStatistics)
+async def get_summary_stats(
+    symbol: str = Query("SPX"),
+    provider: str | None = Query(None),
+    start_date: date | None = Query(None),
+    end_date: date | None = Query(None),
+    demo: bool = Query(False),
+) -> SummaryStatistics:
+    end_date = end_date or get_current_trading_date()
+    start_date = start_date or end_date.replace(day=1)
+    _validate_analytics_dates(start_date, end_date)
+    try:
+        active_provider = ProviderRegistry.resolve_provider_name(provider)
+        _, gex = await _analytics_frames(
+            provider=active_provider,
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            demo=demo,
+        )
+        result = VolatilityAnalyzer.compute_summary_statistics(gex)
+        return result.model_copy(
+            update={
+                "provenance": data_provenance(
+                    gex, provider=active_provider, symbol=symbol, synthetic=demo
+                )
+            }
+        )
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 # ============================================================================
@@ -485,11 +364,11 @@ async def get_iv_surface(
         # In a real scenario, we'd fetch multiple expirations.
         # For now, we'll fetch the nearest chain and generate a realistic surface from it.
         try:
-            options_df, spot_price = await data_client.get_options_chain_for_gex(
-                underlying=symbol
-            )
+            options_df, spot_price = await get_cache().fetch_gex_chain(data_client, symbol)
         except Exception as e:
-            logger.warning(f"Could not fetch live options for IV surface via {data_client.provider_name}: {e}")
+            logger.warning(
+                f"Could not fetch live options for IV surface via {data_client.provider_name}: {e}"
+            )
             options_df = pd.DataFrame()
             spot_price = 5950.0  # Fallback
 
@@ -512,9 +391,7 @@ async def get_iv_surface(
 
             now = datetime.now(ZoneInfo("America/New_York"))
             expiration = pd.to_datetime(options_df["expiration"])
-            options_df["T"] = (
-                (expiration - now).dt.total_seconds() / (365.25 * 24 * 3600)
-            )
+            options_df["T"] = (expiration - now).dt.total_seconds() / (365.25 * 24 * 3600)
             options_df["T"] = options_df["T"].clip(lower=1e-10)
 
         # Calculate mid price if not present
@@ -648,9 +525,7 @@ async def get_technical_indicators(
             )
 
         # Compute indicators
-        result_df = TechnicalIndicatorEngine.compute_indicators(
-            hist, indicators=indicator_list
-        )
+        result_df = TechnicalIndicatorEngine.compute_indicators(hist, indicators=indicator_list)
         return _build_technical_indicator_response(
             symbol=symbol,
             period=period,
@@ -668,124 +543,58 @@ async def get_technical_indicators(
         )
 
 
-@router.get("/vectorbt-backtest")
+@router.get("/vectorbt-backtest", response_model=VectorBTBacktestResult)
 async def run_vectorbt_backtest(
-    symbol: str = Query("SPX", description="Underlying symbol (default: SPX)"),
-    provider: str | None = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
-    start_date: date = Query(..., description="Backtest start date"),
-    end_date: date = Query(..., description="Backtest end date"),
-    entry_threshold: float = Query(-1e9, description="GEX entry threshold (dollars)"),
-    exit_threshold: float = Query(0.0, description="GEX exit threshold (dollars)"),
-    initial_cash: float = Query(100_000.0, description="Starting capital"),
-    demo: bool = Query(False, description="Return deterministic demo data"),
-) -> dict:
-    """Run high-performance backtest using vectorbt.
-
-    Strategy: Enter long when net GEX < entry_threshold (short gamma),
-    exit when net GEX > exit_threshold.
-
-    Demo mode always uses requested-range deterministic demo data anchored to
-    the latest same-provider snapshot when available, rather than substituting
-    a later replay session. Future dates are rejected against the current New
-    York market date.
-    """
+    symbol: str = Query("SPX"),
+    provider: str | None = Query(None),
+    start_date: date = Query(...),
+    end_date: date = Query(...),
+    entry_threshold: float = Query(-1e9, allow_inf_nan=False),
+    exit_threshold: float = Query(0.0, allow_inf_nan=False),
+    initial_cash: float = Query(100_000.0, gt=0, allow_inf_nan=False),
+    fees: float = Query(0.001, ge=0, lt=1, allow_inf_nan=False),
+    slippage: float = Query(0.001, ge=0, lt=1, allow_inf_nan=False),
+    position_size: float = Query(1.0, gt=0, le=1, allow_inf_nan=False),
+    execution_delay_bars: int = Query(1, ge=1, le=30),
+    demo: bool = Query(False),
+) -> VectorBTBacktestResult:
+    """Long-underlying simulation; signal-at-close executes at a later same-session close."""
     from app.core.vectorbt_backtester import VectorBTBacktester
 
-    # Validate
-    if start_date > end_date:
-        raise HTTPException(status_code=400, detail="start_date must be before end_date")
-
-    _reject_future_backtest_dates(start_date, end_date)
-
-    if not demo and (end_date - start_date).days < 5:
-        raise HTTPException(status_code=400, detail="Period must be at least 5 days")
-
-    if (end_date - start_date).days > 365:
-        raise HTTPException(status_code=400, detail="Period cannot exceed 365 days")
-
-    try:
-        settings = get_settings()
-        active_provider = ProviderRegistry.resolve_provider_name(
-            provider,
-            default_provider=settings.data_provider,
+    _validate_analytics_dates(start_date, end_date)
+    if entry_threshold >= exit_threshold:
+        raise HTTPException(
+            status_code=400, detail="entry_threshold must be less than exit_threshold"
         )
-
-        if demo:
-            price_data, gex_data = await _get_demo_backtest_series(
-                provider=active_provider,
-                symbol=symbol,
-                start_date=start_date,
-                end_date=end_date,
-            )
-        else:
-            persisted_result = await get_historical_data_service().run_vectorbt_backtest(
-                provider=active_provider,
-                symbol=symbol,
-                start_date=start_date,
-                end_date=end_date,
-                entry_threshold=entry_threshold,
-                exit_threshold=exit_threshold,
-                initial_cash=initial_cash,
-                prefer_replay=False,
-                allow_latest_replay_fallback=False,
-            )
-            if persisted_result is not None:
-                return {
-                    "total_return": persisted_result.total_return,
-                    "sharpe_ratio": persisted_result.sharpe_ratio,
-                    "sortino_ratio": persisted_result.sortino_ratio,
-                    "calmar_ratio": persisted_result.calmar_ratio,
-                    "max_drawdown": persisted_result.max_drawdown,
-                    "total_trades": persisted_result.total_trades,
-                    "winning_trades": persisted_result.winning_trades,
-                    "losing_trades": persisted_result.losing_trades,
-                    "win_rate": persisted_result.win_rate,
-                    "profit_factor": persisted_result.profit_factor,
-                    "avg_trade_return": persisted_result.avg_trade_return,
-                    "best_trade": persisted_result.best_trade,
-                    "worst_trade": persisted_result.worst_trade,
-                    "avg_trade_duration_minutes": persisted_result.avg_trade_duration_minutes,
-                    "start_date": persisted_result.start_date.isoformat(),
-                    "end_date": persisted_result.end_date.isoformat(),
-                    "equity_curve": persisted_result.equity_curve,
-                }
-
-            start_dt = datetime.combine(start_date, datetime.min.time())
-            end_dt = datetime.combine(end_date, datetime.max.time())
-            gex_data = generate_synthetic_gex_data(start_dt, end_dt)
-            price_data = generate_synthetic_price_data(start_dt, end_dt)
-
+    try:
+        active_provider = ProviderRegistry.resolve_provider_name(provider)
+        _backtest_instrument(active_provider, symbol, demo)
+        prices, gex = await _analytics_frames(
+            provider=active_provider,
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            demo=demo,
+        )
         result = VectorBTBacktester.run_gex_signal_backtest(
-            price_data=price_data,
-            gex_data=gex_data,
+            price_data=_backtest_prices(prices, provider=active_provider, symbol=symbol),
+            gex_data=gex,
             entry_threshold=entry_threshold,
             exit_threshold=exit_threshold,
             initial_cash=initial_cash,
+            fees=fees,
+            slippage=slippage,
+            position_size=position_size,
+            execution_delay_bars=execution_delay_bars,
         )
-
-        return {
-            "total_return": result.total_return,
-            "sharpe_ratio": result.sharpe_ratio,
-            "sortino_ratio": result.sortino_ratio,
-            "calmar_ratio": result.calmar_ratio,
-            "max_drawdown": result.max_drawdown,
-            "total_trades": result.total_trades,
-            "winning_trades": result.winning_trades,
-            "losing_trades": result.losing_trades,
-            "win_rate": result.win_rate,
-            "profit_factor": result.profit_factor,
-            "avg_trade_return": result.avg_trade_return,
-            "best_trade": result.best_trade,
-            "worst_trade": result.worst_trade,
-            "avg_trade_duration_minutes": result.avg_trade_duration_minutes,
-            "start_date": result.start_date.isoformat(),
-            "end_date": result.end_date.isoformat(),
-            "equity_curve": result.equity_curve,
-        }
-
-    except Exception as e:
-        logger.error(f"VectorBT backtest failed: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"VectorBT backtest failed: {str(e)}",
+        payload = asdict(result)
+        provenance = data_provenance(gex, provider=active_provider, symbol=symbol, synthetic=demo)
+        provenance.quality_limitations.append(
+            "Long-underlying simulation: sampled close fills, assumed fees/slippage and overnight positions; no verified executable quote or market-impact model."
         )
+        payload.update(strategy="gex_long_underlying", provenance=provenance)
+        return VectorBTBacktestResult(**payload)
+    except HTTPException:
+        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

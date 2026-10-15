@@ -17,7 +17,7 @@ class TestHawkesEngine:
         assert state.call_intensity == 0.0
         assert state.put_intensity == 0.0
         assert state.net_toxicity == 0.0
-        assert state.squeeze_probability == 0.0
+        assert state.squeeze_score == 0.0
 
     def test_first_update_no_prior(self):
         """First update has no prior volumes, so no delta → zero intensity."""
@@ -88,7 +88,7 @@ class TestHawkesEngine:
         # Intensity should have decayed
         assert state_after_decay.call_intensity < state_after_event.call_intensity
 
-    def test_squeeze_probability_bounded(self):
+    def test_squeeze_score_bounded(self):
         """Squeeze probability should always be between 0 and 1."""
         engine = HawkesEngine()
 
@@ -107,7 +107,7 @@ class TestHawkesEngine:
         })
         state = engine.update(df2, timestamp=1005.0)
 
-        assert 0.0 <= state.squeeze_probability <= 1.0
+        assert 0.0 <= state.squeeze_score <= 1.0
 
     def test_reset(self):
         """Reset should clear all state."""

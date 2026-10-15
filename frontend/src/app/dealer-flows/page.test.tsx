@@ -115,7 +115,7 @@ describe('DealerFlowsPage source label', () => {
             call_intensity: 0,
             put_intensity: 0,
             net_toxicity: 0,
-            squeeze_probability: 0,
+            squeeze_score: 0,
             provider_mode: 'tradier_rich',
             confidence_score: 0,
             event_count: 0,
@@ -128,7 +128,7 @@ describe('DealerFlowsPage source label', () => {
     render(<DealerFlowsPage />);
     fireEvent.click(screen.getByRole('button', { name: /flow proxy/i }));
 
-    expect(screen.getByText(/order flow momentum is balanced/i)).toBeInTheDocument();
+    expect(screen.getByText(/snapshot imbalance proxy is balanced/i)).toBeInTheDocument();
     expect(screen.getByText(/heuristic confidence: 0%.*changed contracts: 0/i)).toBeInTheDocument();
   });
 
@@ -144,7 +144,7 @@ describe('DealerFlowsPage source label', () => {
             call_intensity: 0.75,
             put_intensity: 0.75,
             net_toxicity: 0,
-            squeeze_probability: 0.5,
+            squeeze_score: 0.5,
           },
           smoothed_net_gex: null,
         },
@@ -175,7 +175,7 @@ describe('DealerFlowsPage source label', () => {
             call_intensity: 0.33,
             put_intensity: 0.12,
             net_toxicity: 0.21,
-            squeeze_probability: 0.27,
+            squeeze_score: 0.27,
           },
           smoothed_net_gex: -4.8e8,
         },
@@ -187,5 +187,29 @@ describe('DealerFlowsPage source label', () => {
 
     expect(screen.getByText(/Hidden Flows Panel 8000000/)).toBeInTheDocument();
     expect(screen.getByText(/Momentum Gauge 0.33/)).toBeInTheDocument();
+  });
+
+  it.each([undefined, Number.NaN])('keeps legacy score %s out of the flow interpretation', (score) => {
+    const baseData = getDefaultDashboardData();
+    mockUseDashboardData.mockReturnValue({
+      ...baseData,
+      gexData: {
+        ...baseData.gexData,
+        advanced_analytics: {
+          charm_vanna: null,
+          hawkes: {
+            call_intensity: 0.75,
+            put_intensity: 0.25,
+            net_toxicity: 0.5,
+            squeeze_score: score,
+          },
+          smoothed_net_gex: null,
+        },
+      } as GEXSnapshot,
+    });
+    render(<DealerFlowsPage />);
+    fireEvent.click(screen.getByRole('button', { name: /flow proxy/i }));
+    expect(document.body.textContent).not.toContain('NaN');
+    expect(screen.getAllByText(/Squeeze score: 0 \/ 100/i).length).toBeGreaterThan(0);
   });
 });

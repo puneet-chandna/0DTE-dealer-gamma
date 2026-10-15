@@ -115,7 +115,7 @@ export default function AnalyticsPage() {
                     <CardTitle>IV Smile</CardTitle>
                     {ivData && (
                       <span className="text-xs text-zinc-500">
-                        {ivData.count} strikes • SPX @ {ivData.spot_price?.toLocaleString()}
+                        {ivData.count} strikes • {symbol} @ {ivData.spot_price?.toLocaleString()}
                       </span>
                     )}
                   </div>

@@ -5,9 +5,12 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from zoneinfo import ZoneInfo
 
+import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
 
+from app.core.analytics import BacktestResult
+from app.core.vectorbt_backtester import VectorBTResult
 from app.main import app
 from app.models.schemas import GEXSnapshot
 
@@ -221,25 +224,11 @@ async def test_demo_websocket_shapes_synthetic_fallback_from_latest_snapshot(mon
     )
 
     class _AnchoredDemoService:
-        def get_ws_update(self, symbol="SPX", now=None, *, anchor_snapshot, provider="demo"):
+        def get_current_snapshot(self, symbol="SPX", now=None, *, anchor_snapshot, provider="demo"):
             assert symbol == "SPX"
             assert anchor_snapshot.spot_price == 6012.0
             assert provider == "yfinance"
-            return {
-                "net_gex": -6.5e8,
-                "net_gex_billions": -0.65,
-                "zero_gamma_level": 6004.0,
-                "spot_price": 6010.0,
-                "regime": "neutral",
-                "timestamp": "2026-03-25T10:30:00-04:00",
-                "is_mock": True,
-                "is_demo": True,
-                "is_stale": False,
-                "advanced_analytics": {
-                    "charm_vanna": {"charm_flow": 1.0, "vanna_flow": 2.0, "net_hidden_flow": 3.0, "charm_by_strike": {}, "vanna_by_strike": {}},
-                    "hawkes": {"call_intensity": 0.0, "put_intensity": 0.0, "net_toxicity": 0.0, "squeeze_probability": 0.0},
-                },
-            }
+            return _build_snapshot(spot_price=6010.0, net_gex=-6.5e8, zero_gamma_level=6004.0)
 
     history_service = SimpleNamespace(
         get_historical_snapshots=AsyncMock(return_value=[]),
@@ -421,7 +410,8 @@ def test_demo_vectorbt_backtest_always_uses_requested_range_synthetic_series(mon
                     "anchor_snapshot": anchor_snapshot,
                 }
             )
-            return "demo-price-series", "demo-gex-series"
+            index = pd.date_range("2025-01-01 09:30", periods=3, freq="1min", tz=ET)
+            return pd.DataFrame({"close": [6000., 6010., 6020.]}, index=index), pd.DataFrame({"net_gex": [-1e9] * 3}, index=index)
 
     monkeypatch.setattr(
         analytics_routes,
@@ -434,7 +424,7 @@ def test_demo_vectorbt_backtest_always_uses_requested_range_synthetic_series(mon
         lambda: _DemoService(),
     )
 
-    demo_result = SimpleNamespace(
+    demo_result = VectorBTResult(
         total_return=0.08,
         sharpe_ratio=1.6,
         sortino_ratio=2.0,
@@ -512,7 +502,8 @@ def test_demo_legacy_backtest_always_uses_requested_range_synthetic_series(monke
                     "anchor_snapshot": anchor_snapshot,
                 }
             )
-            return "demo-price-series", "demo-gex-series"
+            index = pd.date_range("2025-01-01 09:30", periods=3, freq="1min", tz=ET)
+            return pd.DataFrame({"close": [6000., 6010., 6020.]}, index=index), pd.DataFrame({"net_gex": [-1e9] * 3}, index=index)
 
     monkeypatch.setattr(
         analytics_routes,
@@ -525,7 +516,7 @@ def test_demo_legacy_backtest_always_uses_requested_range_synthetic_series(monke
         lambda: _DemoService(),
     )
 
-    demo_result = SimpleNamespace(
+    demo_result = BacktestResult(
         total_trades=5,
         winning_trades=3,
         losing_trades=2,

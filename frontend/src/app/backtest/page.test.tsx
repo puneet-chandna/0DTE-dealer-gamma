@@ -70,6 +70,43 @@ vi.mock('@/stores/uiStore', () => ({
 }));
 
 describe('BacktestPage reviewer demo validation', () => {
+  it('defaults to today and blocks invalid allocation before submitting', () => {
+    render(<BacktestPage />);
+    expect(screen.getByLabelText(/start date/i)).toHaveValue('2026-03-30');
+    expect(screen.getByLabelText(/end date/i)).toHaveValue('2026-03-30');
+    fireEvent.change(screen.getByLabelText(/allocation/i), { target: { value: '101' } });
+    fireEvent.click(screen.getByRole('button', { name: /run backtest/i }));
+    expect(mockUseVectorbtBacktest).toHaveBeenLastCalledWith(null, false);
+  });
+  it('shows captured instrument, coverage, assumptions and undefined risk ratios', () => {
+    mockUseVectorbtBacktest.mockReturnValue({ data: {
+      ...sampleResult, sharpe_ratio: null, profit_factor: null,
+      closed_trades: 7, open_trades: 1, initial_cash: 100000,
+      fees: 0.0025, slippage: 0.001, position_size: 0.5, execution_delay_bars: 2,
+      provenance: { provider: 'yfinance', requested_symbol: 'SPX', actual_instrument: 'SPY',
+        is_proxy: true, data_kind: 'captured', sample_count: 120,
+        actual_start: '2025-01-06T09:31:00-05:00', actual_end: '2025-01-06T11:30:00-05:00',
+        quality_limitations: ['Source quote freshness is unknown.'], calculation_versions: ['v2'],
+      },
+    }, isLoading: false, isFetching: false, error: null });
+    render(<BacktestPage />);
+    expect(screen.getByText(/SPY.*SPX proxy/)).toBeInTheDocument();
+    expect(screen.getByText(/120 captured observations/)).toBeInTheDocument();
+    expect(screen.getByText(/source quote freshness is unknown/i)).toBeInTheDocument();
+    expect(screen.getAllByText('—')).toHaveLength(2);
+    expect(screen.getByText(/7 closed.*1 open/)).toBeInTheDocument();
+  });
+
+  it('submits fees and execution delay with the frozen run parameters', () => {
+    render(<BacktestPage />);
+    fireEvent.change(screen.getByLabelText(/fee per side/i), { target: { value: '0.25' } });
+    fireEvent.change(screen.getByLabelText(/execution delay/i), { target: { value: '3' } });
+    fireEvent.click(screen.getByRole('button', { name: /run backtest/i }));
+    expect(mockUseVectorbtBacktest).toHaveBeenLastCalledWith(expect.objectContaining({
+      fees: 0.0025, execution_delay_bars: 3,
+    }), true);
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
     vi.useFakeTimers();
@@ -83,8 +120,8 @@ describe('BacktestPage reviewer demo validation', () => {
       (params: { start_date: string; end_date: string } | null, enabled: boolean) => ({
         data:
           enabled &&
-          params?.start_date === '2025-01-01' &&
-          params?.end_date === '2025-03-01'
+          params?.start_date === '2026-03-30' &&
+          params?.end_date === '2026-03-30'
             ? sampleResult
             : undefined,
         isLoading: false,
@@ -135,7 +172,7 @@ describe('BacktestPage reviewer demo validation', () => {
     expect(screen.queryByText('Equity Curve Chart')).not.toBeInTheDocument();
   });
 
-  it('suppresses demo auto-submit when the default range is in the future versus New York market date', () => {
+  it('uses the current New York date for demo auto-submit', () => {
     vi.setSystemTime(new Date('2024-12-30T16:00:00Z'));
     mockUseUIStore.mockReturnValue({
       demoModeEnabled: true,
@@ -145,11 +182,7 @@ describe('BacktestPage reviewer demo validation', () => {
 
     render(<BacktestPage />);
 
-    expect(screen.getByText(/future dates aren't available/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /run backtest/i })).toBeDisabled();
-    expect(
-      mockUseVectorbtBacktest.mock.calls.some(([, enabled]) => enabled === true)
-    ).toBe(false);
-    expect(mockUseVectorbtBacktest).toHaveBeenLastCalledWith(null, false);
+    expect(screen.queryByText(/future dates aren't available/i)).not.toBeInTheDocument();
+    expect(mockUseVectorbtBacktest).toHaveBeenLastCalledWith(expect.objectContaining({start_date: '2024-12-30', end_date: '2024-12-30'}), true);
   });
 });

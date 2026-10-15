@@ -252,19 +252,19 @@ describe('AlertBanner', () => {
 describe('regimeDescriptions', () => {
   it('has description for short_gamma', () => {
     expect(regimeDescriptions.short_gamma).toBe(
-      'Dealers are short gamma. Volatility amplification expected.'
+      'Negative signed GEX proxy; volatility amplification is a hypothesis.'
     );
   });
 
   it('has description for long_gamma', () => {
     expect(regimeDescriptions.long_gamma).toBe(
-      'Dealers are long gamma. Volatility dampening expected.'
+      'Positive signed GEX proxy; volatility dampening is a hypothesis.'
     );
   });
 
   it('has description for neutral', () => {
     expect(regimeDescriptions.neutral).toBe(
-      'Near neutral gamma positioning. Normal volatility expected.'
+      'Signed GEX proxy is near the regime threshold.'
     );
   });
 });
