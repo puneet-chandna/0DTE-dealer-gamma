@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Iterable
 from datetime import date, datetime, time, timedelta
@@ -14,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
 from app.core.analytics import TradingStrategy, VolatilityAnalyzer
+from app.core.base_provider import optional_market_number
 from app.core.gex_calculator import GEXCalculator
 from app.core.snapshot_quality import annotate_snapshot_quality, is_snapshot_replay_eligible
 from app.core.technical_indicators import TechnicalIndicatorEngine
@@ -484,40 +486,43 @@ class HistoricalDataService:
         if price_data.empty:
             return None
 
-        indicator_names = [item.strip().upper() for item in indicators if item.strip()]
-        if not indicator_names:
-            indicator_names = ["ATR", "RSI", "BBANDS"]
+        def compute_response() -> dict[str, Any]:
+            indicator_names = [item.strip().upper() for item in indicators if item.strip()]
+            if not indicator_names:
+                indicator_names = ["ATR", "RSI", "BBANDS"]
 
-        if len(price_data) >= 5:
-            indicator_df = TechnicalIndicatorEngine.compute_indicators(
-                price_data, indicators=indicator_names
-            )
-        else:
-            indicator_df = price_data.copy()
-            for column in ("atr", "rsi", "bb_upper", "bb_mid", "bb_lower"):
-                indicator_df[column] = pd.NA
+            if len(price_data) >= 5:
+                indicator_df = TechnicalIndicatorEngine.compute_indicators(
+                    price_data, indicators=indicator_names
+                )
+            else:
+                indicator_df = price_data.copy()
+                for column in ("atr", "rsi", "bb_upper", "bb_mid", "bb_lower"):
+                    indicator_df[column] = pd.NA
 
-        points = []
-        for idx, row in indicator_df.iterrows():
-            points.append(
-                {
-                    "timestamp": str(idx),
-                    "close": float(row["close"]),
-                    "atr": None if pd.isna(row.get("atr")) else float(row["atr"]),
-                    "rsi": None if pd.isna(row.get("rsi")) else float(row["rsi"]),
-                    "bb_upper": None if pd.isna(row.get("bb_upper")) else float(row["bb_upper"]),
-                    "bb_mid": None if pd.isna(row.get("bb_mid")) else float(row["bb_mid"]),
-                    "bb_lower": None if pd.isna(row.get("bb_lower")) else float(row["bb_lower"]),
-                }
-            )
+            points = []
+            for idx, row in indicator_df.iterrows():
+                points.append(
+                    {
+                        "timestamp": str(idx),
+                        "close": float(row["close"]),
+                        "atr": None if pd.isna(row.get("atr")) else float(row["atr"]),
+                        "rsi": None if pd.isna(row.get("rsi")) else float(row["rsi"]),
+                        "bb_upper": None if pd.isna(row.get("bb_upper")) else float(row["bb_upper"]),
+                        "bb_mid": None if pd.isna(row.get("bb_mid")) else float(row["bb_mid"]),
+                        "bb_lower": None if pd.isna(row.get("bb_lower")) else float(row["bb_lower"]),
+                    }
+                )
 
-        return {
-            "symbol": symbol.strip().upper(),
-            "period": period,
-            "indicators": indicator_names,
-            "data": points,
-            "count": len(points),
-        }
+            return {
+                "symbol": symbol.strip().upper(),
+                "period": period,
+                "indicators": indicator_names,
+                "data": points,
+                "count": len(points),
+            }
+
+        return await asyncio.to_thread(compute_response)
 
     async def get_time_series_frames(
         self,
@@ -1205,6 +1210,21 @@ class HistoricalDataService:
             return pd.DataFrame(columns=columns or [])
 
         options_df = pd.DataFrame(payload)
+        for column in (
+            "strike",
+            "bid",
+            "ask",
+            "mid",
+            "open_interest",
+            "volume",
+            "implied_vol",
+            "delta",
+            "gamma",
+            "vega",
+            "theta",
+        ):
+            if column in options_df.columns:
+                options_df[column] = pd.to_numeric(options_df[column], errors="coerce")
         options_df.attrs["source_metadata"] = dict(raw_record.source_metadata or {})
         if "expiration" not in options_df.columns and raw_record.expiration_date is not None:
             options_df["expiration"] = raw_record.expiration_date.isoformat()
@@ -1451,7 +1471,7 @@ class HistoricalDataService:
                     lambda value: value.isoformat() if hasattr(value, "isoformat") else value
                 )
 
-        return serializable.fillna(value=pd.NA).replace({pd.NA: None}).to_dict(orient="records")
+        return serializable.astype(object).where(serializable.notna(), None).to_dict(orient="records")
 
     @staticmethod
     def _build_iv_surface_points(
@@ -1473,7 +1493,9 @@ class HistoricalDataService:
                 continue
 
             strike = float(option_row.get("strike", 0.0) or 0.0)
-            mid_price = float(option_row.get("mid", 0.0) or 0.0)
+            mid_price = optional_market_number(option_row.get("mid"))
+            if mid_price is None or mid_price <= 0:
+                continue
             implied_vol = option_row.get("implied_vol")
             if implied_vol is None or pd.isna(implied_vol):
                 continue

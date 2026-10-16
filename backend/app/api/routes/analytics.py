@@ -3,14 +3,16 @@
 Provides GEX-volatility analysis, backtesting, and summary statistics.
 """
 
+import asyncio
 import logging
 from dataclasses import asdict
 from datetime import date
 from zoneinfo import ZoneInfo
 
 import pandas as pd
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.api.dependencies import validate_provider_query
 from app.config import get_settings
 from app.core import (
     ProviderRegistry,
@@ -34,7 +36,7 @@ from app.services.historical_data import get_historical_data_service
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(validate_provider_query)])
 
 # Eastern Time timezone
 ET = ZoneInfo("America/New_York")
@@ -473,7 +475,8 @@ async def get_technical_indicators(
 
         if demo:
             try:
-                hist = _load_yfinance_history(
+                hist = await asyncio.to_thread(
+                    _load_yfinance_history,
                     symbol=symbol,
                     period=period,
                     interval=interval,
@@ -487,11 +490,13 @@ async def get_technical_indicators(
                 hist = pd.DataFrame()
 
             if not hist.empty:
-                result_df = TechnicalIndicatorEngine.compute_indicators(
+                result_df = await asyncio.to_thread(
+                    TechnicalIndicatorEngine.compute_indicators,
                     hist,
                     indicators=indicator_list,
                 )
-                response = _build_technical_indicator_response(
+                response = await asyncio.to_thread(
+                    _build_technical_indicator_response,
                     symbol=symbol,
                     period=period,
                     indicator_list=indicator_list,
@@ -504,7 +509,8 @@ async def get_technical_indicators(
                 provider=active_provider,
                 symbol=symbol,
             )
-            return get_demo_data_service().get_technical_indicators(
+            return await asyncio.to_thread(
+                get_demo_data_service().get_technical_indicators,
                 symbol=symbol,
                 period=period,
                 interval=interval,
@@ -512,7 +518,8 @@ async def get_technical_indicators(
                 anchor_snapshot=anchor_snapshot,
             )
 
-        hist = _load_yfinance_history(
+        hist = await asyncio.to_thread(
+            _load_yfinance_history,
             symbol=symbol,
             period=period,
             interval=interval,
@@ -525,8 +532,11 @@ async def get_technical_indicators(
             )
 
         # Compute indicators
-        result_df = TechnicalIndicatorEngine.compute_indicators(hist, indicators=indicator_list)
-        return _build_technical_indicator_response(
+        result_df = await asyncio.to_thread(
+            TechnicalIndicatorEngine.compute_indicators, hist, indicators=indicator_list
+        )
+        return await asyncio.to_thread(
+            _build_technical_indicator_response,
             symbol=symbol,
             period=period,
             indicator_list=indicator_list,

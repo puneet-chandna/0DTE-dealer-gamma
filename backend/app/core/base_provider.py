@@ -7,8 +7,22 @@ in a standardised DataFrame format that feeds the GEX calculator.
 
 from abc import ABC, abstractmethod
 from datetime import date
+from math import isfinite
 
 import pandas as pd
+
+
+def optional_market_number(value, *, integer: bool = False) -> float | int | None:
+    """Preserve unavailable market values instead of inventing zero quotes/counts."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    if not isfinite(number):
+        return None
+    if integer and (number < 0 or not number.is_integer()):
+        return None
+    return int(number) if integer else number
 
 
 class DataProvider(ABC):

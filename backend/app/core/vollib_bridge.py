@@ -9,6 +9,7 @@ import logging
 import numpy as np
 import pandas as pd
 
+from app.core.base_provider import optional_market_number
 from app.core.constants import DEFAULT_RISK_FREE_RATE, SPX_DIVIDEND_YIELD
 
 logger = logging.getLogger(__name__)
@@ -163,10 +164,10 @@ class VolLibBridge:
         for _, row in options_df.iterrows():
             strike = float(row["strike"])
             option_type = str(row.get("type", row.get("option_type", "call")))
-            mid_price = float(row.get("mid", 0.0))
+            mid_price = optional_market_number(row.get("mid"))
 
             # Skip invalid prices
-            if mid_price <= 0:
+            if mid_price is None or mid_price <= 0:
                 continue
 
             flag = "c" if option_type == "call" else "p"

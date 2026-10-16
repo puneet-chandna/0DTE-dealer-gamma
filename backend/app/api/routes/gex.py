@@ -8,8 +8,9 @@ import logging
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.api.dependencies import validate_provider_query
 from app.config import get_settings
 from app.core import (
     GEXCalculator,
@@ -33,7 +34,7 @@ from app.services.historical_data import get_historical_data_service
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(validate_provider_query)])
 
 # Eastern Time timezone
 ET = ZoneInfo("America/New_York")

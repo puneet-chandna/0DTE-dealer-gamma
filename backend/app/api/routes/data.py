@@ -5,11 +5,11 @@ Provides access to options chain data, spot prices, and market status.
 
 import logging
 from datetime import date, datetime
-from math import isfinite
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from app.api.dependencies import validate_provider_query
 from app.core import (
     ProviderRegistry,
     get_current_trading_date,
@@ -17,6 +17,7 @@ from app.core import (
     get_market_status,
     is_market_open,
 )
+from app.core.base_provider import optional_market_number
 from app.models.schemas import MarketStatusResponse, OptionsChainResponse, SpotPriceResponse
 from app.services.cache import get_cache
 
@@ -91,7 +92,7 @@ async def get_providers():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/options-chain", response_model=OptionsChainResponse, tags=["Data"])
+@router.get("/options-chain", response_model=OptionsChainResponse, tags=["Data"], dependencies=[Depends(validate_provider_query)])
 async def get_options_chain(
     symbol: str = Query("SPX", description="Underlying symbol (default: SPX)"),
     expiration: str | None = Query(None, description="Expiration date (YYYY-MM-DD), defaults to the effective trading session's nearest available expiry"),
@@ -101,6 +102,7 @@ async def get_options_chain(
     Fetch the complete options chain for a given symbol and expiration date.
 
     Returns standard GEX dataset including bid/ask, volume, open interest, and implied volatility.
+    Unavailable quotes and counts are null; source-reported zero values remain zero.
     """
     cache = get_cache()
     cache_key = None
@@ -151,20 +153,16 @@ async def get_options_chain(
         # Convert DataFrame to list of dicts
         options_list = []
         for _, row in options_df.iterrows():
-            implied_vol = float(row["implied_vol"]) if row.get("implied_vol") else None
-            if implied_vol is not None and not isfinite(implied_vol):
-                implied_vol = None
             contract = {
                 "symbol": row.get("symbol", ""),
                 "strike": float(row["strike"]),
                 "expiration": row["expiration"].isoformat() if hasattr(row["expiration"], "isoformat") else str(row["expiration"]),
                 "type": row["type"],
-                "bid": float(row.get("bid", 0)),
-                "ask": float(row.get("ask", 0)),
-                "mid": float(row.get("mid", 0)),
-                "open_interest": int(row.get("open_interest", 0)),
-                "volume": int(row.get("volume", 0)),
-                "implied_vol": implied_vol,
+                **{
+                    field: optional_market_number(row.get(field), integer=field in {"open_interest", "volume"})
+                    for field in ("bid", "ask", "mid", "open_interest", "volume")
+                },
+                "implied_vol": optional_market_number(row.get("implied_vol")) or None,
             }
             options_list.append(contract)
 
@@ -217,7 +215,7 @@ async def get_options_chain(
         )
 
 
-@router.get("/spot-price", response_model=SpotPriceResponse, tags=["Data"])
+@router.get("/spot-price", response_model=SpotPriceResponse, tags=["Data"], dependencies=[Depends(validate_provider_query)])
 async def get_spot_price(
     symbol: str = Query("SPX", description="Symbol to get price for (default: SPX)"),
     provider: str | None = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
