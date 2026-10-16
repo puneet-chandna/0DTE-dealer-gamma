@@ -334,6 +334,11 @@ Default requests use the effective trading session in their cache key. Before
 expiry. An expired resolved default chain cannot be reused after the session
 advances. Explicit `expiration` requests retain their separate dated keys.
 
+Unavailable or nonfinite `bid`, `ask`, `mid`, `volume`, `open_interest`, and
+`implied_vol` values are returned as `null`. Source-reported zero quotes and
+counts remain zero; zero implied volatility is treated as unavailable. Missing
+optional values do not discard the chain. Spot and strike must remain finite.
+
 **Parameters:**
 
 | Name         | Type   | Default | Description                            |
@@ -491,7 +496,7 @@ All errors return a JSON object:
 
 | Code  | Description                                                    |
 | ----- | -------------------------------------------------------------- |
-| `400` | Bad Request - Invalid parameters                               |
+| `400` | Bad Request - Invalid parameters, including an unknown explicit provider |
 | `422` | Validation Error - Missing or invalid fields                   |
 | `503` | Service Unavailable - API key missing or external service down |
 | `500` | Internal Server Error                                          |

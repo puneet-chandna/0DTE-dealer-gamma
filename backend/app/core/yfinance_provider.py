@@ -12,7 +12,7 @@ from zoneinfo import ZoneInfo
 import pandas as pd
 import yfinance as yf
 
-from app.core.base_provider import DataProvider
+from app.core.base_provider import DataProvider, optional_market_number
 from app.core.constants import STRIKE_RANGE_PERCENT
 from app.core.data_acquisition import (
     RateLimiter,
@@ -71,16 +71,6 @@ class YFinanceClient(DataProvider):
             f"Initialized YFinanceClient with {calls_per_minute} req/min, "
             f"SPY proxy: {use_spy_as_proxy}"
         )
-
-    @staticmethod
-    def _safe_int(value) -> int:
-        """Safely convert a value to int, handling NaN and None."""
-        if value is None or pd.isna(value):
-            return 0
-        try:
-            return int(value)
-        except (ValueError, TypeError):
-            return 0
 
     @staticmethod
     def _safe_float(value) -> float:
@@ -251,13 +241,13 @@ class YFinanceClient(DataProvider):
                 if underlying.upper() == "SPX" and ticker_symbol == "SPY":
                     strike *= self.SPY_TO_SPX_RATIO
 
-                bid = float(row.get("bid", 0) or 0)
-                ask = float(row.get("ask", 0) or 0)
+                bid = optional_market_number(row.get("bid"))
+                ask = optional_market_number(row.get("ask"))
 
                 # Convert option prices to SPX equivalent if using proxy
                 if underlying.upper() == "SPX" and ticker_symbol == "SPY":
-                    bid *= self.SPY_TO_SPX_RATIO
-                    ask *= self.SPY_TO_SPX_RATIO
+                    bid = bid * self.SPY_TO_SPX_RATIO if bid is not None else None
+                    ask = ask * self.SPY_TO_SPX_RATIO if ask is not None else None
 
                 options_data.append(
                     {
@@ -273,9 +263,9 @@ class YFinanceClient(DataProvider):
                         "type": row["type"],
                         "bid": bid,
                         "ask": ask,
-                        "mid": (bid + ask) / 2 if (bid + ask) > 0 else 0,
-                        "open_interest": self._safe_int(row.get("openInterest")),
-                        "volume": self._safe_int(row.get("volume")),
+                        "mid": (bid + ask) / 2 if bid is not None and ask is not None else None,
+                        "open_interest": optional_market_number(row.get("openInterest"), integer=True),
+                        "volume": optional_market_number(row.get("volume"), integer=True),
                         # yfinance provides IV but not other Greeks
                         "implied_vol": self._safe_float(row.get("impliedVolatility")),
                         "delta": None,  # Must be calculated
@@ -286,6 +276,8 @@ class YFinanceClient(DataProvider):
                 )
 
             df = pd.DataFrame(options_data)
+            for column in ("bid", "ask", "mid", "open_interest", "volume"):
+                df[column] = pd.to_numeric(df[column], errors="coerce")
             df.attrs["source_metadata"] = {
                 "actual_instrument": ticker_symbol,
                 "is_proxy": underlying.upper() == "SPX" and ticker_symbol == "SPY",

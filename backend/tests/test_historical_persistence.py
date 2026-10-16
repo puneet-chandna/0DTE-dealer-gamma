@@ -14,6 +14,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.services.historical_data as historical_data_module
+from app.core.gex_calculator import GEXCalculator
+from app.core.snapshot_quality import evaluate_snapshot_quality
 from app.db.base import Base
 from app.db.models import (
     GEXByStrikePointRecord,
@@ -234,6 +236,76 @@ async def test_persist_capture_stores_provider_separated_history(history_service
     assert len(strike_points) == 6
     assert len(raw_snapshots) == 2
     assert len(iv_points) == 4
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing_quote", [None, pd.NA, float("nan")])
+async def test_missing_option_mid_preserves_raw_and_gex_capture(history_service, missing_quote):
+    service, session_factory = history_service
+    options = _build_options_df().to_dict(orient="records")
+    options[1].update(bid=missing_quote, ask=missing_quote, mid=missing_quote)
+
+    persisted = await service.persist_capture(
+        provider="yfinance",
+        symbol="SPX",
+        snapshot=_build_snapshot(datetime(2026, 3, 20, 10, 5, tzinfo=ET)),
+        options_df=pd.DataFrame(options),
+        force_raw_capture=True,
+    )
+
+    assert persisted is True
+    async with session_factory() as session:
+        market_session = (await session.execute(select(MarketSessionRecord))).scalar_one()
+        gex_snapshot = (await session.execute(select(GEXSnapshotRecord))).scalar_one()
+        strike_points = (await session.execute(select(GEXByStrikePointRecord))).scalars().all()
+        raw_snapshot = (await session.execute(select(RawOptionsSnapshotRecord))).scalar_one()
+        iv_points = (await session.execute(select(IVSurfacePointRecord))).scalars().all()
+
+    assert market_session.snapshot_count == market_session.raw_snapshot_count == 1
+    assert gex_snapshot.net_gex == -1.35e9
+    assert gex_snapshot.metrics["has_raw_snapshot"] is True
+    assert len(strike_points) == 3
+    assert raw_snapshot.contract_count == 2
+    assert raw_snapshot.payload[1]["implied_vol"] == 0.205
+    assert {field: raw_snapshot.payload[1][field] for field in ("bid", "ask", "mid")} == {
+        "bid": None,
+        "ask": None,
+        "mid": None,
+    }
+    assert [(point.option_type, point.mid_price, point.iv) for point in iv_points] == [
+        ("call", 14.5, 0.19)
+    ]
+
+
+def test_nullable_raw_counts_round_trip_remains_usable_for_gex():
+    payload = _build_options_df().to_dict(orient="records")
+    for option in payload:
+        option.update(open_interest=None, volume=None)
+    raw_record = RawOptionsSnapshotRecord(
+        payload=payload,
+        source_metadata={"provider": "yfinance"},
+        expiration_date=date(2099, 1, 15),
+    )
+
+    options = HistoricalDataService._deserialize_options_payload(raw_record)
+    snapshot = GEXCalculator().calculate_gex_from_chain(
+        options,
+        spot_price=5905.0,
+        timestamp=datetime(2026, 3, 20, 10, 5, tzinfo=ET),
+    )
+    quality = evaluate_snapshot_quality(snapshot, options_df=options, provider="yfinance")
+
+    assert snapshot.net_gex == 0.0
+    assert snapshot.gex_by_strike == {}
+    assert options["open_interest"].isna().all()
+    assert options["volume"].isna().all()
+    assert quality.is_replay_eligible is False
+    assert "insufficient_meaningful_strikes" in quality.quality_flags
+    assert HistoricalDataService._serialize_options_payload(options) == payload
+    assert all(
+        option["open_interest"] is None and option["volume"] is None
+        for option in raw_record.payload
+    )
 
 
 @pytest.mark.asyncio

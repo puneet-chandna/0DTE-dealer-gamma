@@ -4,7 +4,7 @@
 
 'use client';
 
-import { memo } from 'react';
+import { memo, useId } from 'react';
 import { ChevronLeft, ChevronRight, Settings, Calendar } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatGEX, formatCurrency, formatZeroGammaValue } from '@/lib/utils';
@@ -27,6 +27,7 @@ function SidebarComponent({
   isLoading = false,
   layout = 'rail',
 }: SidebarProps) {
+  const alertThresholdId = useId();
   const { data: rateData } = useRiskFreeRate();
   const {
     isSidebarOpen,
@@ -60,6 +61,8 @@ function SidebarComponent({
       {!isStack && (
         <button
           onClick={toggleSidebar}
+          aria-label={isSidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
+          aria-expanded={isSidebarOpen}
           className="absolute -right-3 top-6 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-zinc-700 bg-zinc-900 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
         >
           {isSidebarOpen ? (
@@ -144,16 +147,18 @@ function SidebarComponent({
               <CardContent className="space-y-4">
                 {/* Alert Threshold */}
                 <div>
-                  <label className="text-xs font-medium text-zinc-400">
-                    Alert Threshold (B)
+                  <label htmlFor={alertThresholdId} className="text-xs font-medium text-zinc-400">
+                    Alert Threshold ($B)
                   </label>
                   <div className="mt-1.5 flex items-center gap-2">
                     <input
+                      id={alertThresholdId}
                       type="range"
                       min="0.5"
                       max="3"
                       step="0.25"
                       value={alertThreshold}
+                      aria-valuetext={`${alertThreshold.toFixed(2)} billion dollars`}
                       onChange={(e) =>
                         setAlertThreshold(parseFloat(e.target.value))
                       }
@@ -179,6 +184,7 @@ function SidebarComponent({
                     {[5, 10, 30, 60].map((seconds) => (
                       <button
                         key={seconds}
+                        aria-pressed={refreshInterval === seconds}
                         onClick={() => setAutoRefresh(autoRefreshEnabled, seconds)}
                         className={cn(
                           'flex-1 rounded px-2 py-1 text-xs font-medium transition-colors',

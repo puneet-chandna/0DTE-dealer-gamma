@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 import httpx
 import pandas as pd
 
-from app.core.base_provider import DataProvider
+from app.core.base_provider import DataProvider, optional_market_number
 from app.core.constants import STRIKE_RANGE_PERCENT
 from app.core.data_acquisition import (
     RateLimiter,
@@ -99,16 +99,6 @@ class TradierClient(DataProvider):
             return 0.0 if f != f else f  # NaN check
         except (ValueError, TypeError):
             return 0.0
-
-    @staticmethod
-    def _safe_int(value) -> int:
-        """Safely convert a value to int, handling None / NaN."""
-        if value is None:
-            return 0
-        try:
-            return int(value)
-        except (ValueError, TypeError):
-            return 0
 
     async def _request(self, path: str, params: dict | None = None) -> dict:
         """Make a rate-limited GET request to the Tradier API.
@@ -249,6 +239,8 @@ class TradierClient(DataProvider):
         for opt in option_list:
             greeks = opt.get("greeks") or {}
 
+            bid = optional_market_number(opt.get("bid"))
+            ask = optional_market_number(opt.get("ask"))
             rows.append(
                 {
                     "symbol": opt.get("symbol", ""),
@@ -262,12 +254,11 @@ class TradierClient(DataProvider):
                     "strike": self._safe_float(opt.get("strike")),
                     "expiration": opt.get("expiration_date", target_exp),
                     "type": ("call" if opt.get("option_type", "").lower() == "call" else "put"),
-                    "bid": self._safe_float(opt.get("bid")),
-                    "ask": self._safe_float(opt.get("ask")),
-                    "mid": (self._safe_float(opt.get("bid")) + self._safe_float(opt.get("ask")))
-                    / 2,
-                    "open_interest": self._safe_int(opt.get("open_interest")),
-                    "volume": self._safe_int(opt.get("volume")),
+                    "bid": bid,
+                    "ask": ask,
+                    "mid": (bid + ask) / 2 if bid is not None and ask is not None else None,
+                    "open_interest": optional_market_number(opt.get("open_interest"), integer=True),
+                    "volume": optional_market_number(opt.get("volume"), integer=True),
                     # Tradier serves ORATS Greeks directly
                     "implied_vol": self._safe_float(greeks.get("mid_iv")),
                     "delta": self._safe_float(greeks.get("delta"))
@@ -286,6 +277,8 @@ class TradierClient(DataProvider):
             )
 
         df = pd.DataFrame(rows)
+        for column in ("bid", "ask", "mid", "open_interest", "volume"):
+            df[column] = pd.to_numeric(df[column], errors="coerce")
         df.attrs["source_metadata"] = {
             "actual_instrument": underlying.upper(),
             "is_proxy": False,

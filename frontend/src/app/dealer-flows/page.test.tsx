@@ -103,6 +103,25 @@ describe('DealerFlowsPage source label', () => {
     expect(screen.getByText(/source: tradier/i)).toBeInTheDocument();
   });
 
+  it('shows the snapshot date and Eastern time', () => {
+    render(<DealerFlowsPage />);
+    expect(screen.getByText(/updated mar 25, 2026 6:30 am et/i)).toBeInTheDocument();
+  });
+
+  it.each([
+    ['is_replay_data', 'true', /replay capture: mar 25, 2026 6:30 am et/i],
+    ['is_persisted_fallback', true, /stored capture: mar 25, 2026 6:30 am et/i],
+  ])('preserves %s timestamp provenance', (metric, value, label) => {
+    const baseData = getDefaultDashboardData();
+    mockUseDashboardData.mockReturnValue({
+      ...baseData,
+      gexData: { ...baseData.gexData, metrics: { [metric]: value } },
+    });
+    render(<DealerFlowsPage />);
+    expect(screen.getByText(label)).toBeInTheDocument();
+    expect(screen.queryByText(/^updated /i)).not.toBeInTheDocument();
+  });
+
   it('treats a zero Hawkes state as valid neutral flow data', () => {
     const baseData = getDefaultDashboardData();
     mockUseDashboardData.mockReturnValue({

@@ -6,13 +6,12 @@
  * 2. Dealer hedging → market impact
  * 3. Further price movement → more hedging → cascade
  *
- * This is the feedback loop that causes flash crashes and gamma squeezes.
- * First-in-market: No platform lets you interactively simulate dealer cascades.
+ * An illustrative fixed-gamma scenario, not a forecast of dealer orders or price.
  */
 
 'use client';
 
-import { memo, useMemo, useState, useCallback } from 'react';
+import { memo, useId, useMemo, useState, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { Card, CardHeader, CardContent, CardTitle } from '@/components/ui';
 import type { GEXSnapshot } from '@/types';
@@ -24,18 +23,13 @@ interface HedgingCascadeSimulatorProps {
 
 interface CascadeStep {
   step: number;
-  priceLevel: number;
-  deltaChange: number; // shares/contracts dealers must trade
+  hedgeNotional: number; // signed dollars: buy positive, sell negative
   marketImpact: number; // price impact of that hedging
-  cumulativeMove: number; // total price displacement from original
-  isBuying: boolean; // dealers buying or selling
-  dampening: number; // 0-1, how much the cascade is dying
 }
 
-// Approximate market impact: for SPX, ~$1B in hedging moves price ~0.5-2 points
-const LIQUIDITY_FACTOR = 2e9; // $2B of hedging per 1 point of impact (conservative)
+// shortcut: fixed, uncalibrated liquidity, replace only with validated impact data.
+const LIQUIDITY_FACTOR = 2e9; // illustrative dollars of hedge notional per SPX point
 const MAX_CASCADE_STEPS = 6;
-const CASCADE_DAMPENING = 0.55; // Each step captures 55% of remaining impact
 
 function formatDollars(value: number): string {
   const abs = Math.abs(value);
@@ -47,82 +41,52 @@ function formatDollars(value: number): string {
 
 function HedgingCascadeSimulatorComponent({ data, isLoading }: HedgingCascadeSimulatorProps) {
   const [hypotheticalMove, setHypotheticalMove] = useState(0); // points from current spot
+  const moveInputId = useId();
 
-  // Compute cascade for the given hypothetical move
-  const cascade = useMemo((): CascadeStep[] => {
-    if (!data?.gex_by_strike || !data.spot_price || hypotheticalMove === 0) return [];
+  const simulation = useMemo(() => {
+    if (!data?.gex_by_strike || hypotheticalMove === 0) return null;
 
     const spot = data.spot_price;
-    const gexByStrike = data.gex_by_strike;
-    const steps: CascadeStep[] = [];
+    const values = Object.values(data.gex_by_strike);
+    if (!Number.isFinite(spot) || spot <= 0 || !Number.isFinite(hypotheticalMove)
+      || spot + hypotheticalMove <= 0 || values.length === 0
+      || values.some((gex) => !Number.isFinite(gex))) return null;
+    const netGex = values.reduce((sum, gex) => sum + gex, 0);
+    if (!Number.isFinite(netGex)) return null;
 
-    let currentPrice = spot;
+    const steps: CascadeStep[] = [];
     let remainingMove = hypotheticalMove;
-    let cumulativeMove = 0;
+    let totalMove = hypotheticalMove;
 
     for (let step = 0; step < MAX_CASCADE_STEPS; step++) {
-      if (Math.abs(remainingMove) < 0.5) break; // Stop when cascade dies
+      // GEX = signed OI × gamma × 100 × S² × .01; hedge dollars = −GEX × ΔS / (.01 × S).
+      const hedgeNotional = -(netGex / (0.01 * spot)) * remainingMove;
+      const marketImpact = hedgeNotional / LIQUIDITY_FACTOR;
+      totalMove += marketImpact;
+      if (!Number.isFinite(hedgeNotional) || !Number.isFinite(totalMove)
+        || !Number.isFinite(spot + totalMove) || spot + totalMove <= 0) return null;
 
-      const targetPrice = currentPrice + remainingMove;
-
-      // Calculate net delta change across all strikes for this move
-      // Gamma exposure at each strike: GEX ≈ OI × Γ × 100 × S²
-      // Delta change when spot moves ΔS: ΔDelta ≈ (net_GEX / S²) × ΔS
-      // Simplification: use net_gex directly as proxy for aggregate gamma
-      let netDeltaChange = 0;
-
-      for (const [strikeStr, gex] of Object.entries(gexByStrike)) {
-        const strike = Number(strikeStr);
-        const gexValue = Number(gex);
-        if (!isFinite(gexValue)) continue;
-
-        // Gamma's effect is strongest near the strike price
-        const distance = Math.abs(currentPrice - strike);
-        const proximity = Math.exp(-distance / 30); // Gaussian-like weighting
-
-        // Delta change from this strike's gamma exposure
-        // Positive GEX: dealers hedge AGAINST → dampening → negative feedback
-        // Negative GEX: dealers hedge WITH → amplifying → positive feedback
-        const deltaFromStrike = gexValue * proximity * remainingMove / (spot * spot);
-        netDeltaChange += deltaFromStrike;
-      }
-
-      // Market impact of dealer hedging
-      const marketImpact = (netDeltaChange / LIQUIDITY_FACTOR) * spot;
-      const dampening = Math.pow(CASCADE_DAMPENING, step);
-
-      cumulativeMove += remainingMove;
-
-      steps.push({
-        step: step + 1,
-        priceLevel: targetPrice,
-        deltaChange: netDeltaChange * 100, // Convert to dollar notional
-        marketImpact: marketImpact * dampening,
-        cumulativeMove,
-        isBuying: netDeltaChange > 0,
-        dampening,
-      });
-
-      // Next step: the market impact becomes the new "remaining move"
-      remainingMove = marketImpact * dampening;
-      currentPrice = targetPrice;
+      steps.push({ step: step + 1, hedgeNotional, marketImpact });
+      if (marketImpact === 0) break;
+      remainingMove = marketImpact;
     }
 
-    return steps;
+    return {
+      steps,
+      totalMove,
+      amplification: totalMove / hypotheticalMove,
+      unstable: Math.abs(netGex / (0.01 * spot) / LIQUIDITY_FACTOR) >= 1,
+    };
   }, [data, hypotheticalMove]);
 
-  // Total cascade amplification
-  const totalAmplification = useMemo(() => {
-    if (cascade.length === 0 || hypotheticalMove === 0) return 1;
-    const totalImpact = cascade.reduce((sum, s) => sum + s.marketImpact, 0);
-    return 1 + Math.abs(totalImpact / hypotheticalMove);
-  }, [cascade, hypotheticalMove]);
-
-  const isAmplifying = totalAmplification > 1.1;
-  const isDampening = totalAmplification < 0.95;
+  const cascade = simulation?.steps ?? [];
+  const totalAmplification = simulation?.amplification ?? 1;
+  const isAmplifying = Math.abs(totalAmplification) > 1;
+  const isDampening = Math.abs(totalAmplification) < 1;
 
   // Slider range: ±2% of spot
-  const sliderRange = data?.spot_price ? Math.round(data.spot_price * 0.02) : 100;
+  const sliderRange = data && Number.isFinite(data.spot_price) && data.spot_price > 0
+    ? Math.max(1, Math.round(data.spot_price * 0.02)) : 100;
 
   const handleSliderChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     setHypotheticalMove(Number(e.target.value));
@@ -154,7 +118,7 @@ function HedgingCascadeSimulatorComponent({ data, isLoading }: HedgingCascadeSim
           <CardTitle>
             Hedging Cascade Simulator
           </CardTitle>
-          {hypotheticalMove !== 0 && (
+          {hypotheticalMove !== 0 && simulation && (
             <div
               className={cn(
                 'rounded-md px-2 py-0.5 text-xs font-bold',
@@ -165,7 +129,9 @@ function HedgingCascadeSimulatorComponent({ data, isLoading }: HedgingCascadeSim
                     : 'bg-zinc-800 text-zinc-400'
               )}
             >
-              {isAmplifying
+              {simulation.unstable
+                ? 'Unstable scenario'
+                : isAmplifying
                 ? `${totalAmplification.toFixed(2)}× Amplifying`
                 : isDampening
                   ? `Dampened`
@@ -178,7 +144,7 @@ function HedgingCascadeSimulatorComponent({ data, isLoading }: HedgingCascadeSim
         {/* Slider */}
         <div>
           <div className="flex items-center justify-between text-xs text-zinc-400">
-            <span>What if SPX moves...</span>
+            <label htmlFor={moveInputId}>Hypothetical SPX move (points)</label>
             <span
               className={cn(
                 'font-bold tabular-nums text-sm',
@@ -193,11 +159,13 @@ function HedgingCascadeSimulatorComponent({ data, isLoading }: HedgingCascadeSim
             </span>
           </div>
           <input
+            id={moveInputId}
             type="range"
             min={-sliderRange}
             max={sliderRange}
             step={1}
             value={hypotheticalMove}
+            aria-valuetext={`${hypotheticalMove > 0 ? '+' : ''}${hypotheticalMove} points`}
             onChange={handleSliderChange}
             className="mt-2 w-full accent-violet-500"
           />
@@ -209,10 +177,10 @@ function HedgingCascadeSimulatorComponent({ data, isLoading }: HedgingCascadeSim
         </div>
 
         {/* Cascade Waterfall */}
-        {cascade.length > 0 ? (
+        {simulation ? (
           <div className="space-y-1.5">
             <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">
-              Cascade Chain
+              Cascade chain (hedge $ / impact pts)
             </p>
 
             {cascade.map((step, i) => {
@@ -235,7 +203,6 @@ function HedgingCascadeSimulatorComponent({ data, isLoading }: HedgingCascadeSim
                           ? 'bg-violet-500/30 text-violet-300'
                           : 'bg-zinc-800 text-zinc-500'
                       )}
-                      style={{ opacity: Math.max(0.3, step.dampening) }}
                     >
                       {step.step}
                     </div>
@@ -252,16 +219,15 @@ function HedgingCascadeSimulatorComponent({ data, isLoading }: HedgingCascadeSim
                           )}
                           style={{
                             width: `${Math.max(2, barWidth)}%`,
-                            opacity: Math.max(0.3, step.dampening),
                           }}
                         />
                         {/* Label inside bar */}
                         <div className="absolute inset-0 flex items-center justify-between px-2 text-[9px]">
                           <span className="font-medium text-zinc-300">
-                            {step.isBuying ? 'Dealers BUY' : 'Dealers SELL'}
+                            {step.hedgeNotional === 0 ? 'No hedge adjustment' : step.hedgeNotional > 0 ? 'Dealers BUY' : 'Dealers SELL'}
                           </span>
                           <span className="tabular-nums text-zinc-400">
-                            {formatDollars(Math.abs(step.deltaChange))}
+                            {formatDollars(Math.abs(step.hedgeNotional))}
                           </span>
                         </div>
                       </div>
@@ -273,7 +239,6 @@ function HedgingCascadeSimulatorComponent({ data, isLoading }: HedgingCascadeSim
                         'w-14 text-right text-[10px] font-bold tabular-nums',
                         isPositive ? 'text-emerald-400' : 'text-rose-400'
                       )}
-                      style={{ opacity: Math.max(0.4, step.dampening) }}
                     >
                       {isPositive ? '+' : ''}{step.marketImpact.toFixed(1)}
                     </div>
@@ -300,15 +265,15 @@ function HedgingCascadeSimulatorComponent({ data, isLoading }: HedgingCascadeSim
                 <span
                   className={cn(
                     'font-bold tabular-nums',
-                    hypotheticalMove > 0 ? 'text-emerald-400' : 'text-rose-400'
+                    simulation.totalMove > 0 ? 'text-emerald-400' : 'text-rose-400'
                   )}
                 >
-                  {hypotheticalMove > 0 ? '+' : ''}
-                  {(hypotheticalMove * totalAmplification).toFixed(1)} pts
+                  {simulation.totalMove > 0 ? '+' : ''}
+                  {simulation.totalMove.toFixed(1)} pts
                 </span>
               </div>
               <div className="mt-1 flex items-center justify-between border-t border-zinc-800 pt-1 text-xs">
-                <span className="text-zinc-500">Amplification factor</span>
+                <span className="text-zinc-500">Signed move ratio</span>
                 <span
                   className={cn(
                     'font-bold',
@@ -323,19 +288,21 @@ function HedgingCascadeSimulatorComponent({ data, isLoading }: HedgingCascadeSim
         ) : (
           <div className="flex h-32 items-center justify-center text-zinc-600">
             <div className="text-center">
-              <p className="text-sm">Drag the slider to simulate a price move</p>
+              <p className="text-sm">
+                {hypotheticalMove === 0 ? 'Drag the slider to simulate a price move' : 'Simulation unavailable for these GEX or price values'}
+              </p>
               <p className="mt-1 text-[10px] text-zinc-700">
-                See how dealer hedging creates feedback loops
+                Illustrative feedback under fixed gamma and liquidity
               </p>
             </div>
           </div>
         )}
 
-        {/* Regime context */}
-        <div className="text-[10px] text-zinc-600">
-          {data.net_gex > 0
-            ? 'Long Gamma: dealer hedging dampens moves (mean-reversion)'
-            : 'Short Gamma: dealer hedging amplifies moves (trend-following)'}
+        <div className="text-[10px] text-zinc-400">
+          Illustration only: fixed snapshot gamma, baseline call/put inventory signs,
+          and an uncalibrated $2B hedge notional per SPX point. Capped at six rounds;
+          no option repricing or liquidity forecast. An unstable scenario means
+          feedback does not shrink under these assumptions.
         </div>
       </CardContent>
     </Card>

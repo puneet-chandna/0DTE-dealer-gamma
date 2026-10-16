@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -115,5 +115,27 @@ describe('Sidebar layout variants', () => {
     );
 
     expect(screen.getByText(/zero gamma: below range/i)).toBeInTheDocument();
+  });
+
+  it('names the sidebar toggle and exposes its expanded state', () => {
+    const { rerender } = render(<Sidebar />);
+    const toggle = screen.getByRole('button', { name: /collapse sidebar/i });
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    fireEvent.click(toggle);
+    expect(storeState.state.toggleSidebar).toHaveBeenCalledOnce();
+
+    storeState.state.isSidebarOpen = false;
+    rerender(<Sidebar isLoading />);
+    expect(screen.getByRole('button', { name: /expand sidebar/i })).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('labels the alert threshold in dollar billions and exposes the selected refresh interval', () => {
+    render(<Sidebar />);
+    const threshold = screen.getByRole('slider', { name: /alert threshold \(\$b\)/i });
+    expect(threshold).toHaveAttribute('aria-valuetext', '1.50 billion dollars');
+    fireEvent.change(threshold, { target: { value: '2' } });
+    expect(storeState.state.setAlertThreshold).toHaveBeenCalledWith(2);
+    expect(screen.getByRole('button', { name: '10s' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: '5s' })).toHaveAttribute('aria-pressed', 'false');
   });
 });

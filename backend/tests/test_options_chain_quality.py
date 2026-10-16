@@ -56,10 +56,12 @@ def test_missing_or_nonfinite_iv_is_nullable_and_cacheable(chain_api, iv):
     provider.get_options_chain_snapshot.assert_awaited_once()
 
 
-@pytest.mark.parametrize("field", ["spot", "strike", "bid", "ask", "mid", "volume", "open_interest"])
+@pytest.mark.parametrize("field", ["spot", "strike"])
 @pytest.mark.parametrize("value", [None, float("nan"), float("inf"), -float("inf")])
 @pytest.mark.parametrize("has_stale", [False, True])
-def test_invalid_required_numbers_preserve_cache_and_use_valid_stale(chain_api, field, value, has_stale):
+def test_invalid_required_numbers_preserve_cache_and_use_valid_stale(
+    chain_api, field, value, has_stale
+):
     client, provider, cache = chain_api
     previous = None
     if has_stale:
@@ -92,3 +94,34 @@ def test_invalid_required_numbers_preserve_cache_and_use_valid_stale(chain_api, 
         update_spot.assert_not_called()
         set_cache.assert_not_called()
         assert cache.get(CACHE_KEY) == previous
+
+
+@pytest.mark.parametrize("field", ["bid", "ask", "mid", "volume", "open_interest"])
+@pytest.mark.parametrize("value", [None, float("nan"), float("inf"), -float("inf")])
+@pytest.mark.parametrize("has_stale", [False, True])
+def test_unavailable_optional_numbers_replace_stale_with_fresh_nullable_capture(
+    chain_api, field, value, has_stale
+):
+    client, provider, cache = chain_api
+    if has_stale:
+        assert client.get("/api/data/options-chain", params=PARAMS).status_code == 200
+    provider.get_options_chain_snapshot.return_value = pd.DataFrame([ROW | {field: value}])
+
+    with patch("app.services.cache.datetime") as clock:
+        clock.now.return_value = datetime.now() + timedelta(minutes=1)
+        response = client.get("/api/data/options-chain", params=PARAMS)
+        assert response.status_code == 200
+        body = response.json()
+        assert body["is_stale"] is False
+        assert body["contracts"] == [ROW | {field: None}]
+        assert cache.get(CACHE_KEY) == body
+        assert cache.get("spot:price:SPX:yfinance") == body["spot_price"] == 5500.0
+
+        repeated = client.get("/api/data/options-chain", params=PARAMS)
+        assert repeated.status_code == 200
+        repeated_body = repeated.json()
+        assert repeated_body["age_seconds"] >= body["age_seconds"]
+        assert repeated_body == body | {"age_seconds": repeated_body["age_seconds"]}
+        assert cache.get(CACHE_KEY) == body
+        assert provider.get_options_chain_snapshot.await_count == (2 if has_stale else 1)
+        assert provider.get_spot_price.await_count == (2 if has_stale else 1)

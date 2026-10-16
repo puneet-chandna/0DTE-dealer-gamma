@@ -18,10 +18,10 @@ import { PageShell } from '@/components/ui/PageShell';
 import { HiddenFlowsPanel, GammaMagnetField, HedgingCascadeSimulator } from '@/components/dashboard';
 import { MomentumGauge, GammaDecayClock } from '@/components/charts';
 import { useDashboardData } from '@/hooks/useDashboardData';
-import { cn } from '@/lib/utils';
+import { cn, formatMarketTimestamp, formatZeroGammaValue, hasZeroGammaCrossing } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
 import { PROVIDER_FEATURES } from '@/types';
-import type { GEXSnapshot, CharmVannaSnapshot, HawkesState } from '@/types';
+import type { GEXSnapshot, CharmVannaSnapshot, HawkesState, SnapshotMetricValue } from '@/types';
 
 // ============================================================================
 // Constants
@@ -31,7 +31,7 @@ type TabId = 'magnetics' | 'cascade' | 'decay' | 'hidden';
 
 const TABS: { id: TabId; label: string; question: string }[] = [
   { id: 'magnetics', label: 'Price Magnetics', question: 'Where is price being pulled?' },
-  { id: 'cascade', label: 'Cascade Risk', question: 'What happens if price moves?' },
+  { id: 'cascade', label: 'Cascade Scenario', question: 'What happens if price moves?' },
   { id: 'decay', label: 'Gamma Decay', question: 'How much time do I have?' },
   { id: 'hidden', label: 'Flow proxy (Hawkes-style)', question: 'What are dealers doing right now?' },
 ];
@@ -45,6 +45,12 @@ function formatB(value: number): string {
 }
 function formatM(value: number): string {
   return `$${(Math.abs(value) / 1e6).toFixed(0)}M`;
+}
+
+function isTruthyMetric(value: SnapshotMetricValue | undefined): boolean {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return Number.isFinite(value) && value !== 0;
+  return typeof value === 'string' && ['true', '1', 'yes', 'on'].includes(value.trim().toLowerCase());
 }
 
 function getMagneticsInterpretation(data: GEXSnapshot | null) {
@@ -73,36 +79,36 @@ function getMagneticsInterpretation(data: GEXSnapshot | null) {
 
   let hero = '';
   if (Math.abs(pullDirection) > 10) {
-    hero = `SPX is being pulled toward ${pullTarget.toFixed(0)} — ${Math.abs(pullDirection).toFixed(0)} points ${pullDirection > 0 ? 'above' : 'below'} current spot.`;
+    hero = `The positive-GEX weighted level is ${pullTarget.toFixed(0)} — ${Math.abs(pullDirection).toFixed(0)} points ${pullDirection > 0 ? 'above' : 'below'} spot. This distance-weighted proxy does not predict price attraction.`;
   } else {
-    hero = `Price is relatively balanced near current levels. No strong directional pull detected.`;
+    hero = `The positive-GEX weighted level is near spot, or positive GEX is absent. This heuristic does not establish a directional bias.`;
   }
 
   const bullets: string[] = [];
   if (attractors.length > 0) {
-    bullets.push(`${attractors.length} attractor strikes (long gamma) create mean-reversion. Strongest: ${attractors[0].strike.toFixed(0)} with ${formatB(attractors[0].gex)} GEX.`);
+    bullets.push(`${attractors.length} positive-GEX strikes. If the baseline inventory signs reflect dealer exposure, hedging would oppose small spot moves. Largest: ${attractors[0].strike.toFixed(0)} with ${formatB(attractors[0].gex)} GEX.`);
   }
   if (repellers.length > 0) {
-    bullets.push(`${repellers.length} repeller strikes (short gamma) amplify moves away. Strongest: ${repellers[0].strike.toFixed(0)} with ${formatB(repellers[0].gex)} GEX.`);
+    bullets.push(`${repellers.length} negative-GEX strikes. Under the same inventory assumption, hedging would follow small spot moves. Largest: ${repellers[0].strike.toFixed(0)} with ${formatB(repellers[0].gex)} GEX.`);
   }
   bullets.push(`Dominant strike: ${data.dominant_strike.toFixed(0)} — highest absolute GEX concentration.`);
-  if (data.zero_gamma_level > 0) {
+  if (hasZeroGammaCrossing(data) && data.zero_gamma_level > 0) {
     const zglRelative = data.zero_gamma_level - data.spot_price;
-    bullets.push(`Zero Gamma Level: ${data.zero_gamma_level.toFixed(0)} — ${Math.abs(zglRelative).toFixed(0)} pts ${zglRelative > 0 ? 'above' : 'below'} spot. Crossing this flips the regime.`);
+    bullets.push(`Modeled zero gamma: ${data.zero_gamma_level.toFixed(0)} — ${Math.abs(zglRelative).toFixed(0)} pts ${zglRelative > 0 ? 'above' : 'below'} spot. The root assumes fixed contract IV and inventory signs.`);
   }
 
   let takeaway = '';
   if (isLongGamma && Math.abs(pullDirection) > 10) {
-    takeaway = `Favor mean-reversion trades near ${pullTarget.toFixed(0)}. Long gamma dealers will dampen breakouts. Sell spikes, buy dips within the attractor zone.`;
-  } else if (!isLongGamma) {
-    takeaway = `Short gamma regime — price moves will be amplified. If spot pushes past repeller zones, expect acceleration. Trade with momentum, not against it.`;
+    takeaway = `The proxy is consistent with counter-move hedging near ${pullTarget.toFixed(0)} under fixed gamma and inventory assumptions. It does not establish support, resistance, or a profitable strategy.`;
+  } else if (data.net_gex < 0) {
+    takeaway = `A negative-GEX proxy is consistent with hedging in the direction of spot moves under the baseline inventory assumption. Real impact also depends on liquidity, position changes, and other flows.`;
   } else {
-    takeaway = `Balanced positioning. No strong directional bias from dealer hedging. Focus on other signals for direction.`;
+    takeaway = `GEX alone does not establish price direction or a profitable strategy. Compare the proxy with independent market and liquidity data.`;
   }
 
   const keyLevels = sorted.slice(0, 4).map(e => ({
     price: e.strike.toFixed(0),
-    label: e.gex > 0 ? 'Support' : 'Resistance',
+    label: e.gex > 0 ? 'Positive GEX' : 'Negative GEX',
     value: formatB(e.gex),
     type: (e.gex > 0 ? 'support' : 'resistance') as 'support' | 'resistance',
   }));
@@ -118,28 +124,29 @@ function getCascadeInterpretation(data: GEXSnapshot | null) {
 
   let hero = '';
   if (isLongGamma) {
-    hero = `Dealers are long gamma (${netGexB.toFixed(2)}B). Price moves will be dampened by dealer hedging. Low cascade risk.`;
+    hero = `The GEX proxy is positive (${netGexB.toFixed(2)}B). If the assumed dealer inventory signs hold, delta-neutral hedging would oppose a small spot move.`;
   } else {
-    hero = `Dealers are short gamma (${netGexB.toFixed(2)}B). Price moves will be amplified by dealer hedging. Elevated cascade risk.`;
+    hero = data.net_gex < 0
+      ? `The GEX proxy is negative (${netGexB.toFixed(2)}B). If the assumed dealer inventory signs hold, delta-neutral hedging would follow a small spot move.`
+      : `The net GEX proxy is zero. The fixed-gamma scenario has no net hedge adjustment; this does not establish low market risk.`;
   }
 
   const bullets: string[] = [];
   bullets.push(isLongGamma
-    ? `Long gamma dealers sell into rallies and buy dips — natural mean-reversion. Move amplification factor is typically < 1.0x.`
-    : `Short gamma dealers buy into rallies and sell into dips — positive feedback. Move amplification can reach 1.5–3.0x during volatile sessions.`
+    ? `Positive modeled dealer gamma implies selling after a rise and buying after a fall, with other inputs held fixed.`
+    : `Negative modeled dealer gamma implies buying after a rise and selling after a fall, with other inputs held fixed. Zero net gamma implies no first-order net adjustment.`
   );
-  bullets.push(`Net GEX: ${formatB(data.net_gex)} — ${Math.abs(netGexB) > 2 ? 'significant' : 'moderate'} positioning.`);
-  bullets.push(`Use the slider to simulate a price shock and see the chain reaction step by step.`);
-  bullets.push(isLongGamma
-    ? `In long gamma, large moves are unlikely to sustain. Fades tend to work.`
-    : `In short gamma, a 1% move can trigger $500M+ of directional hedging, creating a self-reinforcing loop.`
-  );
+  bullets.push(`Net GEX: ${formatB(data.net_gex)} of hedge notional per 1% spot move under the baseline call-positive/put-negative convention, not measured dealer inventory.`);
+  bullets.push(`The slider illustrates fixed-gamma feedback with uncalibrated liquidity and at most six rounds. Its price impacts are not forecasts.`);
+  bullets.push(`Open interest does not identify dealer inventory, hedge execution, or available market depth. GEX alone cannot estimate crash or squeeze probabilities.`);
 
   let takeaway = '';
   if (isLongGamma) {
-    takeaway = `Low risk of flash crash or squeeze. Dealer hedging provides a natural buffer. Option sellers benefit from this regime.`;
+    takeaway = `Counter-move hedging is a conditional mechanism, not evidence of low flash-crash risk or an advantage for option sellers.`;
+  } else if (data.net_gex < 0) {
+    takeaway = `With-move hedging can reinforce a shock under the assumed inventory and liquidity conditions. This proxy does not establish a trade recommendation or quantify that risk.`;
   } else {
-    takeaway = `Elevated cascade risk. Tight stops are critical. A catalyst (economic data, large flow) can trigger cascading hedging. Consider protective long gamma positions.`;
+    takeaway = `Zero net GEX gives no net first-order hedge adjustment in this scenario. Offsetting positions, other Greeks, and unrelated flows can still affect prices.`;
   }
 
   return { hero, bullets, takeaway };
@@ -163,41 +170,41 @@ function getDecayInterpretation(data: GEXSnapshot | null) {
 
   let hero = '';
   if (!marketOpen) {
-    hero = `Market is closed. 0DTE options have expired. Gamma exposure has reset to zero.`;
+    hero = `The current Eastern clock is outside 9:30 AM–4:00 PM. This regular-session illustration does not determine whether options have expired or gamma exposure is zero.`;
   } else if (inCritical) {
-    hero = `CRITICAL — Only ${minutesLeft} minutes until close. Gamma is at ${intensity.toFixed(1)}x intensity. Maximum volatility risk.`;
+    hero = `${minutesLeft} minutes to the assumed 4:00 PM ET close. The fixed-volatility ATM time-scaling factor is ${intensity.toFixed(1)}x; this is not a volatility-risk estimate.`;
   } else if (inDanger) {
-    hero = `DANGER ZONE — ${minutesLeft} minutes until close. Gamma intensity is rising sharply. 0DTE options are entering the high-risk decay phase.`;
+    hero = `${minutesLeft} minutes to the assumed close. The inverse-square-root time factor steepens near expiry under the ATM, fixed-volatility approximation.`;
   } else if (minutesLeft <= 180) {
-    hero = `Gamma intensity is elevated at ${intensity.toFixed(2)}x. The decay curve is steepening. ${minutesLeft} minutes to close.`;
+    hero = `The illustrative ATM time factor is ${intensity.toFixed(2)}x the opening baseline, with ${minutesLeft} minutes to the assumed close.`;
   } else {
-    hero = `${minutesLeft} minutes to close. Gamma intensity is stable at ${intensity.toFixed(2)}x. The curve steepens significantly after 2:30 PM ET.`;
+    hero = `${minutesLeft} minutes to the assumed close. The illustrative ATM time factor is ${intensity.toFixed(2)}x the opening baseline; actual gamma also depends on moneyness and implied volatility.`;
   }
 
   const bullets: string[] = [];
-  bullets.push(`Gamma is proportional to 1/sqrt(T) — for ATM 0DTE options, gamma increases exponentially as expiry approaches.`);
+  bullets.push(`Near the money, with volatility and other inputs held fixed, gamma scales approximately as 1/sqrt(T). This is inverse-square-root growth, not exponential growth.`);
   if (marketOpen) {
-    bullets.push(`Current intensity: ${intensity.toFixed(2)}x baseline. ${inDanger ? 'Abnormally high.' : 'Normal range.'}`);
-    bullets.push(`Time remaining: ${minutesLeft} minutes until 4:00 PM ET close.`);
+    bullets.push(`Current clock factor: ${intensity.toFixed(2)}x the 390-minute opening baseline, not measured aggregate gamma.`);
+    bullets.push(`Current clock: ${minutesLeft} minutes until 4:00 PM ET. This uses today's clock even when the displayed snapshot is a replay.`);
     if (inDanger) {
-      bullets.push(`Pin risk: options with large OI near spot will create powerful pinning forces.`);
+      bullets.push(`Open interest near spot can contribute to conditional hedging pressure. It does not establish pinning or a price target.`);
     }
     if (minutesLeft > 90) {
-      bullets.push(`Danger zone begins at 2:30 PM ET (90 min). Critical zone begins at 3:30 PM ET (30 min).`);
+      bullets.push(`The clock highlights the last 90 and 30 minutes as illustrative intervals; these are not calibrated risk thresholds.`);
     }
   } else {
-    bullets.push(`All 0DTE options have expired. Gamma exposure resets tomorrow at market open.`);
+    bullets.push(`Session times alone do not identify settlement, expiry, or the next trading session. Holidays and early closes are not modeled.`);
   }
 
   let takeaway = '';
   if (!marketOpen) {
-    takeaway = `No 0DTE gamma risk. Plan tomorrow's positioning based on expected OI distribution at open.`;
+    takeaway = `The clock does not establish an absence of gamma risk. Check the actual contract expiry, session calendar, and snapshot timestamp.`;
   } else if (inCritical) {
-    takeaway = `Extreme caution. Reduce position sizes. Pin risk creates whipsaw reversals. Use limit orders only. Exit speculative positions.`;
+    takeaway = `Time is short in this regular-session illustration. Risk still depends on contract moneyness, volatility, inventory, and liquidity; the clock does not prescribe a trade.`;
   } else if (inDanger) {
-    takeaway = `Tighten stops. Gamma amplification means moves can accelerate suddenly. Consider closing 0DTE short options.`;
+    takeaway = `A steeper ATM time factor does not by itself establish aggregate hedging pressure, realized volatility, or a strategy advantage.`;
   } else {
-    takeaway = `Standard gamma environment. Plan exits before the danger zone if holding short gamma positions.`;
+    takeaway = `The curve illustrates time sensitivity under fixed inputs. Compare it with actual contract Greeks and expiry details before drawing risk conclusions.`;
   }
 
   return { hero, bullets, takeaway, inDanger, inCritical, marketOpen };
@@ -273,16 +280,15 @@ function getHiddenFlowsInterpretation(
 // ============================================================================
 
 function getRegimeLabel(netGex: number): { text: string; color: string } {
-  if (netGex > 0) return { text: 'Long Gamma', color: 'text-emerald-400' };
-  return { text: 'Short Gamma', color: 'text-rose-400' };
+  if (netGex > 0) return { text: 'Positive GEX proxy', color: 'text-emerald-400' };
+  if (netGex < 0) return { text: 'Negative GEX proxy', color: 'text-rose-400' };
+  return { text: 'Zero net GEX', color: 'text-zinc-300' };
 }
 
 function getBias(data: GEXSnapshot): { text: string; color: string } {
-  const isLong = data.net_gex > 0;
-  if (isLong) return { text: 'Neutral / Dampened', color: 'text-zinc-300' };
-  // Short gamma — check dominant flow direction
-  if (data.spot_price > data.zero_gamma_level) return { text: 'Bearish Pressure', color: 'text-rose-400' };
-  return { text: 'Bullish Pressure', color: 'text-emerald-400' };
+  if (data.net_gex > 0) return { text: 'Counter-move proxy', color: 'text-zinc-300' };
+  if (data.net_gex < 0) return { text: 'With-move proxy', color: 'text-rose-400' };
+  return { text: 'No net adjustment', color: 'text-zinc-300' };
 }
 
 // ============================================================================
@@ -293,7 +299,10 @@ export default function DealerFlowsPage() {
   const { gexData, isLoading } = useDashboardData();
   const { selectedProvider, availableProviders = [] } = useUIStore();
   const [activeTab, setActiveTab] = useState<TabId>('magnetics');
-  const lastUpdated = gexData?.timestamp ? new Date(gexData.timestamp) : null;
+  const lastUpdated = gexData?.timestamp ? formatMarketTimestamp(gexData.timestamp) : null;
+  const timestampLabel = isTruthyMetric(gexData?.metrics?.is_replay_data)
+    ? 'Replay capture:'
+    : isTruthyMetric(gexData?.metrics?.is_persisted_fallback) ? 'Stored capture:' : 'Updated';
   const selectedProviderInfo = availableProviders.find(
     (provider) => provider.name === selectedProvider
   );
@@ -333,7 +342,7 @@ export default function DealerFlowsPage() {
               Dealer Flows
             </h1>
             <p className="mt-0.5 text-xs text-zinc-500">
-              Institutional dealer positioning & hedging intelligence
+              Options-based positioning proxies & illustrative hedging scenarios
             </p>
           </div>
           {/* Trust signals */}
@@ -341,7 +350,7 @@ export default function DealerFlowsPage() {
             <span>Source: {providerDisplayName}</span>
             {lastUpdated && (
               <span>
-                Updated {lastUpdated.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                {timestampLabel} {lastUpdated}
               </span>
             )}
             <div className={cn(
@@ -374,7 +383,7 @@ export default function DealerFlowsPage() {
           {/* Bias */}
           <div className="bg-[#0f1117] px-4 py-3 sm:px-5 sm:py-4">
             <p className="text-[10px] font-medium uppercase tracking-widest text-zinc-600">
-              Dealer Bias
+              Modeled Hedge Response
             </p>
             <p className={cn('mt-1 text-lg font-semibold', bias?.color ?? 'text-zinc-500')}>
               {bias?.text ?? '—'}
@@ -386,7 +395,7 @@ export default function DealerFlowsPage() {
               Gamma Flip
             </p>
             <p className="mt-1 text-lg font-semibold tabular-nums text-violet-400">
-              {gexData && gexData.zero_gamma_level > 0 ? gexData.zero_gamma_level.toFixed(0) : '—'}
+              {formatZeroGammaValue(gexData)}
             </p>
           </div>
         </div>
