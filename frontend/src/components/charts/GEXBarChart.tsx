@@ -1,31 +1,7 @@
-/**
- * GEXBarChart - Strike-by-strike GEX visualization
- *
- * Primary visualization for the dashboard.
- * Use React.memo() to avoid unnecessary chart re-renders.
- * RULE: Throttle updates - max 1 render per 200ms
- *
- * Visual:
- * - Red bars: Negative GEX (Calls) 
- * - Green bars: Positive GEX (Puts)
- * - Vertical dashed line: Current spot price
- * - Horizontal reference line: Zero Gamma Level
- */
-
 'use client';
 
-import { memo, useMemo, useRef, useEffect, useState } from 'react';
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ReferenceLine,
-  ResponsiveContainer,
-  Cell,
-} from 'recharts';
+import { memo, useMemo, useState } from 'react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, ResponsiveContainer, Cell } from 'recharts';
 
 interface GEXBarChartData {
   strike: number;
@@ -41,186 +17,89 @@ interface GEXBarChartProps {
   height?: number;
 }
 
-// Throttle hook to limit re-renders
-function useThrottledValue<T>(value: T, limit: number): T {
-  const [throttledValue, setThrottledValue] = useState(value);
-  const lastRanRef = useRef(0);
-
-  useEffect(() => {
-    const handler = setTimeout(() => {
-      if (Date.now() - lastRanRef.current >= limit) {
-        setThrottledValue(value);
-        lastRanRef.current = Date.now();
-      }
-    }, limit - (Date.now() - lastRanRef.current));
-
-    return () => clearTimeout(handler);
-  }, [value, limit]);
-
-  return throttledValue;
-}
-
-// Custom tooltip component
-const CustomTooltip = ({
-  active,
-  payload,
-  label,
-}: {
+function CustomTooltip({ active, payload }: {
   active?: boolean;
-  payload?: Array<{ value: number; payload: GEXBarChartData }>;
-  label?: number;
-}) => {
-  if (!active || !payload || payload.length === 0) return null;
-
-  const data = payload[0].payload;
-  const isNegative = data.gex < 0;
-
+  payload?: Array<{ payload: GEXBarChartData }>;
+}) {
+  if (!active || !payload?.length) return null;
+  const point = payload[0].payload;
   return (
-    <div className="rounded-lg border border-zinc-700 bg-zinc-900/95 px-3 py-2 shadow-xl">
-      <p className="text-xs text-zinc-400">Strike: ${label?.toLocaleString()}</p>
-      <p
-        className={`text-sm font-semibold ${
-          isNegative ? 'text-rose-400' : 'text-emerald-400'
-        }`}
-      >
-        GEX: {data.gexBillions >= 0 ? '+' : ''}
-        {data.gexBillions.toFixed(3)}B
+    <div className="rounded-lg border border-[var(--stroke)] bg-[var(--surface-raised)] px-3 py-2 text-sm text-[var(--text-primary)]">
+      <p>Strike: ${point.strike.toLocaleString('en-US', { maximumFractionDigits: 2 })}</p>
+      <p className={point.gex < 0 ? 'text-[var(--negative)]' : 'text-[var(--positive)]'}>
+        {point.gexBillions >= 0 ? '+' : '−'}${Math.abs(point.gexBillions).toFixed(3)}B per 1% spot move
       </p>
     </div>
   );
-};
+}
 
-function GEXBarChartComponent({
-  data,
-  spotPrice,
-  zeroGammaLevel,
-  isLoading = false,
-  height = 350,
-}: GEXBarChartProps) {
-  // Throttle data updates to max 5 per second (200ms)
-  const throttledData = useThrottledValue(data, 200);
+function GEXBarChartComponent({ data, spotPrice, zeroGammaLevel, isLoading = false, height = 350 }: GEXBarChartProps) {
+  const [range, setRange] = useState<'near' | 'full'>('near');
+  const validSpot = Number.isFinite(spotPrice) && spotPrice > 0;
+  const validZero = zeroGammaLevel != null && Number.isFinite(zeroGammaLevel) && zeroGammaLevel > 0;
+  const fullData = useMemo(() => data
+    .filter((point) => Number.isFinite(point.strike) && Number.isFinite(point.gex) && Number.isFinite(point.gexBillions))
+    .sort((a, b) => a.strike - b.strike), [data]);
+  const near = range === 'near' && validSpot;
+  const chartData = near ? fullData.filter((point) => point.strike >= spotPrice * 0.98 && point.strike <= spotPrice * 1.02) : fullData;
+  const levels = [...fullData.map((point) => point.strike), ...(validSpot ? [spotPrice] : []), ...(validZero ? [zeroGammaLevel] : [])];
+  const minStrike = Math.min(...levels);
+  const maxStrike = Math.max(...levels);
+  const padding = Math.max((maxStrike - minStrike) * 0.02, 1);
+  const xDomain = near ? [spotPrice * 0.98, spotPrice * 1.02] : [minStrike - padding, maxStrike + padding];
+  const maxAbs = Math.max(...chartData.map((point) => Math.abs(point.gexBillions)), 0.1) * 1.1;
+  const rawTickStep = maxAbs / 4;
+  const tickMagnitude = 10 ** Math.floor(Math.log10(rawTickStep));
+  const tickUnit = rawTickStep / tickMagnitude;
+  const tickStep = (tickUnit <= 1 ? 1 : tickUnit <= 2 ? 2 : tickUnit <= 5 ? 5 : 10) * tickMagnitude;
+  const tickCount = Math.floor(maxAbs / tickStep);
+  const yTicks = Array.from({ length: 2 * tickCount + 1 }, (_, index) => (index - tickCount) * tickStep);
+  const zeroOutsideView = validZero && (zeroGammaLevel < xDomain[0] || zeroGammaLevel > xDomain[1]);
 
-  // Memoize chart data processing
-  const chartData = useMemo(() => {
-    if (!throttledData || throttledData.length === 0) return [];
-    
-    // Sort by strike price
-    return [...throttledData].sort((a, b) => a.strike - b.strike);
-  }, [throttledData]);
-
-  // Calculate Y axis domain for balanced view
-  const yDomain = useMemo(() => {
-    if (chartData.length === 0) return [-1, 1];
-    
-    const maxAbs = Math.max(
-      ...chartData.map((d) => Math.abs(d.gexBillions)),
-      0.1 // Minimum scale
-    );
-    const padding = maxAbs * 0.1;
-    return [-(maxAbs + padding), maxAbs + padding];
-  }, [chartData]);
-
-  if (isLoading) {
-    return (
-      <div
-        className="flex items-center justify-center animate-pulse rounded-lg bg-zinc-800/50"
-        style={{ height }}
-      >
-        <p className="text-zinc-500">Loading chart...</p>
-      </div>
-    );
-  }
-
-  if (chartData.length === 0) {
-    return (
-      <div
-        className="flex items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/50"
-        style={{ height }}
-      >
-        <p className="text-zinc-500">No data available</p>
-      </div>
-    );
-  }
+  if (isLoading) return <div className="flex items-center justify-center text-sm text-[var(--text-secondary)]" style={{ height }}>Loading strike exposures…</div>;
+  if (!fullData.length) return <div className="flex items-center justify-center text-sm text-[var(--text-secondary)]" style={{ height }}>No strike exposures available for this capture.</div>;
 
   return (
-    <ResponsiveContainer width="100%" height={height}>
-      <BarChart
-        data={chartData}
-        margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
-      >
-        <CartesianGrid
-          strokeDasharray="3 3"
-          stroke="#27272a"
-          vertical={false}
-        />
-        <XAxis
-          dataKey="strike"
-          tick={{ fill: '#71717a', fontSize: 11 }}
-          tickLine={{ stroke: '#3f3f46' }}
-          axisLine={{ stroke: '#3f3f46' }}
-          tickFormatter={(value: number) => {
-            // Show fewer labels for readability
-            return value % 25 === 0 ? value.toString() : '';
-          }}
-        />
-        <YAxis
-          domain={yDomain}
-          tick={{ fill: '#71717a', fontSize: 11 }}
-          tickLine={{ stroke: '#3f3f46' }}
-          axisLine={{ stroke: '#3f3f46' }}
-          tickFormatter={(value: number) => `${value.toFixed(1)}B`}
-          width={60}
-        />
-        <Tooltip content={<CustomTooltip />} />
-
-        {/* Zero line */}
-        <ReferenceLine y={0} stroke="#52525b" strokeWidth={1} />
-
-        {/* Spot price vertical line */}
-        <ReferenceLine
-          x={spotPrice}
-          stroke="#fbbf24"
-          strokeWidth={2}
-          strokeDasharray="5 5"
-          label={{
-            value: `Spot: $${spotPrice.toLocaleString()}`,
-            position: 'top',
-            fill: '#fbbf24',
-            fontSize: 11,
-          }}
-        />
-
-        {/* Zero Gamma Level horizontal reference */}
-        {zeroGammaLevel && (
-          <ReferenceLine
-            x={zeroGammaLevel}
-            stroke="#a78bfa"
-            strokeWidth={2}
-            strokeDasharray="8 4"
-            label={{
-              value: `0Γ: $${zeroGammaLevel.toLocaleString()}`,
-              position: 'top',
-              fill: '#a78bfa',
-              fontSize: 11,
-              offset: 15,
-            }}
-          />
-        )}
-
-        {/* GEX bars with conditional coloring */}
-        <Bar dataKey="gexBillions" radius={[2, 2, 0, 0]}>
-          {chartData.map((entry, index) => (
-            <Cell
-              key={`cell-${index}`}
-              fill={entry.gex < 0 ? '#f43f5e' : '#10b981'}
-              fillOpacity={0.8}
-            />
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-[var(--text-secondary)]">Hedge notional per 1% spot move ($B)</p>
+        <div role="group" aria-label="Strike range" className="flex gap-1 rounded-lg border border-[var(--stroke)] p-1">
+          {(['near', 'full'] as const).map((option) => (
+            <button key={option} type="button" aria-pressed={range === option} disabled={option === 'near' && !validSpot}
+              onClick={() => setRange(option)}
+              className={`rounded-md px-3 py-1.5 text-sm focus-visible:outline-2 focus-visible:outline-[var(--accent)] disabled:opacity-50 ${range === option ? 'bg-[var(--surface-raised)] text-[var(--text-primary)]' : 'text-[var(--text-secondary)] hover:bg-[var(--surface-raised)]'}`}>
+              {option === 'near' ? 'Near spot ±2%' : 'Full chain'}
+            </button>
           ))}
-        </Bar>
-      </BarChart>
-    </ResponsiveContainer>
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-x-5 gap-y-1 text-sm tabular-nums">
+        {validSpot && <span className="text-[var(--warning)]">Spot ${spotPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} · solid line</span>}
+        {validZero && <span className="text-[var(--accent)]">Zero gamma ${zeroGammaLevel.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}{zeroOutsideView ? ' · outside view' : ' · dashed line'}</span>}
+      </div>
+      {chartData.length ? (
+        <ResponsiveContainer width="100%" height={height}>
+          <BarChart data={chartData} margin={{ top: 20, right: 24, left: 8, bottom: 20 }} barSize={12}>
+            <CartesianGrid stroke="var(--stroke)" vertical={false} />
+            <XAxis dataKey="strike" type="number" domain={xDomain} allowDataOverflow
+              tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} tickLine={false} axisLine={{ stroke: 'var(--stroke)' }}
+              tickFormatter={(value: number) => value.toLocaleString('en-US', { maximumFractionDigits: 2 })}
+              label={{ value: 'Strike ($)', position: 'insideBottom', offset: -12, fill: 'var(--text-secondary)', fontSize: 12 }} />
+            <YAxis domain={[-maxAbs, maxAbs]} ticks={yTicks} tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} tickLine={false} axisLine={false}
+              tickFormatter={(value: number) => `${value.toFixed(2)}B`} width={72} />
+            <Tooltip content={<CustomTooltip />} isAnimationActive={false} />
+            <ReferenceLine y={0} stroke="var(--text-muted)" />
+            {validSpot && <ReferenceLine x={spotPrice} stroke="var(--warning)" strokeWidth={2} />}
+            {validZero && !zeroOutsideView && <ReferenceLine x={zeroGammaLevel} stroke="var(--accent)" strokeWidth={2} strokeDasharray="6 4" />}
+            <Bar dataKey="gexBillions" isAnimationActive={false} radius={[2, 2, 0, 0]}>
+              {chartData.map((point) => <Cell key={point.strike} fill={point.gex < 0 ? 'var(--negative)' : 'var(--positive)'} />)}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      ) : <div className="flex items-center justify-center text-sm text-[var(--text-secondary)]" style={{ height }}>No strikes in this range. Select Full chain to inspect available exposures.</div>}
+      <p className="text-sm text-[var(--text-muted)]">{near ? 'Filtered to spot ±2%' : 'Full chain'} · {chartData.length} of {fullData.length} strikes · full-chain totals unchanged. Positive bars above zero; negative bars below zero.</p>
+    </div>
   );
 }
 
-// Export memoized component for performance
 export const GEXBarChart = memo(GEXBarChartComponent);

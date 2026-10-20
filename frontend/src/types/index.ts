@@ -72,6 +72,7 @@ export interface DataProvenance {
   actual_instrument: string;
   is_proxy: boolean;
   data_kind: 'captured' | 'synthetic';
+  is_replay?: boolean;
   sample_count: number;
   actual_start?: string | null;
   actual_end?: string | null;
@@ -138,6 +139,7 @@ export interface GEXUpdate {
   provider?: string;
   is_mock?: boolean;
   is_demo?: boolean;
+  is_replay?: boolean;
   is_stale?: boolean;
   timestamp?: string;
   advanced_analytics?: AdvancedAnalytics | null;
@@ -301,6 +303,7 @@ export interface IVSurfaceResponse {
   surface: IVSurfacePoint[];
   skew: IVSkewPoint[];
   count: number;
+  provenance?: DataProvenance | null;
 }
 
 /**
@@ -325,6 +328,7 @@ export interface TechnicalIndicatorResponse {
   indicators: string[];
   data: TechnicalIndicatorPoint[];
   count: number;
+  provenance?: DataProvenance | null;
 }
 
 /**

@@ -1,23 +1,7 @@
-/**
- * TimeSeriesChart - Historical Net GEX over time
- *
- * RULE: Use React.memo() for chart components
- * RULE: Throttle updates - max 1 render per 200ms
- */
-
 'use client';
 
 import { memo, useMemo } from 'react';
-import {
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  ReferenceLine,
-} from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 import { formatMarketTimestamp } from '@/lib/utils';
 
 interface TimeSeriesDataPoint {
@@ -25,172 +9,60 @@ interface TimeSeriesDataPoint {
   netGex: number;
   netGexBillions: number;
 }
-
 interface TimeSeriesChartProps {
   data: TimeSeriesDataPoint[];
   isLoading?: boolean;
   height?: number;
   showZeroLine?: boolean;
 }
+interface PlottedCapture {
+  time: number;
+  netGexBillions: number | null;
+}
 
-// Custom tooltip
-const CustomTooltip = ({
-  active,
-  payload,
-  label,
-}: {
-  active?: boolean;
-  payload?: Array<{ value: number; payload: TimeSeriesDataPoint }>;
-  label?: string;
-}) => {
-  if (!active || !payload || payload.length === 0) return null;
-
-  const data = payload[0].payload;
-  const isNegative = data.netGex < 0;
-
-  let formattedTime = label || '';
-  try {
-    if (label) {
-      formattedTime = formatMarketTimestamp(label) ?? label;
-    }
-  } catch {
-    // Keep original label if parsing fails
-  }
-
-  return (
-    <div className="rounded-lg border border-zinc-700 bg-zinc-900/95 px-3 py-2 shadow-xl">
-      <p className="text-xs text-zinc-400">{formattedTime}</p>
-      <p
-        className={`text-sm font-semibold ${
-          isNegative ? 'text-rose-400' : 'text-emerald-400'
-        }`}
-      >
-        Net GEX: {data.netGexBillions >= 0 ? '+' : ''}
-        {data.netGexBillions.toFixed(2)}B
-      </p>
-    </div>
-  );
-};
-
-function TimeSeriesChartComponent({
-  data,
-  isLoading = false,
-  height = 250,
-  showZeroLine = true,
-}: TimeSeriesChartProps) {
-  // Process and sort data by timestamp
+function TimeSeriesChartComponent({ data, isLoading = false, height = 250, showZeroLine = true }: TimeSeriesChartProps) {
   const chartData = useMemo(() => {
-    if (!data || data.length === 0) return [];
-    return [...data].sort(
-      (a, b) =>
-        new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
-    );
+    const captures = data.map((point) => ({ time: Date.parse(point.timestamp), netGexBillions: point.netGexBillions }))
+      .filter((point) => Number.isFinite(point.time) && Number.isFinite(point.netGexBillions))
+      .sort((a, b) => a.time - b.time);
+    const plotted: PlottedCapture[] = [];
+    captures.forEach((point, index) => {
+      const previous = captures[index - 1];
+      // A null separates capture segments without inventing a market observation.
+      if (previous && point.time - previous.time > 5 * 60_000) {
+        plotted.push({ time: previous.time + (point.time - previous.time) / 2, netGexBillions: null });
+      }
+      plotted.push(point);
+    });
+    return plotted;
   }, [data]);
+  const showSeconds = chartData.length > 0 && chartData[chartData.length - 1].time - chartData[0].time < 5 * 60_000;
+  const maxAbs = Math.max(...chartData.map((point) => Math.abs(point.netGexBillions ?? 0)), 0.5) * 1.15;
 
-  // Calculate Y domain
-  const yDomain = useMemo(() => {
-    if (chartData.length === 0) return [-1, 1];
-
-    const maxAbs = Math.max(
-      ...chartData.map((d) => Math.abs(d.netGexBillions)),
-      0.5
-    );
-    const padding = maxAbs * 0.15;
-    return [-(maxAbs + padding), maxAbs + padding];
-  }, [chartData]);
-
-  // Determine gradient based on latest value
-  const latestValue = chartData.length > 0 ? chartData[chartData.length - 1].netGex : 0;
-  const gradientId = latestValue < 0 ? 'gradientRed' : 'gradientGreen';
-  const strokeColor = latestValue < 0 ? '#f43f5e' : '#10b981';
-
-  if (isLoading) {
-    return (
-      <div
-        className="flex items-center justify-center animate-pulse rounded-lg bg-zinc-800/50"
-        style={{ height }}
-      >
-        <p className="text-zinc-500">Loading chart...</p>
-      </div>
-    );
-  }
-
-  if (chartData.length === 0) {
-    return (
-      <div
-        className="flex items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/50"
-        style={{ height }}
-      >
-        <p className="text-zinc-500">No historical data available</p>
-      </div>
-    );
-  }
+  if (isLoading) return <div className="flex items-center justify-center text-sm text-[var(--text-secondary)]" style={{ height }}>Loading capture history…</div>;
+  if (!chartData.length) return <div className="flex items-center justify-center text-sm text-[var(--text-secondary)]" style={{ height }}>No capture history available.</div>;
 
   return (
-    <ResponsiveContainer width="100%" height={height}>
-      <AreaChart
-        data={chartData}
-        margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
-      >
-        <defs>
-          <linearGradient id="gradientGreen" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
-            <stop offset="95%" stopColor="#10b981" stopOpacity={0.05} />
-          </linearGradient>
-          <linearGradient id="gradientRed" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="5%" stopColor="#f43f5e" stopOpacity={0.3} />
-            <stop offset="95%" stopColor="#f43f5e" stopOpacity={0.05} />
-          </linearGradient>
-        </defs>
-
-        <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
-
-        <XAxis
-          dataKey="timestamp"
-          tick={{ fill: '#71717a', fontSize: 10 }}
-          tickLine={{ stroke: '#3f3f46' }}
-          axisLine={{ stroke: '#3f3f46' }}
-          tickFormatter={(value: string) => {
-            try {
-              return new Date(value).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', hour12: false });
-            } catch {
-              return '';
-            }
-          }}
-          interval="preserveStartEnd"
-        />
-
-        <YAxis
-          domain={yDomain}
-          tick={{ fill: '#71717a', fontSize: 10 }}
-          tickLine={{ stroke: '#3f3f46' }}
-          axisLine={{ stroke: '#3f3f46' }}
-          tickFormatter={(value: number) => `${value.toFixed(1)}B`}
-          width={50}
-        />
-
-        <Tooltip content={<CustomTooltip />} />
-
-        {showZeroLine && (
-          <ReferenceLine y={0} stroke="#52525b" strokeWidth={1} />
-        )}
-
-        <Area
-          type="monotone"
-          dataKey="netGexBillions"
-          stroke={strokeColor}
-          strokeWidth={2}
-          fill={`url(#${gradientId})`}
-          dot={false}
-          activeDot={{
-            r: 4,
-            fill: strokeColor,
-            stroke: '#18181b',
-            strokeWidth: 2,
-          }}
-        />
-      </AreaChart>
-    </ResponsiveContainer>
+    <div className="space-y-2">
+      <ResponsiveContainer width="100%" height={height}>
+        <AreaChart data={chartData} margin={{ top: 10, right: 24, left: 8, bottom: 20 }}>
+          <CartesianGrid stroke="var(--stroke)" vertical={false} />
+          <XAxis dataKey="time" type="number" scale="time" domain={['dataMin', 'dataMax']}
+            tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} tickLine={false} axisLine={{ stroke: 'var(--stroke)' }}
+            tickFormatter={(value: number) => new Date(value).toLocaleTimeString('en-US', { timeZone: 'America/New_York', hour: '2-digit', minute: '2-digit', second: showSeconds ? '2-digit' : undefined, hour12: false })}
+            label={{ value: 'Capture time (ET)', position: 'insideBottom', offset: -12, fill: 'var(--text-secondary)', fontSize: 12 }} />
+          <YAxis domain={[-maxAbs, maxAbs]} tick={{ fill: 'var(--text-secondary)', fontSize: 12 }} tickLine={false} axisLine={false}
+            tickFormatter={(value: number) => `${value.toFixed(1)}B`} width={64} />
+          <Tooltip isAnimationActive={false} contentStyle={{ backgroundColor: 'var(--surface-raised)', border: '1px solid var(--stroke)', color: 'var(--text-primary)', fontSize: 14 }}
+            labelFormatter={(value) => formatMarketTimestamp(new Date(Number(value)).toISOString()) ?? ''}
+            formatter={(value) => [`${Number(value) >= 0 ? '+' : '−'}$${Math.abs(Number(value)).toFixed(3)}B per 1% spot move`, 'Net GEX']} />
+          {showZeroLine && <ReferenceLine y={0} stroke="var(--text-muted)" />}
+          <Area type="linear" dataKey="netGexBillions" stroke="var(--accent)" strokeWidth={2} fill="var(--accent)" fillOpacity={0.08}
+            connectNulls={false} isAnimationActive={false} dot={{ r: 2, fill: 'var(--accent)' }} activeDot={{ r: 4 }} />
+        </AreaChart>
+      </ResponsiveContainer>
+      <p className="text-sm text-[var(--text-muted)]">Net hedge notional per 1% spot move ($B). Elapsed time is to scale; gaps over 5 minutes are left unconnected. Points use the source and data kind identified above.</p>
+    </div>
   );
 }
 

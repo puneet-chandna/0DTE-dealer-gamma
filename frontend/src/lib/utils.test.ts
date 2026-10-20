@@ -285,3 +285,16 @@ describe('market date helpers', () => {
     expect(isFutureMarketDate('2026-03-29', '2026-03-30')).toBe(false);
   });
 });
+
+ describe('backtest weekday session date', () => {
+  it.each([
+    ['2026-10-18T16:00:00Z', '2026-10-16'],
+    ['2026-10-19T13:29:59Z', '2026-10-16'],
+    ['2026-10-19T13:30:00Z', '2026-10-19'],
+    ['2026-11-02T14:29:59Z', '2026-10-30'],
+    ['2026-11-02T14:30:00Z', '2026-11-02'],
+  ])('aligns %s with the backend date %s', async (timestamp, expected) => {
+    const { getCurrentTradingDateString } = await import('./utils');
+    expect(getCurrentTradingDateString(new Date(timestamp))).toBe(expected);
+  });
+});

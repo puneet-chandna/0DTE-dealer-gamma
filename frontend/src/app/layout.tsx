@@ -12,9 +12,9 @@ const inter = Inter({
 });
 
 export const metadata: Metadata = {
-  title: '0DTE GEX Monitor | Dealer Gamma Exposure Dashboard',
+  title: '0DTE Research | Options Exposure Workstation',
   description:
-    'Real-time monitoring of Dealer Gamma Exposure (GEX) for SPX 0DTE options. Track Net GEX, Zero Gamma Level, and market regimes.',
+    'Desktop options research workstation for captured exposure data, implied volatility, conditional hedging models and historical simulations.',
   keywords: [
     '0DTE',
     'options',
@@ -27,8 +27,8 @@ export const metadata: Metadata = {
   ],
   authors: [{ name: '0DTE GEX Team' }],
   openGraph: {
-    title: '0DTE GEX Monitor',
-    description: 'Real-time Dealer Gamma Exposure Analysis',
+    title: '0DTE Research',
+    description: 'Desktop options exposure research',
     type: 'website',
   },
 };

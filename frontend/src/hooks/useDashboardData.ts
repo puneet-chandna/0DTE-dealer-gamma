@@ -29,7 +29,7 @@ import { getAppDataMode } from '@/lib/appMode';
 import { canReplaceSnapshot, retainLatestSnapshot } from '@/lib/snapshots';
 import { getCurrentMarketDateString } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
-import type { GEXSnapshot, RegimeData, GEXByStrike, ConnectionState } from '@/types';
+import type { GEXSnapshot, GEXUpdate, RegimeData, GEXByStrike, ConnectionState } from '@/types';
 
 // Stale data threshold (milliseconds)
 const STALE_THRESHOLD = 60000; // 60 seconds
@@ -65,6 +65,17 @@ interface TimeSeriesPoint {
 }
 
 const DashboardDataContext = createContext<DashboardData | null>(null);
+
+function snapshotMetrics(update: GEXUpdate): GEXSnapshot['metrics'] {
+  const isReplay = update.is_replay ?? Boolean(update.metrics?.is_replay_data);
+  return {
+    ...update.metrics,
+    is_replay_data: isReplay,
+    is_synthetic_data: !isReplay && Boolean(
+      update.is_mock || update.metrics?.is_synthetic_data || update.metrics?.is_demo_data
+    ),
+  };
+}
 
 /**
  * Unified hook for dashboard data that prefers WebSocket when available
@@ -132,7 +143,7 @@ function useDashboardDataState(): DashboardData {
         total_put_gex: wsStream.data.total_put_gex!,
         gex_by_strike: wsStream.data.gex_by_strike!,
         dominant_strike: wsStream.data.dominant_strike ?? 0,
-        metrics: wsStream.data.metrics!,
+        metrics: snapshotMetrics(wsStream.data),
         provider: wsStream.data.provider,
       };
 
@@ -173,7 +184,7 @@ function useDashboardDataState(): DashboardData {
         total_put_gex: wsStream.data.total_put_gex!,
         gex_by_strike: wsStream.data.gex_by_strike!,
         dominant_strike: wsStream.data.dominant_strike ?? 0,
-        metrics: wsStream.data.metrics!,
+        metrics: snapshotMetrics(wsStream.data),
         provider: wsStream.data.provider,
         // Prefer WebSocket advanced analytics, fall back to polled
         advanced_analytics: wsStream.data.advanced_analytics ?? null,

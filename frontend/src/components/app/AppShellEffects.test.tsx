@@ -48,18 +48,19 @@ describe('AppShellEffects theme sync', () => {
     useUIStore.setState(defaultUIState);
   });
 
-  it('applies the current light theme preference to the document root', async () => {
+  it('applies the workstation dark theme while preserving the stored preference', async () => {
     renderWithQueryClient();
 
     await waitFor(() => {
-      expect(document.documentElement).toHaveAttribute('data-theme', 'light');
+      expect(document.documentElement).toHaveAttribute('data-theme', 'dark');
     });
 
-    expect(document.documentElement).not.toHaveClass('dark');
-    expect(document.documentElement.style.colorScheme).toBe('light');
+    expect(document.documentElement).toHaveClass('dark');
+    expect(useUIStore.getState().isDarkMode).toBe(false);
+    expect(document.documentElement.style.colorScheme).toBe('dark');
   });
 
-  it('updates the document root when dark mode is toggled', async () => {
+  it('keeps the workstation dark when a legacy theme preference changes', async () => {
     renderWithQueryClient();
 
     act(() => {

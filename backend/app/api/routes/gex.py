@@ -336,6 +336,7 @@ async def get_current_gex(
             replay_payload["provider"] = active_provider
             replay_payload.setdefault("metrics", {})
             replay_payload["metrics"]["is_replay_data"] = 1.0
+            replay_payload["metrics"]["is_synthetic_data"] = False
             return replay_payload
         anchor_snapshot = await _get_demo_anchor_snapshot(
             symbol=symbol,

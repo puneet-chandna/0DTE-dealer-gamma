@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react';
-import { describe, it, expect, vi } from 'vitest';
+import { beforeEach, describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
 import AnalyticsPage from './page';
 import type { DataProviderInfo } from '@/types';
 
-const { mockUseUIStore } = vi.hoisted(() => ({
+const { mockUseUIStore, mockIV } = vi.hoisted(() => ({
+  mockIV: { data: { spot_price: 5000, count: 0, surface: [], skew: [], provenance: { provider: 'tradier', actual_instrument: 'SPY', requested_symbol: 'SPY', is_proxy: false, data_kind: 'captured', sample_count: 0, quality_limitations: [], calculation_versions: [] } }, error: null as Error | null, isLoading: false, refetch: vi.fn() },
   mockUseUIStore: vi.fn(() => ({
     selectedProvider: 'tradier',
     availableProviders: [] as DataProviderInfo[],
@@ -32,11 +33,7 @@ vi.mock('@/components/charts', () => ({
 }));
 
 vi.mock('@/hooks/useAnalyticsData', () => ({
-  useIVSurface: () => ({
-    data: { spot_price: 5000, count: 0, surface: [], skew: [] },
-    isLoading: false,
-    error: null,
-  }),
+  useIVSurface: () => mockIV,
   useTechnicalIndicators: vi.fn(() => ({
     data: { data: [], indicators: ['ATR', 'RSI', 'BBANDS'] },
     isLoading: false,
@@ -52,6 +49,20 @@ vi.mock('@/stores/uiStore', () => ({
 }));
 
 describe('AnalyticsPage provider gating', () => {
+  beforeEach(() => { mockIV.error = null; });
+  it('exposes symbol, period and interval selection to assistive technology', () => {
+    render(<AnalyticsPage />);
+    for (const name of ['SPY', '1mo', '1d']) expect(screen.getByRole('button', { name })).toHaveAttribute('aria-pressed', 'true');
+  });
+  it('hides the cached spot and successful source context after an IV refetch fails', () => {
+    mockIV.data.count = 10;
+    mockIV.error = new Error('Provider refused refresh');
+    render(<AnalyticsPage />);
+    expect(screen.getByRole('alert')).toHaveTextContent(/IV data unavailable/i);
+    expect(screen.queryByText(/spot 5000/)).not.toBeInTheDocument();
+    expect(screen.queryByText('Source: Tradier')).not.toBeInTheDocument();
+    mockIV.data.count = 0;
+  });
   it('renders the technical indicators chart for Tradier', () => {
     render(<AnalyticsPage />);
 

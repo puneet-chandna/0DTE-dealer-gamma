@@ -18,6 +18,7 @@ from app.core.charm_vanna_calculator import CharmVannaCalculator
 from app.core.constants import LONG_GAMMA_THRESHOLD, SHORT_GAMMA_THRESHOLD
 from app.core.data_acquisition import get_current_trading_date
 from app.core.gex_calculator import GEXCalculator
+from app.core.provenance import data_provenance
 from app.core.technical_indicators import TechnicalIndicatorEngine
 from app.models.schemas import AdvancedAnalytics, CharmVannaSnapshot, GEXSnapshot
 
@@ -213,7 +214,7 @@ class DemoDataService:
         surface = []
         skew = []
         for index, strike in enumerate(strikes):
-            moneyness = (strike - spot) / max(spot, 1.0)
+            moneyness = (strike - spot) / spot
             base_iv = 0.16 + abs(moneyness) * 1.8 + regime_shift
             call_iv = max(0.08, base_iv + 0.01 * np.sin(index + bucket_index / 11))
             put_iv = max(0.09, base_iv + 0.03 + 0.012 * np.cos(index + bucket_index / 13))
@@ -250,12 +251,16 @@ class DemoDataService:
                 }
             )
 
+        coverage = pd.DataFrame(index=pd.DatetimeIndex([snapshot.timestamp] * len(surface)))
         return {
             "symbol": symbol,
             "spot_price": spot,
             "surface": surface,
             "skew": skew,
             "count": len(surface),
+            "provenance": data_provenance(
+                coverage, provider="demo", symbol=symbol, synthetic=True,
+            ).model_dump(mode="json"),
         }
 
     def get_technical_indicators(
@@ -312,6 +317,9 @@ class DemoDataService:
             "indicators": indicator_list,
             "data": data,
             "count": len(data),
+            "provenance": data_provenance(
+                price_data, provider="demo", symbol=symbol, synthetic=True,
+            ).model_dump(mode="json"),
         }
 
     def get_ws_update(
@@ -362,6 +370,9 @@ class DemoDataService:
 
         if not needs_charm_vanna and not needs_hawkes:
             return snapshot
+
+        # Analytics computed here derive from the synthetic demo chain, not the captured chain.
+        snapshot.metrics["advanced_analytics_synthetic"] = True
 
         normalized_timestamp = self._normalize_now(snapshot.timestamp)
         session = self._resolve_session(
@@ -648,6 +659,8 @@ class DemoDataService:
                 "regime_code": regime_code,
                 "gex_imbalance": abs(total_call_gex) / max(abs(total_put_gex), 1.0),
                 "is_demo_data": 1.0,
+                "is_synthetic_data": True,
+                "is_replay_data": False,
                 "demo_bucket": float(bucket_index),
                 "zero_gamma_crossing_found": zero_gamma_crossing_found,
                 "zero_gamma_relation": zero_gamma_relation,

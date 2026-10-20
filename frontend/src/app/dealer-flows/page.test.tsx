@@ -9,6 +9,7 @@ const { mockUseUIStore, mockUseDashboardData, getDefaultDashboardData } = vi.hoi
   const getDefaultDashboardData = () => ({
     gexData: {
       timestamp: '2026-03-25T10:30:00.000Z',
+      provider: 'tradier',
       spot_price: 6025,
       total_call_gex: -2.0e9,
       total_put_gex: 1.5e9,
@@ -97,7 +98,7 @@ describe('DealerFlowsPage source label', () => {
     mockUseDashboardData.mockImplementation(getDefaultDashboardData);
   });
 
-  it('shows the selected provider display name instead of a hardcoded Yahoo label', () => {
+  it('shows the actual capture provider', () => {
     render(<DealerFlowsPage />);
 
     expect(screen.getByText(/source: tradier/i)).toBeInTheDocument();
@@ -105,7 +106,7 @@ describe('DealerFlowsPage source label', () => {
 
   it('shows the snapshot date and Eastern time', () => {
     render(<DealerFlowsPage />);
-    expect(screen.getByText(/updated mar 25, 2026 6:30 am et/i)).toBeInTheDocument();
+    expect(screen.getByText(/capture: mar 25, 2026 6:30 am et/i)).toBeInTheDocument();
   });
 
   it.each([
@@ -120,6 +121,18 @@ describe('DealerFlowsPage source label', () => {
     render(<DealerFlowsPage />);
     expect(screen.getByText(label)).toBeInTheDocument();
     expect(screen.queryByText(/^updated /i)).not.toBeInTheDocument();
+  });
+
+  it('selects and focuses model tabs with arrow keys', () => {
+    render(<DealerFlowsPage />);
+    const first = screen.getByRole('tab', { name: /GEX concentration/i });
+    expect(first).toHaveAttribute('aria-selected', 'true');
+    fireEvent.keyDown(first, { key: 'ArrowRight' });
+    const second = screen.getByRole('tab', { name: /cascade scenario/i });
+    expect(second).toHaveAttribute('aria-selected', 'true');
+    expect(second).toHaveFocus();
+    expect(first).toHaveAttribute('tabindex', '-1');
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', second.id);
   });
 
   it('treats a zero Hawkes state as valid neutral flow data', () => {
@@ -145,10 +158,33 @@ describe('DealerFlowsPage source label', () => {
     });
 
     render(<DealerFlowsPage />);
-    fireEvent.click(screen.getByRole('button', { name: /flow proxy/i }));
+    fireEvent.click(screen.getByRole('tab', { name: /flow proxy/i }));
 
     expect(screen.getByText(/snapshot imbalance proxy is balanced/i)).toBeInTheDocument();
     expect(screen.getByText(/heuristic confidence: 0%.*changed contracts: 0/i)).toBeInTheDocument();
+  });
+
+  it('discloses when analytics were backfilled synthetically for a replay capture', () => {
+    const baseData = getDefaultDashboardData();
+    mockUseDashboardData.mockReturnValue({
+      ...baseData,
+      gexData: {
+        ...baseData.gexData,
+        metrics: { ...baseData.gexData.metrics, advanced_analytics_synthetic: true },
+      } as GEXSnapshot,
+    });
+
+    render(<DealerFlowsPage />);
+    fireEvent.click(screen.getByRole('tab', { name: /flow proxy/i }));
+
+    expect(screen.getByText(/backfilled analytics:/i)).toBeInTheDocument();
+  });
+
+  it('does not show the backfilled analytics note for regular captures', () => {
+    render(<DealerFlowsPage />);
+    fireEvent.click(screen.getByRole('tab', { name: /flow proxy/i }));
+
+    expect(screen.queryByText(/backfilled analytics:/i)).not.toBeInTheDocument();
   });
 
   it('distinguishes balanced but elevated Hawkes intensity from quiet flow', () => {
@@ -171,7 +207,7 @@ describe('DealerFlowsPage source label', () => {
     });
 
     render(<DealerFlowsPage />);
-    fireEvent.click(screen.getByRole('button', { name: /flow proxy/i }));
+    fireEvent.click(screen.getByRole('tab', { name: /flow proxy/i }));
 
     expect(screen.getByText(/balanced, but hawkes intensities are elevated on both sides/i)).toBeInTheDocument();
   });
@@ -202,7 +238,7 @@ describe('DealerFlowsPage source label', () => {
     });
 
     render(<DealerFlowsPage />);
-    fireEvent.click(screen.getByRole('button', { name: /flow proxy/i }));
+    fireEvent.click(screen.getByRole('tab', { name: /flow proxy/i }));
 
     expect(screen.getByText(/Hidden Flows Panel 8000000/)).toBeInTheDocument();
     expect(screen.getByText(/Momentum Gauge 0.33/)).toBeInTheDocument();
@@ -227,7 +263,7 @@ describe('DealerFlowsPage source label', () => {
       } as GEXSnapshot,
     });
     render(<DealerFlowsPage />);
-    fireEvent.click(screen.getByRole('button', { name: /flow proxy/i }));
+    fireEvent.click(screen.getByRole('tab', { name: /flow proxy/i }));
     expect(document.body.textContent).not.toContain('NaN');
     expect(screen.getAllByText(/Squeeze score: 0 \/ 100/i).length).toBeGreaterThan(0);
   });

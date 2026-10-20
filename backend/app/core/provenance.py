@@ -33,7 +33,8 @@ def live_capture_metadata(options_df: pd.DataFrame) -> dict:
 
 
 def data_provenance(
-    frame: pd.DataFrame, *, provider: str, symbol: str, synthetic: bool = False
+    frame: pd.DataFrame, *, provider: str, symbol: str, synthetic: bool = False,
+    is_replay: bool = False,
 ) -> DataProvenance:
     metadata = dict(frame.attrs.get("source_metadata", {}))
     is_proxy = bool(metadata.get("is_proxy", provider == "yfinance" and symbol.upper() == "SPX"))
@@ -59,6 +60,7 @@ def data_provenance(
         ),
         is_proxy=is_proxy,
         data_kind="synthetic" if synthetic else "captured",
+        is_replay=is_replay,
         sample_count=len(frame),
         actual_start=frame.index.min() if len(frame) else None,
         actual_end=frame.index.max() if len(frame) else None,

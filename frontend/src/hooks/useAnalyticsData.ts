@@ -50,7 +50,7 @@ export function useRiskFreeRate() {
  * Fetch IV surface and skew data.
  */
 export function useIVSurface(symbol: string = 'SPY', enabled: boolean = true) {
-  const { demoModeEnabled, selectedProvider } = useUIStore();
+  const { demoModeEnabled, selectedProvider, autoRefreshEnabled = true, refreshInterval = 30 } = useUIStore();
   const mode = getAppDataMode(demoModeEnabled);
 
   return useQuery<IVSurfaceResponse>({
@@ -63,7 +63,7 @@ export function useIVSurface(symbol: string = 'SPY', enabled: boolean = true) {
     enabled,
     staleTime: 5 * 60 * 1000,
     gcTime: 15 * 60 * 1000,
-    refetchInterval: demoModeEnabled ? 5000 : false,
+    refetchInterval: autoRefreshEnabled ? refreshInterval * 1000 : false,
     refetchOnMount: true,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,
@@ -81,7 +81,7 @@ export function useTechnicalIndicators(
   indicators: string = 'ATR,RSI,BBANDS',
   enabled: boolean = true
 ) {
-  const { demoModeEnabled, selectedProvider } = useUIStore();
+  const { demoModeEnabled, selectedProvider, autoRefreshEnabled = true, refreshInterval = 30 } = useUIStore();
   const mode = getAppDataMode(demoModeEnabled);
 
   return useQuery<TechnicalIndicatorResponse>({
@@ -101,7 +101,7 @@ export function useTechnicalIndicators(
     enabled,
     staleTime: 5 * 60 * 1000,
     gcTime: 15 * 60 * 1000,
-    refetchInterval: demoModeEnabled ? 5000 : false,
+    refetchInterval: autoRefreshEnabled ? refreshInterval * 1000 : false,
     refetchOnMount: true,
     refetchOnWindowFocus: true,
     refetchOnReconnect: true,

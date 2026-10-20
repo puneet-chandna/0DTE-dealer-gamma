@@ -1,23 +1,3 @@
-/**
- * Dashboard Page - Full GEX monitoring dashboard with real-time WebSocket integration
- *
- * Layout:
- * ┌─────────────────────────────────────────────────────────────────┐
- * │ Header: Logo | Connection Status | Controls                     │
- * ├─────────────────────────────────────────────────────────────────┤
- * │ Stale Data Banner (conditional)                                 │
- * │ Regime Banner (conditional)                                     │
- * ├─────────────┬───────────────────────────────────────────────────┤
- * │ Sidebar     │ Main Content                                      │
- * │ Quick Stats │ ┌─────────────────────────────────────────────┐   │
- * │ • Net GEX   │ │ GEX by Strike Bar Chart                     │   │
- * │ • Zero Γ    │ └─────────────────────────────────────────────┘   │
- * │ Settings    │ ┌────────────────────┬────────────────────────┐   │
- * │ • Threshold │ │ Time Series Chart  │ Metrics Panel          │   │
- * │ • Refresh   │ └────────────────────┴────────────────────────┘   │
- * └─────────────┴───────────────────────────────────────────────────┘
- */
-
 'use client';
 
 import { useMemo } from 'react';
@@ -25,43 +5,21 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useDashboardData, useIntradayTimeSeries } from '@/hooks/useDashboardData';
 import { useGEXByStrikes, queryKeys } from '@/hooks/useGEXData';
 import { getAppDataMode } from '@/lib/appMode';
-import { formatMarketTimestamp, hasZeroGammaCrossing } from '@/lib/utils';
+import { formatCurrency, formatGEX, formatZeroGammaValue, hasZeroGammaCrossing } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
-import { DashboardHeader, Sidebar, MetricsPanel } from '@/components/dashboard';
-import {
-  AlertBanner,
-  regimeDescriptions,
-  Card,
-  CardHeader,
-  CardContent,
-  CardTitle,
-  StaleDataBanner,
-} from '@/components/ui';
+import { DashboardHeader, Sidebar } from '@/components/dashboard';
+import { Card, CardHeader, CardContent, CardTitle, PageShell } from '@/components/ui';
+import { SnapshotContext } from '@/components/ui/DataContext';
 import { ChartErrorBoundary, GEXBarChart, TimeSeriesChart } from '@/components/charts';
-import type { GEXChartDataPoint, SnapshotMetricValue, TimeSeriesDataPoint } from '@/types';
-
-function isTruthyMetric(metric: SnapshotMetricValue | undefined): boolean {
-  if (typeof metric === 'boolean') return metric;
-  if (typeof metric === 'number') return Number.isFinite(metric) && metric !== 0;
-  if (typeof metric === 'string') {
-    const normalized = metric.trim().toLowerCase();
-    return ['true', '1', 'yes', 'on'].includes(normalized);
-  }
-  return false;
-}
+import type { GEXChartDataPoint, TimeSeriesDataPoint } from '@/types';
 
 export default function DashboardPage() {
   const queryClient = useQueryClient();
-  const { demoModeEnabled, selectedProvider, availableProviders } = useUIStore();
+  const { demoModeEnabled, selectedProvider } = useUIStore();
   const mode = getAppDataMode(demoModeEnabled);
-  const selectedProviderInfo = availableProviders.find(
-    (provider) => provider.name === selectedProvider
-  );
-
   // Hybrid data hook - prefers WebSocket, falls back to polling
   const {
     gexData,
-    regimeData,
     strikesData,
     isRealtime,
     connectionState,
@@ -81,21 +39,6 @@ export default function DashboardPage() {
 
   // Use whichever strikes data is available
   const effectiveStrikesData = strikesData ?? strikesDataRest;
-
-  // Format last update time
-  const lastUpdate = lastUpdateTime
-    ? `${new Date(lastUpdateTime).toLocaleTimeString('en-US', { timeZone: 'America/New_York' })} ET`
-    : undefined;
-  let captureTimestampLabel: string | undefined;
-  if (gexData?.timestamp) {
-    const formattedTimestamp = formatMarketTimestamp(gexData.timestamp);
-    if (formattedTimestamp) {
-      const isReplayCapture = isTruthyMetric(gexData.metrics?.is_replay_data);
-      const isPersistedFallback = isTruthyMetric(gexData.metrics?.is_persisted_fallback);
-      if (isReplayCapture) captureTimestampLabel = `Replay capture: ${formattedTimestamp}`;
-      else if (isPersistedFallback) captureTimestampLabel = `Stored capture: ${formattedTimestamp}`;
-    }
-  }
 
   // Transform strikes data for bar chart
   const barChartData: GEXChartDataPoint[] = useMemo(() => {
@@ -133,186 +76,29 @@ export default function DashboardPage() {
     reconnect();
   };
 
-  // Show regime banner for short gamma (warning)
-  const showRegimeBanner = regimeData?.regime === 'short_gamma';
-
-  return (
-    <div className="flex h-screen flex-col bg-zinc-950 text-zinc-50">
-      {/* Header with connection status */}
-      <DashboardHeader
-        isConnected={!isLoading && !!gexData}
-        isRealtime={isRealtime}
-        connectionState={connectionState}
-        retryCount={retryCount}
-        isLoading={isLoading}
-        lastUpdate={lastUpdate}
-        captureTimestampLabel={captureTimestampLabel}
-        onRefresh={handleRefresh}
-      />
-
-      {error && !gexData && (
-        <p role="alert" className="mx-4 mt-4 rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-sm text-rose-300">
-          Market snapshot unavailable: {error}. Enable Demo to explore a labelled synthetic scenario.
-        </p>
-      )}
-
-      {/* Stale Data Warning Banner */}
-      {isStale && (
-        <div className="px-4 pt-4 sm:px-6 xl:px-8">
-          <div className="mx-auto w-full max-w-[1600px]">
-            <StaleDataBanner
-              lastUpdateTime={lastUpdateTime}
-              staleThresholdMs={60000}
-            />
-          </div>
+  return <div className="min-h-screen">
+    <DashboardHeader isRealtime={isRealtime} connectionState={connectionState} retryCount={retryCount} isLoading={isLoading} onRefresh={handleRefresh} />
+    <PageShell variant="wide">
+      <div className="page-heading"><div><h1>Market structure</h1><p>Signed options exposure and captured intraday context</p></div><span className="panel-caption">SPX research · 0DTE</span></div>
+      <div className="context-strip"><SnapshotContext snapshot={gexData} isStale={isStale} /></div>
+      {error && <div role="alert" className="research-alert mb-4">{gexData ? 'Refresh unavailable; retaining the labelled capture.' : `Market snapshot unavailable: ${error}. Choose Demo to explore a labelled replay or synthetic scenario.`}</div>}
+      <dl className="metric-strip">
+        <div><dt>Spot reference</dt><dd>{gexData ? formatCurrency(gexData.spot_price, 2) : '—'}</dd></div>
+        <div><dt>Net GEX · $ / 1% move</dt><dd className={gexData && gexData.net_gex < 0 ? 'text-rose-400' : 'text-emerald-400'}>{gexData ? formatGEX(gexData.net_gex) : '—'}</dd></div>
+        <div><dt>Zero gamma</dt><dd>{formatZeroGammaValue(gexData)}</dd></div>
+        <div><dt>Signed inventory proxy</dt><dd>{gexData ? gexData.net_gex > 0 ? 'Positive GEX' : gexData.net_gex < 0 ? 'Negative GEX' : 'Zero net GEX' : '—'}</dd></div>
+      </dl>
+      <div className="dashboard-workspace">
+        <div className="plot-stack min-w-0">
+          <Card><CardHeader><CardTitle>GEX by strike</CardTitle><span className="panel-caption">Hedge notional per 1% spot move · $B</span></CardHeader><CardContent>
+            <ChartErrorBoundary chartName="GEX by strike"><GEXBarChart data={barChartData} spotPrice={effectiveStrikesData?.spot_price ?? gexData?.spot_price ?? 0} zeroGammaLevel={gexData && !hasZeroGammaCrossing(gexData) ? undefined : effectiveStrikesData?.zero_gamma_level ?? gexData?.zero_gamma_level} isLoading={isLoading || strikesLoading} height={350} /></ChartErrorBoundary>
+          </CardContent></Card>
+          <Card><CardHeader><CardTitle>Intraday net GEX</CardTitle><span className="panel-caption">{dataPointCount} points · Eastern time</span></CardHeader><CardContent>
+            <ChartErrorBoundary chartName="Intraday net GEX">{timeSeriesData.length > 0 ? <TimeSeriesChart data={timeSeriesData} isLoading={false} height={240} /> : <div className="empty-chart"><p>{isLoading ? 'Loading persisted intraday history…' : 'No persisted intraday history for this source'}</p><p className="panel-caption">Saved captures appear first; subsequent captures are appended.</p></div>}</ChartErrorBoundary>
+          </CardContent></Card>
         </div>
-      )}
-
-      {/* Regime Alert Banner */}
-      {showRegimeBanner && regimeData && (
-        <div className="px-4 pt-4 sm:px-6 xl:px-8">
-          <div className="mx-auto w-full max-w-[1600px]">
-            <AlertBanner
-              regime={regimeData.regime}
-              description={regimeData.description || regimeDescriptions[regimeData.regime]}
-              netGexBillions={regimeData.net_gex_billions}
-            />
-          </div>
-        </div>
-      )}
-
-      {/* Stacked Sidebar for tablet/mobile */}
-      <div className="px-4 pt-4 sm:px-6 xl:hidden">
-        <div className="mx-auto w-full max-w-[1600px]">
-          <Sidebar
-            layout="stack"
-            gexData={gexData}
-            regimeData={regimeData}
-            isLoading={isLoading}
-          />
-        </div>
+        <Sidebar gexData={gexData} isLoading={isLoading} />
       </div>
-
-      {/* Main Layout */}
-      <div className="flex flex-1 overflow-hidden">
-        {/* Sidebar */}
-        <div className="hidden xl:flex">
-          <Sidebar
-            layout="rail"
-            gexData={gexData}
-            regimeData={regimeData}
-            isLoading={isLoading}
-          />
-        </div>
-
-        {/* Main Content */}
-        <main className="flex-1 overflow-y-auto p-4 sm:p-6">
-          <div className="mx-auto w-full max-w-[1600px] space-y-6">
-            {/* GEX Bar Chart - Primary visualization */}
-            <Card>
-              <CardHeader>
-                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                  <CardTitle>GEX by Strike</CardTitle>
-                  <div className="flex flex-wrap items-center gap-3">
-                    {isRealtime && (
-                      <span className="inline-flex items-center gap-1 rounded bg-emerald-900/50 px-2 py-0.5 text-xs text-emerald-300">
-                        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
-                        Streaming
-                      </span>
-                    )}
-                    {gexData?.spot_price !== undefined && (
-                      <span className="text-xs text-zinc-500">
-                        {selectedProviderInfo?.display_name ?? selectedProvider} • SPX @ {gexData.spot_price.toLocaleString()}
-                      </span>
-                    )}
-                    {selectedProvider === 'yfinance' && (
-                      <span
-                        className="rounded bg-amber-900/40 px-1.5 py-0.5 text-[11px] text-amber-300"
-                        title="Yahoo Finance has no SPX options: SPY options are fetched and spot, strikes, bid/ask are scaled ×10 as an SPX approximation. Greeks are computed locally. Quote freshness is not guaranteed."
-                      >
-                        SPX via SPY ×10 · options delayed ~15 min
-                      </span>
-                    )}
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <ChartErrorBoundary chartName="GEX Bar Chart">
-                    <GEXBarChart
-                      data={barChartData}
-                      spotPrice={effectiveStrikesData?.spot_price ?? gexData?.spot_price ?? 0}
-                    zeroGammaLevel={
-                      gexData && !hasZeroGammaCrossing(gexData)
-                        ? undefined
-                        : (effectiveStrikesData?.zero_gamma_level ?? gexData?.zero_gamma_level)
-                    }
-                      isLoading={strikesLoading}
-                      height={350}
-                    />
-                </ChartErrorBoundary>
-              </CardContent>
-            </Card>
-
-            {/* Bottom Row: Time Series + Metrics */}
-            <div className="grid gap-6 xl:grid-cols-3">
-              {/* Time Series Chart */}
-              <div className="xl:col-span-2">
-                <Card>
-                  <CardHeader>
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                      <CardTitle>Intraday Net GEX</CardTitle>
-                      {dataPointCount > 0 && (
-                        <span className="text-xs text-zinc-500">
-                          {dataPointCount} data points
-                        </span>
-                      )}
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <ChartErrorBoundary chartName="Time Series Chart">
-                      {timeSeriesData.length > 0 ? (
-                        <TimeSeriesChart
-                          data={timeSeriesData}
-                          isLoading={false}
-                          height={250}
-                        />
-                      ) : (
-                        <div className="flex h-[250px] items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/50">
-                          <div className="text-center">
-                            <p className="text-sm text-zinc-500">
-                              {isLoading
-                                ? 'Loading persisted intraday history...'
-                                : 'No persisted intraday history yet'}
-                            </p>
-                            <p className="mt-1 text-xs text-zinc-600">
-                              The chart will load saved history first, then append live updates
-                            </p>
-                          </div>
-                        </div>
-                      )}
-                    </ChartErrorBoundary>
-                  </CardContent>
-                </Card>
-              </div>
-
-              {/* Metrics Panel */}
-              <div>
-                <MetricsPanel data={gexData} isLoading={isLoading} />
-              </div>
-            </div>
-
-            {/* Footer info */}
-            <div className="text-center">
-              <p className="text-xs text-zinc-400">
-                {isRealtime
-                  ? 'WebSocket updates (about every 5s)'
-                  : 'REST data (configurable refresh interval, 30s default)'}
-                {' • Provider freshness varies; updates can continue outside market hours.'}
-              </p>
-            </div>
-          </div>
-        </main>
-      </div>
-    </div>
-  );
+    </PageShell>
+  </div>;
 }

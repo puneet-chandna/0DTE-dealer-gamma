@@ -82,7 +82,7 @@ export function zeroGammaReferenceLineConfig(value: number) {
       value: `0Γ: $${value.toLocaleString()}`,
       position: 'top' as const,
       fill: '#a78bfa',
-      fontSize: 11,
+      fontSize: 12,
     },
   };
 }

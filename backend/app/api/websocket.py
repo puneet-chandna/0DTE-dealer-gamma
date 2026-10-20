@@ -140,7 +140,11 @@ def _build_ws_payload_from_snapshot(
         "is_demo": is_demo,
         "is_replay": is_replay,
         "is_stale": False,
-        "metrics": dict(snapshot.metrics or {}),
+        "metrics": {
+            **dict(snapshot.metrics or {}),
+            "is_replay_data": is_replay,
+            "is_synthetic_data": is_demo and not is_replay,
+        },
     }
     if snapshot.advanced_analytics is not None:
         payload["advanced_analytics"] = snapshot.advanced_analytics.model_dump()

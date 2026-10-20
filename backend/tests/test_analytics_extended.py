@@ -125,7 +125,7 @@ class TestIVSurfaceEndpoint:
             resp = client.get("/api/analytics/iv-surface")
             assert resp.status_code == 200
 
-    def test_empty_provider_chain_returns_an_empty_surface(self):
+    def test_empty_provider_chain_returns_provider_error(self):
         with patch("app.api.routes.analytics.get_data_client") as mock_client_cls:
             instance = AsyncMock()
             # Return empty DF to simulate no data for invalid symbol
@@ -133,9 +133,8 @@ class TestIVSurfaceEndpoint:
             mock_client_cls.return_value = instance
 
             resp = client.get("/api/analytics/iv-surface?symbol=XXXXINVALID")
-            assert resp.status_code == 200
-            assert resp.json()["count"] == 0
-            assert resp.json()["surface"] == []
+            assert resp.status_code == 502
+            assert "spot_price" not in resp.json()
 
     def test_provider_param_keeps_registry_managed_client_open(self):
         """IV surface should honor provider selection without closing the cached provider."""
@@ -211,7 +210,7 @@ class TestIVSurfaceEndpoint:
                 resp = client.get("/api/analytics/iv-surface?provider=tradier")
 
         assert resp.status_code == 503
-        assert "TRADIER_API_KEY" in resp.json()["detail"]
+        assert "unavailable" in resp.json()["detail"]
 
 
 # ---------------------------------------------------------------------------
@@ -255,6 +254,51 @@ class TestTechnicalIndicatorsEndpoint:
             "/api/analytics/technical-indicators?symbol=SPY&indicators=ATR,RSI,BBANDS"
         )
         assert resp.status_code in (200, 503)
+
+    def test_indicator_list_ignores_empty_tokens_and_defaults_when_empty(self):
+        """Empty/whitespace tokens are discarded; an empty list falls back to all supported indicators."""
+        persisted_payload = {
+            "symbol": "SPY",
+            "period": "1mo",
+            "indicators": ["ATR", "RSI", "BBANDS"],
+            "count": 1,
+            "data": [
+                {
+                    "timestamp": "2026-03-25T10:30:00-04:00",
+                    "close": 590.0,
+                    "atr": 4.2,
+                    "rsi": 51.0,
+                    "bb_upper": 594.0,
+                    "bb_mid": 590.0,
+                    "bb_lower": 586.0,
+                }
+            ],
+        }
+        history_service = MagicMock()
+        history_service.get_technical_indicators = AsyncMock(return_value=persisted_payload)
+
+        with patch(
+            "app.api.routes.analytics.get_historical_data_service", return_value=history_service
+        ):
+            resp = client.get(
+                "/api/analytics/technical-indicators?symbol=SPY&indicators=%20,,ATR%20,RSI,"
+            )
+            assert resp.status_code == 200
+            assert history_service.get_technical_indicators.await_args.kwargs["indicators"] == ["ATR", "RSI"]
+
+            resp = client.get(
+                "/api/analytics/technical-indicators?symbol=SPY&indicators= , ,"
+            )
+            assert resp.status_code == 200
+            assert history_service.get_technical_indicators.await_args.kwargs["indicators"] == ["ATR", "RSI", "BBANDS"]
+
+    def test_nonempty_unsupported_indicator_still_rejected(self):
+        """Non-empty unsupported indicator names keep the 400 rejection."""
+        resp = client.get(
+            "/api/analytics/technical-indicators?symbol=SPY&indicators=,MACD,"
+        )
+        assert resp.status_code == 400
+        assert "Unsupported indicators" in resp.json()["detail"]
 
     def test_demo_mode_falls_back_to_synthetic_when_real_history_is_unavailable(self):
         """Demo mode should synthesize usable indicators when persisted and real history are both unusable."""

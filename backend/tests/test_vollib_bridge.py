@@ -106,6 +106,13 @@ class TestIVSurface:
             assert result["iv"].min() > 0
             assert result["iv"].max() < 5.0
 
+    def test_moneyness_is_signed_distance_from_spot(self):
+        surface = VolLibBridge.calculate_iv_surface(self._make_options_df(), spot_price=100.0)
+        skew = VolLibBridge.calculate_iv_skew(surface)
+        for frame in (surface, skew):
+            assert (frame["moneyness"] - (frame["strike"] - 100.0) / 100.0).abs().max() < 1e-12
+            assert (frame.loc[frame["strike"] == 100.0, "moneyness"] == 0).all()
+
     def test_iv_skew_computation(self):
         """IV skew should be computable from surface."""
         df = self._make_options_df()

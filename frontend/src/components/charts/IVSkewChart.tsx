@@ -33,7 +33,7 @@ function IVSkewChartComponent({
 }: IVSkewChartProps) {
   const chartData = useMemo(
     () =>
-      data.map((d) => ({
+      [...data].sort((a, b) => a.strike - b.strike).map((d) => ({
         strike: d.strike,
         skew: d.skew * 100,
         callIV: d.call_iv * 100,
@@ -49,7 +49,7 @@ function IVSkewChartComponent({
         className="flex items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/50"
         style={{ height }}
       >
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-600 border-t-violet-400" />
+        <p className="text-sm text-[var(--text-secondary)]">Loading chart…</p>
       </div>
     );
   }
@@ -60,7 +60,7 @@ function IVSkewChartComponent({
         className="flex items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/50"
         style={{ height }}
       >
-        <p className="text-sm text-zinc-500">No skew data available</p>
+        <p className="text-sm text-[var(--text-secondary)]">No skew data available</p>
       </div>
     );
   }
@@ -68,22 +68,27 @@ function IVSkewChartComponent({
   return (
     <ResponsiveContainer width="100%" height={height}>
       <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+        <CartesianGrid strokeDasharray="3 3" stroke="var(--stroke)" />
         <XAxis
           dataKey="strike"
-          tick={{ fill: '#71717a', fontSize: 11 }}
-          label={{ value: 'Strike', position: 'bottom', fill: '#52525b', fontSize: 11 }}
+          type="number"
+          domain={['dataMin', 'dataMax']}
+          tick={{ fill: 'var(--text-secondary)', fontSize: 12 }}
+          label={{ value: 'Strike', position: 'bottom', fill: 'var(--text-secondary)', fontSize: 12 }}
         />
         <YAxis
-          tick={{ fill: '#71717a', fontSize: 11 }}
-          label={{ value: 'Skew (%)', angle: -90, position: 'insideLeft', fill: '#52525b', fontSize: 11 }}
+          width={80}
+          tick={{ fill: 'var(--text-secondary)', fontSize: 12 }}
+          label={{ value: 'Put − call IV (pp)', angle: -90, position: 'insideLeft', fill: 'var(--text-secondary)', fontSize: 12 }}
         />
         <Tooltip
+          isAnimationActive={false}
           contentStyle={{
-            backgroundColor: '#18181b',
-            border: '1px solid #3f3f46',
+            backgroundColor: 'var(--surface-raised)',
+            border: '1px solid var(--stroke)',
             borderRadius: '8px',
-            fontSize: '12px',
+            fontSize: '14px',
+            color: 'var(--text-primary)',
           }}
           formatter={(value, name) => {
             const v = typeof value === 'number' ? value : 0;
@@ -92,24 +97,26 @@ function IVSkewChartComponent({
               callIV: 'Call IV',
               putIV: 'Put IV',
             };
-            return [`${v.toFixed(2)}%`, (labels[name ?? ''] || (name ?? ''))];
+            return [`${v.toFixed(2)}${name === 'skew' ? ' pp' : '%'}`, (labels[name ?? ''] || (name ?? ''))];
           }}
         />
-        <ReferenceLine y={0} stroke="#52525b" strokeDasharray="5 5" />
+        <ReferenceLine y={0} stroke="var(--text-muted)" strokeDasharray="5 5" />
         <Area
-          type="monotone"
+          isAnimationActive={false}
+          type="linear"
           dataKey="skew"
-          fill="#8b5cf6"
+          fill="var(--accent)"
           fillOpacity={0.1}
           stroke="none"
         />
         <Line
-          type="monotone"
+          isAnimationActive={false}
+          type="linear"
           dataKey="skew"
-          stroke="#8b5cf6"
+          stroke="var(--accent)"
           strokeWidth={2}
-          dot={{ fill: '#8b5cf6', r: 3 }}
-          activeDot={{ r: 5, fill: '#a78bfa' }}
+          dot={{ fill: 'var(--accent)', r: 3 }}
+          activeDot={{ r: 5, fill: 'var(--accent)' }}
         />
       </ComposedChart>
     </ResponsiveContainer>

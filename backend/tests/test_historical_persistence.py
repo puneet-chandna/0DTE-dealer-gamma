@@ -1311,6 +1311,36 @@ async def test_demo_current_falls_back_to_synthetic_without_cross_provider_repla
 
 
 @pytest.mark.asyncio
+async def test_stored_iv_recomputes_legacy_moneyness_without_rewriting_history(history_service):
+    service, session_factory = history_service
+    captured_at = datetime(2026, 3, 20, 10, 5, tzinfo=ET)
+    options = _build_options_df()
+    options.attrs["source_metadata"] = {"actual_instrument": "SPY", "is_proxy": True}
+    await service.persist_capture(
+        provider="yfinance", symbol="SPX", snapshot=_build_snapshot(captured_at),
+        options_df=options, force_raw_capture=True,
+    )
+    async with session_factory() as session:
+        rows = (await session.execute(select(IVSurfacePointRecord))).scalars().all()
+        for row in rows:
+            row.moneyness = row.strike / 5905.0
+        await session.commit()
+    result = await service.get_iv_surface(provider="yfinance", symbol="SPX")
+    assert result is not None
+    for point in result["surface"] + result["skew"]:
+        assert point["moneyness"] == pytest.approx((point["strike"] - 5905.0) / 5905.0)
+    provenance = result["provenance"]
+    assert provenance["provider"] == "yfinance"
+    assert provenance["actual_instrument"] == "SPY"
+    assert provenance["data_kind"] == "captured"
+    assert provenance["sample_count"] == 2
+    assert datetime.fromisoformat(provenance["actual_start"]) == captured_at
+    async with session_factory() as session:
+        rows = (await session.execute(select(IVSurfacePointRecord))).scalars().all()
+        assert all(row.moneyness == row.strike / 5905.0 for row in rows)
+
+
+@pytest.mark.asyncio
 async def test_get_technical_indicators_returns_null_indicators_for_short_history(history_service):
     service, _ = history_service
     base_time = datetime(2026, 3, 20, 10, 0, 0, tzinfo=ET)
@@ -1340,6 +1370,10 @@ async def test_get_technical_indicators_returns_null_indicators_for_short_histor
     assert indicators["symbol"] == "SPX"
     assert indicators["indicators"] == ["ATR", "RSI"]
     assert indicators["count"] == 3
+    assert indicators["provenance"]["provider"] == "yfinance"
+    assert indicators["provenance"]["actual_instrument"] == "SPY"
+    assert indicators["provenance"]["data_kind"] == "captured"
+    assert indicators["provenance"]["sample_count"] == 3
     assert all(point["atr"] is None for point in indicators["data"])
     assert all(point["rsi"] is None for point in indicators["data"])
     assert all(point["bb_upper"] is None for point in indicators["data"])

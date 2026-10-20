@@ -99,7 +99,7 @@ function HedgingCascadeSimulatorComponent({ data, isLoading }: HedgingCascadeSim
           <CardTitle>Hedging Cascade Simulator</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-[var(--text-secondary)]">
             {isLoading ? 'Loading GEX data...' : 'Awaiting GEX data'}
           </p>
         </CardContent>
@@ -121,12 +121,12 @@ function HedgingCascadeSimulatorComponent({ data, isLoading }: HedgingCascadeSim
           {hypotheticalMove !== 0 && simulation && (
             <div
               className={cn(
-                'rounded-md px-2 py-0.5 text-xs font-bold',
+                'rounded-md px-2 py-0.5 text-sm font-bold',
                 isAmplifying
                   ? 'bg-rose-900/50 text-rose-300'
                   : isDampening
                     ? 'bg-emerald-900/50 text-emerald-300'
-                    : 'bg-zinc-800 text-zinc-400'
+                    : 'bg-zinc-800 text-[var(--text-secondary)]'
               )}
             >
               {simulation.unstable
@@ -143,16 +143,16 @@ function HedgingCascadeSimulatorComponent({ data, isLoading }: HedgingCascadeSim
       <CardContent className="space-y-4">
         {/* Slider */}
         <div>
-          <div className="flex items-center justify-between text-xs text-zinc-400">
+          <div className="flex items-center justify-between text-sm text-[var(--text-secondary)]">
             <label htmlFor={moveInputId}>Hypothetical SPX move (points)</label>
             <span
               className={cn(
                 'font-bold tabular-nums text-sm',
                 hypotheticalMove > 0
-                  ? 'text-emerald-400'
+                  ? 'text-[var(--positive)]'
                   : hypotheticalMove < 0
-                    ? 'text-rose-400'
-                    : 'text-zinc-500'
+                    ? 'text-[var(--negative)]'
+                    : 'text-[var(--text-secondary)]'
               )}
             >
               {hypotheticalMove > 0 ? '+' : ''}{hypotheticalMove} pts
@@ -167,9 +167,9 @@ function HedgingCascadeSimulatorComponent({ data, isLoading }: HedgingCascadeSim
             value={hypotheticalMove}
             aria-valuetext={`${hypotheticalMove > 0 ? '+' : ''}${hypotheticalMove} points`}
             onChange={handleSliderChange}
-            className="mt-2 w-full accent-violet-500"
+            className="mt-2 w-full accent-[var(--accent)]"
           />
-          <div className="flex justify-between text-[10px] text-zinc-600">
+          <div className="flex justify-between text-sm text-[var(--text-muted)]">
             <span>-{sliderRange}</span>
             <span>0</span>
             <span>+{sliderRange}</span>
@@ -179,7 +179,7 @@ function HedgingCascadeSimulatorComponent({ data, isLoading }: HedgingCascadeSim
         {/* Cascade Waterfall */}
         {simulation ? (
           <div className="space-y-1.5">
-            <p className="text-[10px] font-medium uppercase tracking-wider text-zinc-500">
+            <p className="text-sm font-medium uppercase tracking-wider text-[var(--text-secondary)]">
               Cascade chain (hedge $ / impact pts)
             </p>
 
@@ -198,10 +198,10 @@ function HedgingCascadeSimulatorComponent({ data, isLoading }: HedgingCascadeSim
                     {/* Step number */}
                     <div
                       className={cn(
-                        'flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold',
+                        'flex h-7 w-7 items-center justify-center rounded-md text-sm font-medium',
                         i === 0
                           ? 'bg-violet-500/30 text-violet-300'
-                          : 'bg-zinc-800 text-zinc-500'
+                          : 'bg-zinc-800 text-[var(--text-secondary)]'
                       )}
                     >
                       {step.step}
@@ -209,38 +209,35 @@ function HedgingCascadeSimulatorComponent({ data, isLoading }: HedgingCascadeSim
 
                     {/* Bar */}
                     <div className="flex-1">
-                      <div className="relative h-5 overflow-hidden rounded bg-zinc-800/60">
+                      <div className="flex items-center justify-between gap-3 text-sm">
+                        <span className="font-medium text-[var(--text-primary)]">
+                          {step.hedgeNotional === 0 ? 'No hedge adjustment' : step.hedgeNotional > 0 ? 'Dealers BUY' : 'Dealers SELL'}
+                        </span>
+                        <span className="tabular-nums text-[var(--text-secondary)]">{formatDollars(Math.abs(step.hedgeNotional))}</span>
+                      </div>
+                      <div aria-hidden="true" className="mt-1.5 h-1.5 overflow-hidden rounded bg-[var(--surface-raised)]">
                         <div
                           className={cn(
-                            'h-full rounded transition-all duration-500',
+                            'h-full rounded',
                             isPositive
-                              ? 'bg-gradient-to-r from-emerald-600/80 to-emerald-500/50'
-                              : 'bg-gradient-to-r from-rose-600/80 to-rose-500/50'
+                              ? 'bg-[var(--positive)]'
+                              : 'bg-[var(--negative)]'
                           )}
                           style={{
                             width: `${Math.max(2, barWidth)}%`,
                           }}
                         />
-                        {/* Label inside bar */}
-                        <div className="absolute inset-0 flex items-center justify-between px-2 text-[9px]">
-                          <span className="font-medium text-zinc-300">
-                            {step.hedgeNotional === 0 ? 'No hedge adjustment' : step.hedgeNotional > 0 ? 'Dealers BUY' : 'Dealers SELL'}
-                          </span>
-                          <span className="tabular-nums text-zinc-400">
-                            {formatDollars(Math.abs(step.hedgeNotional))}
-                          </span>
-                        </div>
                       </div>
                     </div>
 
                     {/* Impact value */}
                     <div
                       className={cn(
-                        'w-14 text-right text-[10px] font-bold tabular-nums',
-                        isPositive ? 'text-emerald-400' : 'text-rose-400'
+                        'w-20 text-right text-sm font-medium tabular-nums',
+                        isPositive ? 'text-[var(--positive)]' : 'text-[var(--negative)]'
                       )}
                     >
-                      {isPositive ? '+' : ''}{step.marketImpact.toFixed(1)}
+                      {isPositive ? '+' : ''}{step.marketImpact.toFixed(1)} pts
                     </div>
                   </div>
                 </div>
@@ -248,36 +245,36 @@ function HedgingCascadeSimulatorComponent({ data, isLoading }: HedgingCascadeSim
             })}
 
             {/* Total impact summary */}
-            <div className="mt-3 rounded-lg border border-zinc-800 bg-zinc-900/50 px-3 py-2">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-zinc-400">Initial move</span>
+            <div className="mt-3 rounded-lg border border-[var(--stroke)] bg-[var(--surface-base)] px-3 py-2">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-[var(--text-secondary)]">Initial move</span>
                 <span
                   className={cn(
                     'font-bold tabular-nums',
-                    hypotheticalMove > 0 ? 'text-emerald-400' : 'text-rose-400'
+                    hypotheticalMove > 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]'
                   )}
                 >
                   {hypotheticalMove > 0 ? '+' : ''}{hypotheticalMove.toFixed(1)} pts
                 </span>
               </div>
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-zinc-400">After cascade</span>
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-[var(--text-secondary)]">After cascade</span>
                 <span
                   className={cn(
                     'font-bold tabular-nums',
-                    simulation.totalMove > 0 ? 'text-emerald-400' : 'text-rose-400'
+                    simulation.totalMove > 0 ? 'text-[var(--positive)]' : 'text-[var(--negative)]'
                   )}
                 >
                   {simulation.totalMove > 0 ? '+' : ''}
                   {simulation.totalMove.toFixed(1)} pts
                 </span>
               </div>
-              <div className="mt-1 flex items-center justify-between border-t border-zinc-800 pt-1 text-xs">
-                <span className="text-zinc-500">Signed move ratio</span>
+              <div className="mt-1 flex items-center justify-between border-t border-[var(--stroke)] pt-1 text-sm">
+                <span className="text-[var(--text-secondary)]">Signed move ratio</span>
                 <span
                   className={cn(
                     'font-bold',
-                    isAmplifying ? 'text-rose-400' : 'text-emerald-400'
+                    isAmplifying ? 'text-[var(--negative)]' : 'text-[var(--positive)]'
                   )}
                 >
                   {totalAmplification.toFixed(2)}×
@@ -286,19 +283,19 @@ function HedgingCascadeSimulatorComponent({ data, isLoading }: HedgingCascadeSim
             </div>
           </div>
         ) : (
-          <div className="flex h-32 items-center justify-center text-zinc-600">
+          <div className="flex h-32 items-center justify-center text-[var(--text-muted)]">
             <div className="text-center">
               <p className="text-sm">
-                {hypotheticalMove === 0 ? 'Drag the slider to simulate a price move' : 'Simulation unavailable for these GEX or price values'}
+                {hypotheticalMove === 0 ? 'Move the slider or use arrow keys to simulate a price move' : 'Simulation unavailable for these GEX or price values'}
               </p>
-              <p className="mt-1 text-[10px] text-zinc-700">
+              <p className="mt-1 text-sm text-[var(--text-muted)]">
                 Illustrative feedback under fixed gamma and liquidity
               </p>
             </div>
           </div>
         )}
 
-        <div className="text-[10px] text-zinc-400">
+        <div className="text-sm text-[var(--text-secondary)]">
           Illustration only: fixed snapshot gamma, baseline call/put inventory signs,
           and an uncalibrated $2B hedge notional per SPX point. Capped at six rounds;
           no option repricing or liquidity forecast. An unstable scenario means

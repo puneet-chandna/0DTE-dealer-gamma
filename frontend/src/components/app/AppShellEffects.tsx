@@ -2,13 +2,12 @@
 
 import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import { MarketStatusAlert } from '@/components/ui/MarketStatusAlert';
 import { useProviders } from '@/hooks/useProviders';
 import { useUIStore } from '@/stores/uiStore';
 
 export function AppShellEffects() {
   const queryClient = useQueryClient();
-  const { demoModeEnabled, isDarkMode, selectedProvider } = useUIStore();
+  const { demoModeEnabled, selectedProvider } = useUIStore();
   const previousModeRef = useRef(demoModeEnabled);
   const previousProviderRef = useRef(selectedProvider);
 
@@ -16,12 +15,10 @@ export function AppShellEffects() {
 
   useEffect(() => {
     const root = document.documentElement;
-    const nextTheme = isDarkMode ? 'dark' : 'light';
-
-    root.dataset.theme = nextTheme;
-    root.classList.toggle('dark', isDarkMode);
-    root.style.colorScheme = nextTheme;
-  }, [isDarkMode]);
+    root.dataset.theme = 'dark';
+    root.classList.add('dark');
+    root.style.colorScheme = 'dark';
+  }, []);
 
   useEffect(() => {
     if (
@@ -42,5 +39,5 @@ export function AppShellEffects() {
     });
   }, [demoModeEnabled, queryClient, selectedProvider]);
 
-  return <MarketStatusAlert />;
+  return null;
 }

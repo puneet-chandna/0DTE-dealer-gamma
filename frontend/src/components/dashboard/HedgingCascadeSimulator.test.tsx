@@ -60,6 +60,7 @@ describe('HedgingCascadeSimulator', () => {
     expect(slider).toHaveAttribute('aria-valuetext', '0 points');
     fireEvent.change(slider, { target: { value: 1 } });
     expect(slider).toHaveAttribute('aria-valuetext', '+1 points');
+    expect(document.querySelector('[aria-hidden="true"] > div[style]')).not.toHaveClass('transition-all');
   });
 
   it('sums snapshot GEX without reweighting it by strike distance', () => {
@@ -89,7 +90,7 @@ describe('HedgingCascadeSimulator', () => {
   it('keeps zero shocks idle', () => {
     render(<HedgingCascadeSimulator data={snapshot(1e9)} />);
     expect(screen.queryByText('After cascade')).not.toBeInTheDocument();
-    expect(screen.getByText(/drag the slider/i)).toBeInTheDocument();
+    expect(screen.getByText(/move the slider/i)).toBeInTheDocument();
   });
 
   it.each([Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_VALUE])('does not display unsafe model results for GEX %s', (gex) => {

@@ -15,9 +15,10 @@ export function PageShell({
 }: PageShellProps) {
   return (
     <main
+      id="research-content"
       className={cn(
-        'mx-auto w-full px-4 py-6 sm:px-6 md:py-8 xl:px-8',
-        variant === 'wide' ? 'max-w-[1600px]' : 'max-w-[1440px]',
+        'research-page w-full',
+        variant === 'wide' ? 'max-w-[1920px]' : 'max-w-[1800px]',
         className
       )}
     >

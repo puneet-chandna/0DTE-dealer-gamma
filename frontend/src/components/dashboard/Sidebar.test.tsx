@@ -77,7 +77,7 @@ describe('Sidebar layout variants', () => {
     };
   });
 
-  it('renders stack mode as a full-width section instead of a left rail', () => {
+  it('shows one inspector with exposure, controls and calculation limits', () => {
     const { container } = render(
       <Sidebar
         layout="stack"
@@ -86,10 +86,9 @@ describe('Sidebar layout variants', () => {
       />
     );
 
-    expect(screen.getByText(/quick stats/i)).toBeInTheDocument();
-    expect(container.firstChild).toHaveClass('w-full');
-    expect(container.firstChild).not.toHaveClass('w-72');
-    expect(screen.getByText(/settings/i)).toBeInTheDocument();
+    expect(screen.getByText(/exposure breakdown/i)).toBeInTheDocument();
+    expect(container.firstChild).toHaveClass('inspector');
+    expect(screen.getByText(/model assumptions/i)).toBeInTheDocument();
     expect(screen.queryByText(/pages/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /analytics/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /dealer flows/i })).not.toBeInTheDocument();
@@ -114,7 +113,7 @@ describe('Sidebar layout variants', () => {
       />
     );
 
-    expect(screen.getByText(/zero gamma: below range/i)).toBeInTheDocument();
+    expect(screen.getByText(/below sampled range/i)).toBeInTheDocument();
   });
 
   it('names the sidebar toggle and exposes its expanded state', () => {
