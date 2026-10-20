@@ -9,6 +9,7 @@ const storeState = vi.hoisted(() => ({
   state: {
     demoModeEnabled: false,
     selectedProvider: 'yfinance' as 'yfinance' | 'tradier',
+    autoRefreshEnabled: true, refreshInterval: 30,
   },
 }));
 
@@ -60,11 +61,11 @@ describe('useAnalyticsData demo polling', () => {
     vi.clearAllMocks();
     storeState.state = {
       demoModeEnabled: false,
-      selectedProvider: 'yfinance',
+      selectedProvider: 'yfinance', autoRefreshEnabled: true, refreshInterval: 30,
     };
   });
 
-  it('adds a 5-second refetch interval for IV surface in demo mode only', () => {
+  it('uses the selected polling interval for IV surface', () => {
     storeState.state = {
       ...storeState.state,
       demoModeEnabled: true,
@@ -76,12 +77,12 @@ describe('useAnalyticsData demo polling', () => {
 
     expect(useQuerySpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        refetchInterval: 5000,
+        refetchInterval: 30000,
       })
     );
   });
 
-  it('adds a 5-second refetch interval for technical indicators in demo mode only', () => {
+  it('uses the selected polling interval for technical indicators', () => {
     storeState.state = {
       ...storeState.state,
       demoModeEnabled: true,
@@ -93,16 +94,15 @@ describe('useAnalyticsData demo polling', () => {
 
     expect(useQuerySpy).toHaveBeenCalledWith(
       expect.objectContaining({
-        refetchInterval: 5000,
+        refetchInterval: 30000,
       })
     );
   });
 
-  it('keeps live-mode analytics queries on the existing non-polling behavior', () => {
-    renderHook(() => useIVSurface('SPY'), {
-      wrapper: createWrapper(),
-    });
-
+  it('disables IV and technical polling when Auto poll is off', () => {
+    storeState.state.autoRefreshEnabled = false;
+    renderHook(() => { useIVSurface('SPY'); useTechnicalIndicators('SPY'); }, { wrapper: createWrapper() });
+    expect(useQuerySpy).toHaveBeenCalledTimes(2);
     expect(useQuerySpy).toHaveBeenCalledWith(
       expect.objectContaining({
         refetchInterval: false,

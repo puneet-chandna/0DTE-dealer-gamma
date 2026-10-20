@@ -33,6 +33,7 @@ const websocketState = vi.hoisted(() => {
           is_stale?: boolean;
           is_mock?: boolean;
           is_demo?: boolean;
+          is_replay?: boolean;
           total_call_gex?: number;
           total_put_gex?: number;
           gex_by_strike?: Record<number, number>;
@@ -192,6 +193,25 @@ function createProviderWrapper(queryClient: QueryClient) {
 }
 
 describe('useDashboardData', () => {
+  it.each([true, false])('normalizes replay=%s metadata into rendered and cached snapshots', async (isReplay) => {
+    storeState.state.demoModeEnabled = true;
+    websocketState.stream.data!.is_demo = true;
+    websocketState.stream.data!.is_replay = isReplay;
+    websocketState.stream.data!.is_mock = !isReplay;
+    vi.mocked(gexAPI.getCurrentGEX).mockReturnValue(createPendingPromise<GEXSnapshot>());
+    vi.mocked(gexAPI.getCurrentRegime).mockResolvedValue(liveRegime);
+    vi.mocked(gexAPI.getGEXByStrikes).mockResolvedValue(liveStrikes);
+    const queryClient = createQueryClient();
+    const { result } = renderHook(() => useDashboardData(), {
+      wrapper: createProviderWrapper(queryClient),
+    });
+    await waitFor(() => expect(result.current.isRealtime).toBe(true));
+    expect(Boolean(result.current.gexData?.metrics.is_replay_data)).toBe(isReplay);
+    expect(Boolean(result.current.gexData?.metrics.is_synthetic_data)).toBe(!isReplay);
+    const cached = queryClient.getQueryData<GEXSnapshot>(queryKeys.gex.current('demo', 'yfinance'));
+    expect(Boolean(cached?.metrics.is_replay_data)).toBe(isReplay);
+    expect(Boolean(cached?.metrics.is_synthetic_data)).toBe(!isReplay);
+  });
   it('keeps streamed totals, strike exposures and provenance from the same snapshot', async () => {
     vi.mocked(gexAPI.getCurrentGEX).mockResolvedValue(liveCurrentGex);
     vi.mocked(gexAPI.getCurrentRegime).mockResolvedValue(liveRegime);

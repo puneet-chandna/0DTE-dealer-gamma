@@ -17,6 +17,7 @@ from sqlalchemy.orm import selectinload
 from app.core.analytics import TradingStrategy, VolatilityAnalyzer
 from app.core.base_provider import optional_market_number
 from app.core.gex_calculator import GEXCalculator
+from app.core.provenance import data_provenance
 from app.core.snapshot_quality import annotate_snapshot_quality, is_snapshot_replay_eligible
 from app.core.technical_indicators import TechnicalIndicatorEngine
 from app.core.vectorbt_backtester import VectorBTBacktester
@@ -431,6 +432,9 @@ class HistoricalDataService:
 
             if not iv_rows:
                 return None
+            spot_price = optional_market_number(raw_snapshot.spot_price)
+            if spot_price is None or spot_price <= 0:
+                return None
 
             surface = [
                 {
@@ -438,17 +442,25 @@ class HistoricalDataService:
                     "type": row.option_type,
                     "iv": row.iv,
                     "mid_price": row.mid_price,
-                    "moneyness": row.moneyness,
+                    "moneyness": (row.strike - spot_price) / spot_price,
                 }
                 for row in iv_rows
             ]
-            skew = self._build_skew_points(iv_rows)
+            skew = self._build_skew_points(iv_rows, spot_price=spot_price)
+            coverage = pd.DataFrame(
+                index=pd.DatetimeIndex([self._normalize_timestamp(raw_snapshot.captured_at)] * len(surface))
+            )
+            coverage.attrs["source_metadata"] = dict(raw_snapshot.source_metadata or {})
             return {
                 "symbol": underlying,
                 "spot_price": raw_snapshot.spot_price,
                 "surface": surface,
                 "skew": skew,
                 "count": len(surface),
+                "provenance": data_provenance(
+                    coverage, provider=provider_name, symbol=underlying,
+                    is_replay=prefer_replay,
+                ).model_dump(mode="json"),
             }
         except Exception as exc:
             logger.warning("IV surface lookup failed for %s/%s: %s", provider_name, underlying, exc)
@@ -520,6 +532,9 @@ class HistoricalDataService:
                 "indicators": indicator_names,
                 "data": points,
                 "count": len(points),
+                "provenance": data_provenance(
+                    price_data, provider=provider, symbol=symbol, is_replay=prefer_replay,
+                ).model_dump(mode="json"),
             }
 
         return await asyncio.to_thread(compute_response)
@@ -1483,7 +1498,7 @@ class HistoricalDataService:
         spot_price: float,
         options_df: pd.DataFrame,
     ) -> list[IVSurfacePointRecord]:
-        if options_df.empty or "strike" not in options_df.columns:
+        if options_df.empty or "strike" not in options_df.columns or spot_price <= 0:
             return []
 
         rows: list[IVSurfacePointRecord] = []
@@ -1510,16 +1525,20 @@ class HistoricalDataService:
                     option_type=option_type,
                     iv=float(implied_vol),
                     mid_price=mid_price,
-                    moneyness=float((strike - spot_price) / max(spot_price, 1.0)),
+                    moneyness=float((strike - spot_price) / spot_price),
                 )
             )
         return rows
 
     @staticmethod
-    def _build_skew_points(iv_rows: Iterable[IVSurfacePointRecord]) -> list[dict[str, float]]:
+    def _build_skew_points(
+        iv_rows: Iterable[IVSurfacePointRecord], *, spot_price: float
+    ) -> list[dict[str, float]]:
         grouped: dict[float, dict[str, float]] = {}
         for row in iv_rows:
-            bucket = grouped.setdefault(row.strike, {"moneyness": row.moneyness})
+            bucket = grouped.setdefault(
+                row.strike, {"moneyness": (row.strike - spot_price) / spot_price}
+            )
             bucket[f"{row.option_type}_iv"] = row.iv
 
         skew_points: list[dict[str, float]] = []

@@ -1,13 +1,12 @@
 /**
  * RegimeIndicator - Visual regime status component
  *
- * Large colored indicator with animation when regime changes.
+ * Static indicator of the signed GEX proxy regime.
  */
 
 'use client';
 
 import { memo } from 'react';
-import { motion } from 'framer-motion';
 import { TrendingUp, TrendingDown, Activity } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import type { RegimeType } from '@/types';
@@ -27,32 +26,28 @@ const regimeConfig: Record<
     description: string;
     bgClass: string;
     textClass: string;
-    glowClass: string;
   }
 > = {
   short_gamma: {
     icon: TrendingDown,
     label: 'Short Gamma',
     description: 'Negative signed GEX proxy',
-    bgClass: 'bg-rose-500',
-    textClass: 'text-rose-400',
-    glowClass: 'shadow-rose-500/30',
+    bgClass: 'bg-[var(--negative)]',
+    textClass: 'text-[var(--negative)]',
   },
   long_gamma: {
     icon: TrendingUp,
     label: 'Long Gamma',
     description: 'Positive signed GEX proxy',
-    bgClass: 'bg-emerald-500',
-    textClass: 'text-emerald-400',
-    glowClass: 'shadow-emerald-500/30',
+    bgClass: 'bg-[var(--positive)]',
+    textClass: 'text-[var(--positive)]',
   },
   neutral: {
     icon: Activity,
     label: 'Neutral',
     description: 'GEX proxy near the regime threshold',
-    bgClass: 'bg-amber-500',
-    textClass: 'text-amber-400',
-    glowClass: 'shadow-amber-500/30',
+    bgClass: 'bg-[var(--warning)]',
+    textClass: 'text-[var(--warning)]',
   },
 };
 
@@ -68,15 +63,11 @@ function RegimeIndicatorComponent({
   if (compact) {
     return (
       <div className="flex items-center gap-2">
-        <motion.div
+        <div
           key={regime}
-          initial={{ scale: 0.8, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ type: 'spring', stiffness: 300, damping: 20 }}
           className={cn(
-            'h-3 w-3 rounded-full shadow-lg',
-            config.bgClass,
-            config.glowClass
+            'h-3 w-3 rounded-full',
+            config.bgClass
           )}
         />
         <span className={cn('text-sm font-medium', config.textClass)}>
@@ -87,38 +78,18 @@ function RegimeIndicatorComponent({
   }
 
   return (
-    <motion.div
+    <div
       key={regime}
-      initial={{ scale: 0.95, opacity: 0 }}
-      animate={{ scale: 1, opacity: 1 }}
-      transition={{ type: 'spring', stiffness: 300, damping: 20 }}
       className="flex items-center gap-4"
     >
-      {/* Pulsing indicator */}
-      <div className="relative">
-        <motion.div
-          animate={{
-            scale: [1, 1.2, 1],
-            opacity: [0.5, 0.8, 0.5],
-          }}
-          transition={{
-            duration: 2,
-            repeat: Infinity,
-            ease: 'easeInOut',
-          }}
-          className={cn(
-            'absolute inset-0 rounded-full blur-md',
-            config.bgClass
-          )}
-        />
+      <div>
         <div
           className={cn(
-            'relative flex h-12 w-12 items-center justify-center rounded-full shadow-lg',
-            config.bgClass,
-            config.glowClass
+            'flex h-12 w-12 items-center justify-center rounded-lg',
+            config.bgClass
           )}
         >
-          <Icon className="h-6 w-6 text-white" />
+          <Icon className="h-6 w-6 text-[var(--surface-base)]" />
         </div>
       </div>
 
@@ -129,17 +100,17 @@ function RegimeIndicatorComponent({
             {config.label}
           </h3>
           {netGexBillions !== undefined && (
-            <span className="text-sm text-zinc-400">
+            <span className="text-sm text-[var(--text-secondary)]">
               ({netGexBillions >= 0 ? '+' : ''}
               {netGexBillions.toFixed(2)}B)
             </span>
           )}
         </div>
-        <p className="text-sm text-zinc-500">
+        <p className="text-sm text-[var(--text-secondary)]">
           {description || config.description}
         </p>
       </div>
-    </motion.div>
+    </div>
   );
 }
 

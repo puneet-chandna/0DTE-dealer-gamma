@@ -6,7 +6,7 @@ Provides GEX-volatility analysis, backtesting, and summary statistics.
 import asyncio
 import logging
 from dataclasses import asdict
-from datetime import date
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 import pandas as pd
@@ -15,20 +15,23 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.api.dependencies import validate_provider_query
 from app.config import get_settings
 from app.core import (
+    GEXCalculator,
     ProviderRegistry,
     TradingStrategy,
     VolatilityAnalyzer,
     get_current_trading_date,
     get_data_client,
 )
+from app.core.base_provider import optional_market_number
 from app.core.demo_data import get_demo_data_service
-from app.core.provenance import data_provenance
+from app.core.provenance import data_provenance, source_timestamp
 from app.core.provider_registry import ProviderUnavailableError
 from app.models.schemas import (
     AnalyticsResult,
     BacktestResult,
     IVSurfaceResponse,
     SummaryStatistics,
+    TechnicalIndicatorResponse,
     VectorBTBacktestResult,
 )
 from app.services.cache import get_cache
@@ -83,12 +86,20 @@ def _build_technical_indicator_response(
                 point[bb_key] = None if pd.isna(val) else float(val)
         data.append(point)
 
+    coverage = result_df.copy(deep=False)
+    coverage.attrs["source_metadata"] = {
+        "actual_instrument": symbol.upper(), "is_proxy": False,
+    }
+    coverage.attrs["timestamp_basis"] = "Yahoo Finance historical bar timestamps; source freshness unknown"
     return {
         "symbol": symbol,
         "period": period,
         "indicators": indicator_list,
         "data": data,
         "count": len(data),
+        "provenance": data_provenance(
+            coverage, provider="yfinance", symbol=symbol,
+        ).model_copy(update={"nominal_options_delay_minutes": None}).model_dump(mode="json"),
     }
 
 
@@ -329,10 +340,7 @@ async def get_iv_surface(
     provider: str | None = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
     demo: bool = Query(False, description="Return deterministic demo data"),
 ) -> IVSurfaceResponse:
-    """Get Implied Volatility Surface data for 3D charting.
-
-    Creates a mock surface or true surface based on available options data.
-    """
+    """Return stored/live IV observations, or explicitly requested synthetic data."""
     from app.core.rate_provider import get_rate_provider
     from app.core.vollib_bridge import VolLibBridge
 
@@ -363,36 +371,29 @@ async def get_iv_surface(
 
         data_client = get_data_client(active_provider)
 
-        # In a real scenario, we'd fetch multiple expirations.
-        # For now, we'll fetch the nearest chain and generate a realistic surface from it.
         try:
             options_df, spot_price = await get_cache().fetch_gex_chain(data_client, symbol)
-        except Exception as e:
-            logger.warning(
-                f"Could not fetch live options for IV surface via {data_client.provider_name}: {e}"
+        except ProviderUnavailableError:
+            raise
+        except Exception as exc:
+            logger.warning("IV options fetch failed via %s", active_provider)
+            raise HTTPException(
+                status_code=502, detail="The selected provider could not supply IV options data."
+            ) from exc
+
+        spot_price = optional_market_number(spot_price)
+        if options_df.empty or spot_price is None or spot_price <= 0:
+            raise HTTPException(
+                status_code=502, detail="The selected provider returned no usable options or spot price."
             )
-            options_df = pd.DataFrame()
-            spot_price = 5950.0  # Fallback
 
         # Get live rate
         rate = get_rate_provider().get_rate()
 
-        if options_df.empty:
-            return {
-                "symbol": symbol,
-                "spot_price": spot_price,
-                "surface": [],
-                "skew": [],
-                "count": 0,
-            }
-
         # Add time-to-expiry column if not present
         if "T" not in options_df.columns:
-            from datetime import datetime
-            from zoneinfo import ZoneInfo
-
-            now = datetime.now(ZoneInfo("America/New_York"))
-            expiration = pd.to_datetime(options_df["expiration"])
+            now = datetime.now(ET)
+            expiration = GEXCalculator()._normalize_expiration_timestamps(options_df["expiration"])
             options_df["T"] = (expiration - now).dt.total_seconds() / (365.25 * 24 * 3600)
             options_df["T"] = options_df["T"].clip(lower=1e-10)
 
@@ -404,16 +405,16 @@ async def get_iv_surface(
         surface_df = VolLibBridge.calculate_iv_surface(options_df, spot_price, r=rate)
 
         if surface_df.empty:
-            return {
-                "symbol": symbol,
-                "spot_price": spot_price,
-                "surface": [],
-                "skew": [],
-                "count": 0,
-            }
+            raise HTTPException(status_code=502, detail="No usable IV observations were available.")
 
         # Compute skew
         skew_df = VolLibBridge.calculate_iv_skew(surface_df)
+        metadata = dict(options_df.attrs.get("source_metadata", {}))
+        captured_at = source_timestamp(metadata.get("source_received_at")) or datetime.now(ET)
+        coverage = pd.DataFrame(index=pd.DatetimeIndex([captured_at] * len(surface_df)))
+        coverage.attrs["source_metadata"] = metadata
+        coverage.attrs["timestamp_basis"] = "provider receipt or computation time; quote freshness unknown"
+        coverage.attrs["quality_limitations"] = ["Nearest available expiry only; not a multi-expiry IV surface."]
 
         return {
             "symbol": symbol,
@@ -421,20 +422,23 @@ async def get_iv_surface(
             "surface": surface_df.to_dict(orient="records"),
             "skew": skew_df.to_dict(orient="records") if not skew_df.empty else [],
             "count": len(surface_df),
+            "provenance": data_provenance(
+                coverage, provider=active_provider, symbol=symbol,
+            ),
         }
 
     except HTTPException:
         raise
     except ProviderUnavailableError as e:
-        raise HTTPException(status_code=503, detail=str(e)) from e
+        raise HTTPException(status_code=503, detail="The selected data provider is unavailable.") from e
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
-        logger.error(f"IV surface computation failed: {e}")
-        raise HTTPException(status_code=500, detail=f"IV surface failed: {str(e)}")
+        logger.error("IV surface computation failed (%s)", type(e).__name__)
+        raise HTTPException(status_code=500, detail="IV surface computation failed.") from e
 
 
-@router.get("/technical-indicators")
+@router.get("/technical-indicators", response_model=TechnicalIndicatorResponse)
 async def get_technical_indicators(
     symbol: str = Query("SPY", description="Symbol to analyze"),
     provider: str | None = Query(None, description="Data provider to use (e.g. yfinance, tradier)"),
@@ -450,7 +454,7 @@ async def get_technical_indicators(
 
     Feature idea: overlay with GEX levels to detect volatility explosions.
     """
-    from app.core.technical_indicators import TechnicalIndicatorEngine
+    from app.core.technical_indicators import SUPPORTED_INDICATORS, TechnicalIndicatorEngine
 
     try:
         settings = get_settings()
@@ -458,7 +462,13 @@ async def get_technical_indicators(
             provider,
             default_provider=settings.data_provider,
         )
-        indicator_list = [item.strip().upper() for item in indicators.split(",")]
+        indicator_list = [item.strip().upper() for item in indicators.split(",") if item.strip()]
+        if not indicator_list:
+            indicator_list = ["ATR", "RSI", "BBANDS"]
+        if set(indicator_list) - SUPPORTED_INDICATORS:
+            raise HTTPException(
+                status_code=400, detail="Unsupported indicators; choose ATR, RSI or BBANDS."
+            )
 
         persisted_indicators = await get_historical_data_service().get_technical_indicators(
             provider=active_provider,
@@ -489,7 +499,7 @@ async def get_technical_indicators(
                 )
                 hist = pd.DataFrame()
 
-            if not hist.empty:
+            if len(hist) >= 5:
                 result_df = await asyncio.to_thread(
                     TechnicalIndicatorEngine.compute_indicators,
                     hist,
@@ -532,9 +542,11 @@ async def get_technical_indicators(
             )
 
         # Compute indicators
-        result_df = await asyncio.to_thread(
-            TechnicalIndicatorEngine.compute_indicators, hist, indicators=indicator_list
-        )
+        result_df = hist.rename(columns=str.lower)
+        if len(hist) >= 5:
+            result_df = await asyncio.to_thread(
+                TechnicalIndicatorEngine.compute_indicators, hist, indicators=indicator_list
+            )
         return await asyncio.to_thread(
             _build_technical_indicator_response,
             symbol=symbol,
@@ -546,11 +558,11 @@ async def get_technical_indicators(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Technical indicator computation failed: {e}")
+        logger.error("Technical indicator computation failed (%s)", type(e).__name__)
         raise HTTPException(
             status_code=500,
-            detail=f"Technical indicators failed: {str(e)}",
-        )
+            detail="Technical indicator computation failed.",
+        ) from e
 
 
 @router.get("/vectorbt-backtest", response_model=VectorBTBacktestResult)

@@ -206,6 +206,7 @@ class DataProvenance(BaseModel):
     actual_instrument: str
     is_proxy: bool
     data_kind: Literal["captured", "synthetic"]
+    is_replay: bool = False
     sample_count: int
     actual_start: datetime | None = None
     actual_end: datetime | None = None
@@ -317,6 +318,7 @@ class TechnicalIndicatorResponse(BaseModel):
     indicators: list[str]
     data: list[TechnicalIndicatorData]
     count: int
+    provenance: DataProvenance | None = None
 
 
 class IVSurfaceData(BaseModel):
@@ -340,6 +342,7 @@ class IVSurfaceResponse(BaseModel):
     surface: list[IVSurfaceData]
     skew: list[dict[str, float]]
     count: int
+    provenance: DataProvenance | None = None
 
 
 class VectorBTBacktestResult(BaseModel):

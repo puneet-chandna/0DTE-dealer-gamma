@@ -6,6 +6,7 @@
 
 'use client';
 
+import { formatMarketTimestamp } from '@/lib/utils';
 import { memo, useMemo } from 'react';
 import {
   ComposedChart,
@@ -27,15 +28,6 @@ interface TechnicalOverlayChartProps {
   isLoading?: boolean;
 }
 
-function formatDate(timestamp: string): string {
-  try {
-    const d = new Date(timestamp);
-    return `${d.getMonth() + 1}/${d.getDate()}`;
-  } catch {
-    return timestamp.slice(0, 10);
-  }
-}
-
 function TechnicalOverlayChartComponent({
   data,
   indicators,
@@ -44,19 +36,23 @@ function TechnicalOverlayChartComponent({
 }: TechnicalOverlayChartProps) {
   const chartData = useMemo(
     () =>
-      data.map((d) => ({
-        date: formatDate(d.timestamp),
-        close: d.close,
-        atr: d.atr,
-        rsi: d.rsi,
-        bbUpper: d.bb_upper,
-        bbMid: d.bb_mid,
-        bbLower: d.bb_lower,
-        // For the band area fill
-        bbRange: d.bb_upper !== null && d.bb_lower !== null
-          ? [d.bb_lower, d.bb_upper]
-          : undefined,
-      })),
+      [...data]
+        .map((d) => ({ d, time: Date.parse(d.timestamp) }))
+        .filter((entry) => Number.isFinite(entry.time))
+        .sort((a, b) => a.time - b.time)
+        .map(({ d, time }) => ({
+          time,
+          close: d.close,
+          atr: d.atr,
+          rsi: d.rsi,
+          bbUpper: d.bb_upper,
+          bbMid: d.bb_mid,
+          bbLower: d.bb_lower,
+          // For the band area fill
+          bbRange: d.bb_upper !== null && d.bb_lower !== null
+            ? [d.bb_lower, d.bb_upper]
+            : undefined,
+        })),
     [data]
   );
 
@@ -78,10 +74,10 @@ function TechnicalOverlayChartComponent({
     (hasATR || hasRSI || hasBBands) &&
     !hasAnyIndicatorValues;
   const legendItems = [
-    { label: 'Close', color: '#e4e4e7' },
-    ...(hasBBands ? [{ label: 'Bollinger Bands', color: '#3b82f6' }] : []),
-    ...(hasATR ? [{ label: 'ATR', color: '#f59e0b' }] : []),
-    ...(hasRSI ? [{ label: 'RSI', color: '#8b5cf6' }] : []),
+    { label: 'Close', color: 'var(--text-primary)' },
+    ...(hasBBands ? [{ label: 'Bollinger Bands', color: 'var(--accent)' }] : []),
+    ...(hasATR ? [{ label: 'ATR', color: 'var(--warning)' }] : []),
+    ...(hasRSI ? [{ label: 'RSI', color: 'var(--accent)' }] : []),
   ];
 
   if (isLoading) {
@@ -90,7 +86,7 @@ function TechnicalOverlayChartComponent({
         className="flex items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/50"
         style={{ height: height + (hasRSI ? 150 : 0) }}
       >
-        <div className="h-6 w-6 animate-spin rounded-full border-2 border-zinc-600 border-t-violet-400" />
+        <p className="text-sm text-[var(--text-secondary)]">Loading chart…</p>
       </div>
     );
   }
@@ -101,7 +97,7 @@ function TechnicalOverlayChartComponent({
         className="flex items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/50"
         style={{ height }}
       >
-        <p className="text-sm text-zinc-500">No price data available</p>
+        <p className="text-sm text-[var(--text-secondary)]">No price data available</p>
       </div>
     );
   }
@@ -112,12 +108,12 @@ function TechnicalOverlayChartComponent({
         className="flex flex-col items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/50 px-6 text-center"
         style={{ height }}
       >
-        <p className="text-sm text-zinc-300">
-          Need more persisted history before ATR, RSI, and Bollinger Bands can be plotted.
+        <p className="text-sm text-[var(--text-primary)]">
+          More observations are needed before ATR, RSI, and Bollinger Bands can be plotted.
         </p>
-        <p className="mt-2 max-w-xl text-xs text-zinc-500">
-          The backend has price history, but this interval does not have enough captured bars yet.
-          Try a longer period or wait for more market data to be recorded.
+        <p className="mt-2 max-w-xl text-sm text-[var(--text-secondary)]">
+          The available price history does not contain enough bars at this interval.
+          Choose a longer period or a shorter interval.
         </p>
       </div>
     );
@@ -125,7 +121,8 @@ function TechnicalOverlayChartComponent({
 
   return (
     <div className="space-y-2">
-      <div className="flex flex-wrap gap-2 text-xs text-zinc-400">
+      <p className="text-sm text-[var(--text-muted)]">Observation time (ET), spaced by elapsed time.</p>
+      <div className="flex flex-wrap gap-2 text-sm text-[var(--text-secondary)]">
         {legendItems.map((item) => (
           <div
             key={item.label}
@@ -143,33 +140,42 @@ function TechnicalOverlayChartComponent({
       {/* Main price chart with Bollinger Bands */}
       <ResponsiveContainer width="100%" height={height}>
         <ComposedChart data={chartData} margin={{ top: 10, right: 20, bottom: 5, left: 10 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+          <CartesianGrid strokeDasharray="3 3" stroke="var(--stroke)" />
           <XAxis
-            dataKey="date"
-            tick={{ fill: '#71717a', fontSize: 10 }}
+            dataKey="time"
+            type="number"
+            scale="time"
+            domain={['dataMin', 'dataMax']}
+            tickFormatter={(value: number) => new Date(value).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+            tick={{ fill: 'var(--text-secondary)', fontSize: 12 }}
             interval="preserveStartEnd"
           />
           <YAxis
             yAxisId="price"
+            width={80}
             domain={['auto', 'auto']}
-            tick={{ fill: '#71717a', fontSize: 11 }}
-            label={{ value: 'Price', angle: -90, position: 'insideLeft', fill: '#52525b', fontSize: 11 }}
+            tick={{ fill: 'var(--text-secondary)', fontSize: 12 }}
+            label={{ value: 'Price ($)', angle: -90, position: 'insideLeft', fill: 'var(--text-secondary)', fontSize: 12 }}
           />
           {hasATR && (
             <YAxis
               yAxisId="atr"
               orientation="right"
+              width={80}
               domain={['auto', 'auto']}
-              tick={{ fill: '#f59e0b', fontSize: 10 }}
-              label={{ value: 'ATR', angle: 90, position: 'insideRight', fill: '#f59e0b', fontSize: 10 }}
+              tick={{ fill: 'var(--warning)', fontSize: 12 }}
+              label={{ value: 'ATR', angle: 90, position: 'insideRight', fill: 'var(--warning)', fontSize: 12 }}
             />
           )}
           <Tooltip
+            isAnimationActive={false}
+            labelFormatter={(value) => formatMarketTimestamp(new Date(Number(value)).toISOString()) ?? ''}
             contentStyle={{
-              backgroundColor: '#18181b',
-              border: '1px solid #3f3f46',
+              backgroundColor: 'var(--surface-raised)',
+              border: '1px solid var(--stroke)',
               borderRadius: '8px',
-              fontSize: '12px',
+              fontSize: '14px',
+              color: 'var(--text-primary)',
             }}
             formatter={(value, name) => {
               if (value == null) return ['—', name ?? ''];
@@ -191,48 +197,43 @@ function TechnicalOverlayChartComponent({
           {hasBBands && (
             <>
               <Area
+                isAnimationActive={false}
                 yAxisId="price"
-                type="monotone"
-                dataKey="bbUpper"
+                type="linear"
+                dataKey="bbRange"
                 stroke="none"
-                fill="#3b82f6"
-                fillOpacity={0.05}
-                connectNulls={false}
-              />
-              <Area
-                yAxisId="price"
-                type="monotone"
-                dataKey="bbLower"
-                stroke="none"
-                fill="#09090b"
-                fillOpacity={1}
+                fill="var(--accent)"
+                fillOpacity={0.08}
                 connectNulls={false}
               />
               <Line
+                isAnimationActive={false}
                 yAxisId="price"
-                type="monotone"
+                type="linear"
                 dataKey="bbUpper"
-                stroke="#3b82f6"
+                stroke="var(--accent)"
                 strokeWidth={1}
                 strokeDasharray="4 2"
                 dot={false}
                 connectNulls={false}
               />
               <Line
+                isAnimationActive={false}
                 yAxisId="price"
-                type="monotone"
+                type="linear"
                 dataKey="bbMid"
-                stroke="#3b82f6"
+                stroke="var(--accent)"
                 strokeWidth={1}
                 strokeOpacity={0.5}
                 dot={false}
                 connectNulls={false}
               />
               <Line
+                isAnimationActive={false}
                 yAxisId="price"
-                type="monotone"
+                type="linear"
                 dataKey="bbLower"
-                stroke="#3b82f6"
+                stroke="var(--accent)"
                 strokeWidth={1}
                 strokeDasharray="4 2"
                 dot={false}
@@ -243,22 +244,24 @@ function TechnicalOverlayChartComponent({
 
           {/* Price line */}
           <Line
+            isAnimationActive={false}
             yAxisId="price"
-            type="monotone"
+            type="linear"
             dataKey="close"
-            stroke="#e4e4e7"
+            stroke="var(--text-primary)"
             strokeWidth={2}
             dot={false}
-            activeDot={{ r: 4, fill: '#e4e4e7' }}
+            activeDot={{ r: 4, fill: 'var(--text-primary)' }}
           />
 
           {/* ATR */}
           {hasATR && (
             <Line
+              isAnimationActive={false}
               yAxisId="atr"
-              type="monotone"
+              type="linear"
               dataKey="atr"
-              stroke="#f59e0b"
+              stroke="var(--warning)"
               strokeWidth={1.5}
               dot={false}
               connectNulls={false}
@@ -271,24 +274,31 @@ function TechnicalOverlayChartComponent({
       {hasRSI && (
         <ResponsiveContainer width="100%" height={140}>
           <ComposedChart data={chartData} margin={{ top: 5, right: 20, bottom: 15, left: 10 }}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#27272a" />
+            <CartesianGrid strokeDasharray="3 3" stroke="var(--stroke)" />
             <XAxis
-              dataKey="date"
-              tick={{ fill: '#71717a', fontSize: 10 }}
+              dataKey="time"
+              type="number"
+              scale="time"
+              domain={['dataMin', 'dataMax']}
+              tickFormatter={(value: number) => new Date(value).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+              tick={{ fill: 'var(--text-secondary)', fontSize: 12 }}
               interval="preserveStartEnd"
             />
             <YAxis
               domain={[0, 100]}
               ticks={[20, 30, 50, 70, 80]}
-              tick={{ fill: '#71717a', fontSize: 10 }}
-              label={{ value: 'RSI', angle: -90, position: 'insideLeft', fill: '#52525b', fontSize: 10 }}
+              tick={{ fill: 'var(--text-secondary)', fontSize: 12 }}
+              label={{ value: 'RSI', angle: -90, position: 'insideLeft', fill: 'var(--text-secondary)', fontSize: 12 }}
             />
             <Tooltip
+              isAnimationActive={false}
+              labelFormatter={(value) => formatMarketTimestamp(new Date(Number(value)).toISOString()) ?? ''}
               contentStyle={{
-                backgroundColor: '#18181b',
-                border: '1px solid #3f3f46',
+                backgroundColor: 'var(--surface-raised)',
+                border: '1px solid var(--stroke)',
                 borderRadius: '8px',
-                fontSize: '12px',
+                fontSize: '14px',
+                color: 'var(--text-primary)',
               }}
               formatter={(value) => [
                 typeof value === 'number' ? value.toFixed(1) : '—',
@@ -296,25 +306,27 @@ function TechnicalOverlayChartComponent({
               ]}
             />
             {/* Overbought/Oversold zones */}
-            <ReferenceLine y={70} stroke="#ef4444" strokeDasharray="4 4" strokeOpacity={0.5} />
-            <ReferenceLine y={30} stroke="#22c55e" strokeDasharray="4 4" strokeOpacity={0.5} />
-            <ReferenceLine y={50} stroke="#52525b" strokeDasharray="2 4" />
+            <ReferenceLine y={70} stroke="var(--negative)" strokeDasharray="4 4" strokeOpacity={0.5} />
+            <ReferenceLine y={30} stroke="var(--positive)" strokeDasharray="4 4" strokeOpacity={0.5} />
+            <ReferenceLine y={50} stroke="var(--text-muted)" strokeDasharray="2 4" />
 
             <Area
-              type="monotone"
+              isAnimationActive={false}
+              type="linear"
               dataKey="rsi"
-              fill="#8b5cf6"
+              fill="var(--accent)"
               fillOpacity={0.1}
               stroke="none"
               connectNulls={false}
             />
             <Line
-              type="monotone"
+              isAnimationActive={false}
+              type="linear"
               dataKey="rsi"
-              stroke="#8b5cf6"
+              stroke="var(--accent)"
               strokeWidth={1.5}
               dot={false}
-              activeDot={{ r: 3, fill: '#a78bfa' }}
+              activeDot={{ r: 3, fill: 'var(--text-secondary)' }}
               connectNulls={false}
             />
           </ComposedChart>

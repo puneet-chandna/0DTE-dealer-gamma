@@ -25,22 +25,6 @@ function getProviderModeLabel(providerMode?: HawkesState['provider_mode']) {
   return 'Snapshot Proxy Mode';
 }
 
-function getConfidenceLabel(confidenceScore: number) {
-  if (confidenceScore >= 0.8) return 'High Confidence';
-  if (confidenceScore >= 0.55) return 'Moderate Confidence';
-  return 'Low Confidence';
-}
-
-function getConfidencePillClasses(confidenceScore: number) {
-  if (confidenceScore >= 0.8) {
-    return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300';
-  }
-  if (confidenceScore >= 0.55) {
-    return 'border-amber-500/30 bg-amber-500/10 text-amber-300';
-  }
-  return 'border-rose-500/30 bg-rose-500/10 text-rose-300';
-}
-
 function MomentumGaugeComponent({ data, isLoading }: MomentumGaugeProps) {
   // Map net_toxicity to -100..+100 angle range
   const gaugeAngle = useMemo(() => {
@@ -58,9 +42,8 @@ function MomentumGaugeComponent({ data, isLoading }: MomentumGaugeProps) {
   const squeezePercent = data && Number.isFinite(data.squeeze_score) ? Math.round(data.squeeze_score * 100) : 0;
   const isHighSqueeze = squeezePercent >= 60;
   const baselineReady = data?.baseline_ready ?? false;
-  const confidenceScore = data?.confidence_score ?? 0;
-  const confidenceLabel = getConfidenceLabel(confidenceScore);
-  const confidencePillClasses = getConfidencePillClasses(confidenceScore);
+  const confidenceScore = data?.confidence_score;
+  const confidenceLabel = `Heuristic confidence: ${typeof confidenceScore === 'number' && Number.isFinite(confidenceScore) ? `${Math.round(confidenceScore * 100)} / 100` : 'unavailable'}`;
   const providerModeLabel = getProviderModeLabel(data?.provider_mode);
 
   if (isLoading || !data) {
@@ -70,7 +53,7 @@ function MomentumGaugeComponent({ data, isLoading }: MomentumGaugeProps) {
           <CardTitle>Hawkes-Style Flow Intensity</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-[var(--text-secondary)]">
             {isLoading ? 'Analyzing snapshot flow...' : 'Awaiting Hawkes-style data'}
           </p>
         </CardContent>
@@ -89,13 +72,13 @@ function MomentumGaugeComponent({ data, isLoading }: MomentumGaugeProps) {
             <CardTitle>
               Hawkes-Style Flow Intensity
             </CardTitle>
-            <p className="text-xs text-zinc-500">
+            <p className="text-sm text-[var(--text-secondary)]">
               Snapshot-based excitation proxy from volume/OI changes.
             </p>
           </div>
           {isHighSqueeze && (
-            <div className="animate-pulse rounded-md bg-amber-900/60 px-2 py-0.5 text-xs font-bold text-amber-300">
-              ⚡ SQUEEZE {squeezePercent} / 100
+            <div className="rounded-md bg-amber-900/60 px-2 py-0.5 text-sm font-bold text-amber-300">
+              Squeeze score {squeezePercent} / 100
             </div>
           )}
         </div>
@@ -104,23 +87,12 @@ function MomentumGaugeComponent({ data, isLoading }: MomentumGaugeProps) {
         {/* Gauge */}
         <div className="relative mx-auto flex h-40 w-64 items-end justify-center overflow-hidden">
           {/* Background arc */}
-          <svg viewBox="0 0 200 110" className="absolute inset-0 h-full w-full">
-            {/* Gradient arc background */}
-            <defs>
-              <linearGradient id="gaugeGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.6" />
-                <stop offset="35%" stopColor="#f97316" stopOpacity="0.3" />
-                <stop offset="50%" stopColor="#3b82f6" stopOpacity="0.2" />
-                <stop offset="65%" stopColor="#f97316" stopOpacity="0.3" />
-                <stop offset="100%" stopColor="#10b981" stopOpacity="0.6" />
-              </linearGradient>
-            </defs>
-
+          <svg role="img" aria-label={`Snapshot intensity balance: calls ${data.call_intensity.toFixed(2)}, puts ${data.put_intensity.toFixed(2)}`} viewBox="0 0 200 110" className="absolute inset-0 h-full w-full">
             {/* Background arc */}
             <path
               d="M 15 100 A 85 85 0 0 1 185 100"
               fill="none"
-              stroke="url(#gaugeGradient)"
+              stroke="var(--stroke)"
               strokeWidth="12"
               strokeLinecap="round"
             />
@@ -139,52 +111,49 @@ function MomentumGaugeComponent({ data, isLoading }: MomentumGaugeProps) {
                   y1={cy + innerR * Math.sin(rad)}
                   x2={cx + outerR * Math.cos(rad)}
                   y2={cy + outerR * Math.sin(rad)}
-                  stroke="#52525b"
+                  stroke="var(--text-secondary)"
                   strokeWidth="1.5"
                 />
               );
             })}
 
             {/* Needle */}
-            <g
-              transform={`rotate(${gaugeAngle}, 100, 100)`}
-              className="transition-transform duration-700 ease-out"
-            >
+            <g transform={`rotate(${gaugeAngle}, 100, 100)`}>
               <line
                 x1="100"
                 y1="100"
                 x2="100"
                 y2="25"
-                stroke="#f4f4f5"
+                stroke="var(--text-primary)"
                 strokeWidth="2.5"
                 strokeLinecap="round"
               />
-              <circle cx="100" cy="100" r="4" fill="#f4f4f5" />
+              <circle cx="100" cy="100" r="4" fill="var(--text-primary)" />
             </g>
           </svg>
 
           {/* Labels */}
-          <div className="absolute bottom-0 flex w-full justify-between px-2 text-[10px] text-zinc-500">
-            <span className="text-rose-400/70">PUT</span>
-            <span className="text-emerald-400/70">CALL</span>
+          <div className="absolute bottom-0 flex w-full justify-between px-2 text-sm text-[var(--text-secondary)]">
+            <span className="text-[var(--negative)]">PUT</span>
+            <span className="text-[var(--positive)]">CALL</span>
           </div>
         </div>
 
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <span
             className={cn(
-              'rounded-full border px-2.5 py-1 text-[11px] font-medium',
-              confidencePillClasses
+              'rounded-full border px-2.5 py-1 text-sm font-medium',
+              'border-zinc-700 bg-zinc-900 text-zinc-300'
             )}
           >
             {confidenceLabel}
           </span>
-          <span className="rounded-full border border-zinc-700 bg-zinc-900/80 px-2.5 py-1 text-[11px] font-medium text-zinc-300">
+          <span className="rounded-full border border-zinc-700 bg-zinc-900/80 px-2.5 py-1 text-sm font-medium text-[var(--text-primary)]">
             {providerModeLabel}
           </span>
           <span
             className={cn(
-              'rounded-full border px-2.5 py-1 text-[11px] font-medium',
+              'rounded-full border px-2.5 py-1 text-sm font-medium',
               baselineReady
                 ? 'border-sky-500/30 bg-sky-500/10 text-sky-300'
                 : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
@@ -194,39 +163,39 @@ function MomentumGaugeComponent({ data, isLoading }: MomentumGaugeProps) {
           </span>
         </div>
 
-        <p className="mt-3 text-xs leading-5 text-zinc-500">
+        <p className="mt-3 text-sm leading-5 text-[var(--text-secondary)]">
           {baselineReady
-            ? `Tracking ${data.event_count ?? 0} eligible flow event${(data.event_count ?? 0) === 1 ? '' : 's'} from consecutive snapshots.`
+            ? `${data.event_count ?? 0} changed contracts counted from consecutive snapshots; these are not trades.`
             : 'Building flow baseline from consecutive snapshots before new contracts contribute to the signal.'}
         </p>
 
         {/* Metrics row */}
         <div className="mt-4 grid grid-cols-3 gap-2 text-center">
           <div>
-            <p className="text-[10px] uppercase tracking-wider text-zinc-500">Put Intensity</p>
-            <p className="text-sm font-bold tabular-nums text-rose-400">
+            <p className="text-sm uppercase tracking-wider text-[var(--text-secondary)]">Put Intensity</p>
+            <p className="text-sm font-bold tabular-nums text-[var(--negative)]">
               {data.put_intensity.toFixed(2)}
             </p>
           </div>
           <div>
-            <p className="text-[10px] uppercase tracking-wider text-zinc-500">Squeeze Score</p>
+            <p className="text-sm uppercase tracking-wider text-[var(--text-secondary)]">Squeeze Score</p>
             <p
               className={cn(
                 'text-sm font-bold tabular-nums',
-                isHighSqueeze ? 'text-amber-400' : 'text-zinc-300'
+                isHighSqueeze ? 'text-amber-400' : 'text-[var(--text-primary)]'
               )}
             >
               {squeezePercent} / 100
             </p>
           </div>
           <div>
-            <p className="text-[10px] uppercase tracking-wider text-zinc-500">Call Intensity</p>
-            <p className="text-sm font-bold tabular-nums text-emerald-400">
+            <p className="text-sm uppercase tracking-wider text-[var(--text-secondary)]">Call Intensity</p>
+            <p className="text-sm font-bold tabular-nums text-[var(--positive)]">
               {data.call_intensity.toFixed(2)}
             </p>
           </div>
         </div>
-        <p className="mt-2 text-center text-xs text-zinc-500">Uncalibrated snapshot heuristic; this score is not a probability.</p>
+        <p className="mt-2 text-center text-sm text-[var(--text-secondary)]">Uncalibrated snapshot heuristic; this score is not a probability.</p>
       </CardContent>
     </Card>
   );

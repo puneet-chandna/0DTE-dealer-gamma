@@ -97,6 +97,24 @@ describe('BacktestPage reviewer demo validation', () => {
     expect(screen.getByText(/7 closed.*1 open/)).toBeInTheDocument();
   });
 
+  it('marks edited controls as a draft while keeping results tied to the submitted run', () => {
+    render(<BacktestPage />);
+    fireEvent.click(screen.getByRole('button', { name: /run backtest/i }));
+    fireEvent.change(screen.getByLabelText(/initial cash/i), { target: { value: '200000' } });
+    expect(screen.getByText(/parameters changed since last run/i)).toBeInTheDocument();
+    expect(mockUseVectorbtBacktest).toHaveBeenLastCalledWith(expect.objectContaining({ initial_cash: 100000 }), true);
+    expect(screen.getByText('Equity Curve Chart')).toBeInTheDocument();
+  });
+
+  it('does not present zero closed-trade statistics as measured returns', () => {
+    mockUseVectorbtBacktest.mockReturnValue({ data: { ...sampleResult, closed_trades: 0, open_trades: 1 }, isLoading: false, isFetching: false, error: null });
+    render(<BacktestPage />);
+    expect(screen.getByText(/no closed trades; trade statistics are unavailable/i)).toBeInTheDocument();
+    for (const label of ['Win Rate', 'Best Trade', 'Worst Trade', 'Avg Duration']) {
+      expect(screen.getByText(label).parentElement).toHaveTextContent('—');
+    }
+  });
+
   it('submits fees and execution delay with the frozen run parameters', () => {
     render(<BacktestPage />);
     fireEvent.change(screen.getByLabelText(/fee per side/i), { target: { value: '0.25' } });
@@ -170,6 +188,13 @@ describe('BacktestPage reviewer demo validation', () => {
     ).toBeInTheDocument();
     expect(screen.queryByText('Equity Curve')).not.toBeInTheDocument();
     expect(screen.queryByText('Equity Curve Chart')).not.toBeInTheDocument();
+  });
+
+  it('defaults weekend demo runs to the backend’s latest eligible weekday', () => {
+    vi.setSystemTime(new Date('2026-10-18T16:00:00Z'));
+    mockUseUIStore.mockReturnValue({ demoModeEnabled: true, selectedProvider: 'yfinance', availableProviders: [] });
+    render(<BacktestPage />);
+    expect(mockUseVectorbtBacktest).toHaveBeenLastCalledWith(expect.objectContaining({ start_date: '2026-10-16', end_date: '2026-10-16' }), true);
   });
 
   it('uses the current New York date for demo auto-submit', () => {

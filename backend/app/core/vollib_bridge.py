@@ -190,7 +190,7 @@ class VolLibBridge:
                     "type": option_type,
                     "iv": iv,
                     "mid_price": mid_price,
-                    "moneyness": strike / spot_price,
+                    "moneyness": (strike - spot_price) / spot_price,
                 }
             )
 

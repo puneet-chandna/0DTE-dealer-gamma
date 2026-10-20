@@ -51,13 +51,13 @@ describe('Card Components', () => {
     expect(container.firstChild).toHaveClass('custom-class');
   });
 
-  it('uses responsive padding classes for card sections', () => {
+  it('uses shared workstation panel sections', () => {
     const { container: headerContainer } = render(<CardHeader>Header</CardHeader>);
     const { container: contentContainer } = render(<CardContent>Content</CardContent>);
     const { container: footerContainer } = render(<CardFooter>Footer</CardFooter>);
 
-    expect(headerContainer.firstChild).toHaveClass('px-4', 'py-3', 'sm:px-5', 'sm:py-4');
-    expect(contentContainer.firstChild).toHaveClass('px-4', 'py-3', 'sm:px-5', 'sm:py-4');
+    expect(headerContainer.firstChild).toHaveClass('panel-heading');
+    expect(contentContainer.firstChild).toHaveClass('panel-content');
     expect(footerContainer.firstChild).toHaveClass('px-4', 'py-3', 'sm:px-5');
   });
 });

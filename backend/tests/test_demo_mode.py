@@ -179,6 +179,7 @@ def test_current_gex_demo_replay_backfills_advanced_analytics_when_missing(monke
     assert response.status_code == 200
     data = response.json()
     assert data["metrics"]["is_replay_data"] == 1.0
+    assert bool(data["metrics"]["advanced_analytics_synthetic"]) is True
     assert data["advanced_analytics"]["charm_vanna"] is not None
     assert data["advanced_analytics"]["hawkes"] is not None
     assert data["advanced_analytics"]["smoothed_net_gex"] is not None
@@ -318,6 +319,7 @@ async def test_demo_websocket_replay_backfills_advanced_analytics_when_missing(m
 
     assert payload["is_demo"] is True
     assert payload["is_replay"] is True
+    assert bool(payload["metrics"]["advanced_analytics_synthetic"]) is True
     assert payload["advanced_analytics"]["charm_vanna"] is not None
     assert payload["advanced_analytics"]["hawkes"] is not None
 

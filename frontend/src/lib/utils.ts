@@ -197,6 +197,18 @@ export function getCurrentMarketDateString(now: Date = new Date()): string {
   return `${partLookup.year}-${partLookup.month}-${partLookup.day}`;
 }
 
+/** Match the backend's weekday session convention; holidays are not resolved. */
+export function getCurrentTradingDateString(now: Date = new Date()): string {
+  const clock = new Intl.DateTimeFormat('en-US', {
+    timeZone: MARKET_TIME_ZONE, hour: 'numeric', minute: 'numeric', hourCycle: 'h23',
+  }).formatToParts(now);
+  const part = (type: string) => Number(clock.find(item => item.type === type)?.value);
+  const day = new Date(`${getCurrentMarketDateString(now)}T12:00:00Z`);
+  if (part('hour') * 60 + part('minute') < 9 * 60 + 30) day.setUTCDate(day.getUTCDate() - 1);
+  while (day.getUTCDay() === 0 || day.getUTCDay() === 6) day.setUTCDate(day.getUTCDate() - 1);
+  return day.toISOString().slice(0, 10);
+}
+
 export function isFutureMarketDate(
   dateString: string,
   marketDate: string = getCurrentMarketDateString()

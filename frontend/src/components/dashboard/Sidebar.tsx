@@ -1,227 +1,30 @@
-/**
- * Sidebar - Quick stats, settings, expirations
- */
-
 'use client';
 
 import { memo, useId } from 'react';
-import { ChevronLeft, ChevronRight, Settings, Calendar } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { formatGEX, formatCurrency, formatZeroGammaValue } from '@/lib/utils';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { useUIStore } from '@/stores/uiStore';
-import { MetricCard, Card, CardContent, Skeleton } from '@/components/ui';
-import { RegimeIndicator } from '@/components/charts';
-import { useRiskFreeRate } from '@/hooks/useAnalyticsData';
+import { MetricsPanel } from './MetricsPanel';
 import type { GEXSnapshot, RegimeData } from '@/types';
 
-interface SidebarProps {
-  gexData?: GEXSnapshot | null;
-  regimeData?: RegimeData | null;
-  isLoading?: boolean;
-  layout?: 'rail' | 'stack';
-}
-
-function SidebarComponent({
-  gexData,
-  regimeData,
-  isLoading = false,
-  layout = 'rail',
-}: SidebarProps) {
-  const alertThresholdId = useId();
-  const { data: rateData } = useRiskFreeRate();
-  const {
-    isSidebarOpen,
-    toggleSidebar,
-    alertThreshold,
-    setAlertThreshold,
-    refreshInterval,
-    setAutoRefresh,
-    autoRefreshEnabled,
-  } = useUIStore();
-
-  // Calculate if we're in alert condition
-  const isAlertActive = gexData
-    ? Math.abs(gexData.net_gex / 1e9) >= alertThreshold
-    : false;
-  const isStack = layout === 'stack';
-  const showExpandedContent = isStack || isSidebarOpen;
-
-  return (
-    <aside
-      className={cn(
-        'relative bg-zinc-950/50',
-        isStack
-          ? 'w-full rounded-2xl border border-zinc-800/80 backdrop-blur-sm'
-          : cn(
-            'flex flex-col border-r border-zinc-800 transition-all duration-300',
-            isSidebarOpen ? 'w-72' : 'w-14'
-          )
-      )}
-    >
-      {!isStack && (
-        <button
-          onClick={toggleSidebar}
-          aria-label={isSidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'}
-          aria-expanded={isSidebarOpen}
-          className="absolute -right-3 top-6 z-10 flex h-6 w-6 items-center justify-center rounded-full border border-zinc-700 bg-zinc-900 text-zinc-400 transition-colors hover:bg-zinc-800 hover:text-zinc-300"
-        >
-          {isSidebarOpen ? (
-            <ChevronLeft className="h-3.5 w-3.5" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5" />
-          )}
-        </button>
-      )}
-
-      {showExpandedContent ? (
-        <div
-          className={cn(
-            isStack ? 'space-y-6 p-4 sm:p-5' : 'flex-1 overflow-y-auto p-4'
-          )}
-        >
-          {/* Regime Indicator */}
-          <div className="mb-6">
-            {isLoading ? (
-              <Skeleton className="h-20 w-full" />
-            ) : regimeData ? (
-              <RegimeIndicator
-                regime={regimeData.regime}
-                netGexBillions={regimeData.net_gex_billions}
-                description={regimeData.description}
-              />
-            ) : (
-              <div className="text-sm text-zinc-500">No regime data</div>
-            )}
-          </div>
-
-          {/* Quick Stats */}
-          <div className="space-y-3">
-            <h3 className="text-xs font-medium uppercase tracking-wider text-zinc-500">
-              Quick Stats
-            </h3>
-
-            <div className={cn(isStack ? 'grid gap-3 sm:grid-cols-2 xl:grid-cols-5' : 'space-y-3')}>
-              <MetricCard
-                label="Net GEX"
-                value={gexData ? formatGEX(gexData.net_gex) : '--'}
-                isLoading={isLoading}
-                isNegative={gexData ? gexData.net_gex < 0 : false}
-                isPositive={gexData ? gexData.net_gex > 0 : false}
-              />
-
-              <MetricCard
-                label="Zero Gamma"
-                value={formatZeroGammaValue(gexData)}
-                isLoading={isLoading}
-              />
-
-              <MetricCard
-                label="Spot Price"
-                value={gexData ? formatCurrency(gexData.spot_price, 2) : '--'}
-                isLoading={isLoading}
-              />
-
-              <MetricCard
-                label="Dominant Strike"
-                value={gexData ? formatCurrency(gexData.dominant_strike, 0) : '--'}
-                isLoading={isLoading}
-              />
-
-              <MetricCard
-                label="Risk-Free Rate"
-                value={rateData ? `${rateData.rate_pct.toFixed(2)}%` : '--'}
-                isLoading={!rateData}
-                isPositive={rateData ? !rateData.is_fallback : false}
-              />
-            </div>
-          </div>
-
-          {/* Settings */}
-          <div className={cn(isStack ? 'space-y-3' : 'mt-6 space-y-3')}>
-            <h3 className="flex items-center gap-2 text-xs font-medium uppercase tracking-wider text-zinc-500">
-              <Settings className="h-3.5 w-3.5" />
-              Settings
-            </h3>
-
-            <Card>
-              <CardContent className="space-y-4">
-                {/* Alert Threshold */}
-                <div>
-                  <label htmlFor={alertThresholdId} className="text-xs font-medium text-zinc-400">
-                    Alert Threshold ($B)
-                  </label>
-                  <div className="mt-1.5 flex items-center gap-2">
-                    <input
-                      id={alertThresholdId}
-                      type="range"
-                      min="0.5"
-                      max="3"
-                      step="0.25"
-                      value={alertThreshold}
-                      aria-valuetext={`${alertThreshold.toFixed(2)} billion dollars`}
-                      onChange={(e) =>
-                        setAlertThreshold(parseFloat(e.target.value))
-                      }
-                      className="flex-1 accent-violet-500"
-                    />
-                    <span className="w-12 text-right text-sm font-medium text-zinc-300">
-                      {alertThreshold.toFixed(2)}B
-                    </span>
-                  </div>
-                  {isAlertActive && (
-                    <p className="mt-1 text-xs text-rose-400">
-                      ⚠️ Alert threshold exceeded
-                    </p>
-                  )}
-                </div>
-
-                {/* Refresh Interval */}
-                <div>
-                  <label className="text-xs font-medium text-zinc-400">
-                    Refresh Interval
-                  </label>
-                  <div className="mt-1.5 flex gap-1">
-                    {[5, 10, 30, 60].map((seconds) => (
-                      <button
-                        key={seconds}
-                        aria-pressed={refreshInterval === seconds}
-                        onClick={() => setAutoRefresh(autoRefreshEnabled, seconds)}
-                        className={cn(
-                          'flex-1 rounded px-2 py-1 text-xs font-medium transition-colors',
-                          refreshInterval === seconds
-                            ? 'bg-violet-500/20 text-violet-400 border border-violet-500/30'
-                            : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
-                        )}
-                      >
-                        {seconds}s
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+interface SidebarProps { gexData?: GEXSnapshot | null; regimeData?: RegimeData | null; isLoading?: boolean; layout?: 'rail' | 'stack' }
+function SidebarComponent({ gexData, isLoading = false }: SidebarProps) {
+  const thresholdId = useId();
+  const { isSidebarOpen, toggleSidebar, alertThreshold, setAlertThreshold, refreshInterval, setAutoRefresh, autoRefreshEnabled } = useUIStore();
+  return <aside className={`inspector research-panel ${isSidebarOpen ? '' : 'collapsed'}`} aria-label="Research inspector">
+    <div className="inspector-heading">
+      {isSidebarOpen && <h2>Inspector</h2>}
+      <button type="button" className="control-button" onClick={toggleSidebar} aria-label={isSidebarOpen ? 'Collapse sidebar' : 'Expand sidebar'} aria-expanded={isSidebarOpen}>{isSidebarOpen ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}</button>
+    </div>
+    {isSidebarOpen && <>
+      <section className="inspector-section"><h3>Exposure breakdown</h3><MetricsPanel data={gexData} isLoading={isLoading} /></section>
+      <section className="inspector-section space-y-4"><h3>Monitoring</h3>
+        <div><label htmlFor={thresholdId}>Alert Threshold ($B)</label><div className="mt-2 flex items-center gap-3"><input id={thresholdId} type="range" min="0.5" max="3" step="0.25" value={alertThreshold} aria-valuetext={`${alertThreshold.toFixed(2)} billion dollars`} onChange={e => setAlertThreshold(Number(e.target.value))} className="min-w-0 flex-1 accent-blue-400" /><span className="tabular-nums">{alertThreshold.toFixed(2)}B</span></div>
+          {gexData && Math.abs(gexData.net_gex / 1e9) >= alertThreshold && <p className="mt-2 text-amber-300">Absolute GEX exceeds this visual alert threshold.</p>}
         </div>
-      ) : (
-        /* Collapsed state - just icons */
-        <div className="flex flex-col items-center gap-4 pt-12">
-          <div
-            className={cn(
-              'h-3 w-3 rounded-full',
-              regimeData?.regime === 'short_gamma'
-                ? 'bg-rose-500'
-                : regimeData?.regime === 'long_gamma'
-                  ? 'bg-emerald-500'
-                  : 'bg-amber-500'
-            )}
-            title={regimeData?.regime || 'No data'}
-          />
-          <Calendar className="h-4 w-4 text-zinc-500" />
-          <Settings className="h-4 w-4 text-zinc-500" />
-        </div>
-      )}
-    </aside>
-  );
+        <div><p className="mb-2">Polling interval</p><div className="flex gap-1" role="group" aria-label="Polling interval">{[5, 10, 30, 60].map(seconds => <button type="button" key={seconds} className="control-button flex-1" aria-pressed={refreshInterval === seconds} onClick={() => setAutoRefresh(autoRefreshEnabled, seconds)}>{seconds}s</button>)}</div></div>
+      </section>
+      <section className="inspector-section"><h3>Model assumptions</h3><p>Baseline inventory: calls positive, puts negative. Open interest does not identify dealer positions.</p><details className="source-details mt-3"><summary>Calculation & source limits</summary><p>GEX is hedge notional per 1% spot move. Zero gamma holds each contract’s IV fixed. Daily open interest and provider quote timestamps can differ; capture time does not establish quote freshness.</p></details></section>
+    </>}
+  </aside>;
 }
-
 export const Sidebar = memo(SidebarComponent);

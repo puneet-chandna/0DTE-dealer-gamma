@@ -1,27 +1,12 @@
-/**
- * Backtest Page — VectorBT strategy backtester with equity curve.
- *
- * Layout:
- * ┌─────────────────────────────────────────────────────────────┐
- * │  NavBar                                                      │
- * ├──────────────────────┬──────────────────────────────────────┤
- * │  Controls            │  Results Summary                     │
- * │  • Date Range        │  (metrics cards)                     │
- * │  • Thresholds        │                                      │
- * │  [Run Backtest]      │                                      │
- * ├──────────────────────┴──────────────────────────────────────┤
- * │  Equity Curve                                                │
- * └─────────────────────────────────────────────────────────────┘
- */
-
 'use client';
 
 import { useEffect, useRef, useState, useCallback, useReducer } from 'react';
 import { NavBar } from '@/components/ui/NavBar';
+import { DataContext } from '@/components/ui/DataContext';
 import { Card, CardHeader, CardContent, CardTitle, PageShell } from '@/components/ui';
 import { ChartErrorBoundary, EquityCurveChart } from '@/components/charts';
 import { useVectorbtBacktest } from '@/hooks/useAnalyticsData';
-import { cn, getCurrentMarketDateString, isFutureMarketDate } from '@/lib/utils';
+import { cn, formatGEX, formatMarketTimestamp, getCurrentTradingDateString, isFutureMarketDate } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
 
 interface BacktestParams {
@@ -78,8 +63,8 @@ function backtestRunReducer(
 export default function BacktestPage() {
   const { demoModeEnabled } = useUIStore();
   const [params, setParams] = useState<BacktestParams>({
-    start_date: getCurrentMarketDateString(),
-    end_date: getCurrentMarketDateString(),
+    start_date: getCurrentTradingDateString(),
+    end_date: getCurrentTradingDateString(),
     entry_threshold: -1e9,
     exit_threshold: 0,
     initial_cash: 100000,
@@ -100,11 +85,11 @@ export default function BacktestPage() {
     runState.runEnabled
   );
 
-  const marketToday = getCurrentMarketDateString();
+  const marketToday = getCurrentTradingDateString();
   const futureDateError =
     isFutureMarketDate(params.start_date, marketToday) ||
     isFutureMarketDate(params.end_date, marketToday)
-      ? `Future dates aren't available for backtests. Choose a date on or before ${marketToday} (New York market date).`
+      ? `Future dates aren't available for backtests. Choose a date on or before ${marketToday} (latest eligible weekday session).`
       : null;
   const handleRun = useCallback(() => {
     if (futureDateError || !params.start_date || !params.end_date || params.start_date > params.end_date) {
@@ -120,7 +105,7 @@ export default function BacktestPage() {
   }, [futureDateError, params, refetch, runState.submitted]);
 
   const isRunning = isLoading || isFetching;
-  const canRunBacktest = !isRunning && !futureDateError && !!params.start_date && !!params.end_date;
+  const canRunBacktest = !isRunning && !futureDateError && !!params.start_date && !!params.end_date && params.start_date <= params.end_date;
 
   useEffect(() => {
     if (!futureDateError) {
@@ -150,25 +135,29 @@ export default function BacktestPage() {
     dispatchRun({ type: 'auto-submit-demo', params });
   }, [demoModeEnabled, futureDateError, params, runState.submitted]);
 
+  const draftChanged = runState.submitted !== null && JSON.stringify(params) !== JSON.stringify(runState.submitted);
+  const closedTrades = result?.closed_trades ?? result?.total_trades ?? 0;
+  const tradeStatsAvailable = closedTrades > 0;
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-50">
       <NavBar />
 
-      <PageShell variant="standard">
+      <PageShell variant="wide">
         {/* Page Header */}
-        <div className="mb-8">
+        <div className="page-heading"><div>
           <h1 className="text-2xl font-bold tracking-tight">Strategy Backtester</h1>
           <p className="mt-1 text-sm text-zinc-400">
             Directional long-underlying simulation. Signals execute at a later close; costs and fills are assumptions.
           </p>
-        </div>
+        </div></div>
 
         {/* Controls + Results Row */}
-        <div className="mb-6 grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
+        <div className="backtest-workspace">
           {/* Controls Panel */}
           <Card>
             <CardHeader>
-              <CardTitle>Parameters</CardTitle>
+              <CardTitle>Draft parameters</CardTitle>
             </CardHeader>
             <CardContent className="space-y-5">
               <form onSubmit={(event) => { event.preventDefault(); if (event.currentTarget.checkValidity()) handleRun(); }} className="space-y-5">
@@ -233,7 +222,7 @@ export default function BacktestPage() {
                   className="w-full rounded-lg border border-zinc-700 bg-zinc-800/60 px-3 py-2 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500/30 font-mono"
                   step="any"
                 />
-                <p className="mt-1 text-xs text-zinc-500">Enter long when GEX drops below this</p>
+                <p className="mt-1 text-xs text-zinc-500">Enter long below {formatGEX(params.entry_threshold)}</p>
               </div>
 
               <div>
@@ -251,6 +240,7 @@ export default function BacktestPage() {
                   className="w-full rounded-lg border border-zinc-700 bg-zinc-800/60 px-3 py-2 text-sm text-zinc-200 focus:border-violet-500 focus:outline-none focus:ring-1 focus:ring-violet-500/30 font-mono"
                   step="any"
                 />
+                <p className="mt-1 text-xs text-zinc-500">Exit above {formatGEX(params.exit_threshold)}</p>
               </div>
 
               <div>
@@ -292,14 +282,7 @@ export default function BacktestPage() {
               <button
                 type="submit"
                 disabled={!canRunBacktest}
-                className={cn(
-                  'w-full rounded-lg py-2.5 text-sm font-semibold transition-all',
-                  isRunning
-                    ? 'cursor-wait bg-violet-500/30 text-violet-300'
-                    : canRunBacktest
-                      ? 'bg-violet-500 text-white hover:bg-violet-600 active:bg-violet-700'
-                      : 'cursor-not-allowed bg-zinc-800 text-zinc-500'
-                )}
+                className={cn('control-button primary w-full py-2.5 text-sm', isRunning && 'cursor-wait')}
               >
                 {isRunning ? (
                   <span className="flex items-center justify-center gap-2">
@@ -320,130 +303,49 @@ export default function BacktestPage() {
             </CardContent>
           </Card>
 
-          {/* Results Summary */}
-          <div>
-            <Card className="h-full">
-              <CardHeader>
-                <CardTitle>Results Summary</CardTitle>
-              </CardHeader>
+          <div className="min-w-0 space-y-5">
+            {draftChanged && result && <p role="status" className="research-alert">Parameters changed since last run. Results below use the submitted settings.</p>}
+            <Card>
+              <CardHeader><CardTitle>{result ? 'Equity Curve' : 'Results'}</CardTitle><span className="panel-caption">Long underlying · delayed-close execution</span></CardHeader>
               <CardContent>
-                {result?.provenance && (
-                  <section aria-label="Data provenance" className="mb-4 space-y-2 text-xs text-zinc-400">
-                    <p className="font-medium text-zinc-200">
-                      {result.provenance.actual_instrument}{result.provenance.is_proxy ? ' · SPX proxy' : ''}
-                    </p>
-                    <p>{result.provenance.sample_count} {result.provenance.data_kind} observations · {result.provenance.provider}</p>
-                    {result.provenance.actual_start && result.provenance.actual_end && (
-                      <p>Actual coverage: {result.provenance.actual_start.slice(0, 10)} to {result.provenance.actual_end.slice(0, 10)}</p>
-                    )}
-                    {result.closed_trades !== undefined && <p>{result.closed_trades} closed · {result.open_trades ?? 0} open · trade statistics use closed trades</p>}
-                    {result.fees !== undefined && result.slippage !== undefined && (
-                      <p>Assumptions: fee {formatPct(result.fees)} / side · spread/slippage {formatPct(result.slippage)} / side · delay {result.execution_delay_bars} bars</p>
-                    )}
-                    <details>
-                      <summary className="cursor-pointer">Data and simulation limitations</summary>
-                      <ul className="mt-2 list-disc pl-4 space-y-1">
-                        {result.provenance.quality_limitations.map((limitation) => <li key={limitation}>{limitation}</li>)}
-                      </ul>
-                    </details>
-                  </section>
-                )}
-                {!result && !isRunning ? (
-                  <div className="flex min-h-[220px] items-center justify-center sm:min-h-[280px] lg:min-h-[340px]">
-                    <div className="text-center">
-                      <p className="text-sm text-zinc-500">Configure parameters and run a backtest</p>
-                      <p className="mt-1 text-xs text-zinc-600">
-                        Strategy: Long when Net GEX {'<'} entry threshold, exit when {'>'} exit threshold
-                        {' '}• Long-only • Requires captured history or explicit demo mode
-                      </p>
-                    </div>
-                  </div>
-                ) : isRunning ? (
-                  <div className="flex min-h-[220px] items-center justify-center sm:min-h-[280px] lg:min-h-[340px]">
-                    <div className="h-8 w-8 animate-spin rounded-full border-2 border-zinc-600 border-t-violet-400" />
-                  </div>
-                ) : result ? (
-                  <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-4">
-                    <MetricTile
-                      label="Total Return"
-                      value={formatPct(result.total_return)}
-                      color={result.total_return >= 0 ? 'positive' : 'negative'}
-                    />
-                    <MetricTile label="Sharpe Ratio" value={formatRatio(result.sharpe_ratio)} />
-                    <MetricTile label="Sortino Ratio" value={formatRatio(result.sortino_ratio)} />
-                    <MetricTile label="Calmar Ratio" value={formatRatio(result.calmar_ratio)} />
-                    <MetricTile
-                      label="Max Drawdown"
-                      value={formatPct(result.max_drawdown)}
-                      color="negative"
-                    />
-                    <MetricTile label="Entries" value={result.total_trades.toString()} />
-                    <MetricTile
-                      label="Win Rate"
-                      value={formatPct(result.win_rate)}
-                      color={result.win_rate >= 0.5 ? 'positive' : 'negative'}
-                    />
-                    <MetricTile label="Profit Factor" value={formatRatio(result.profit_factor)} />
-                    <MetricTile
-                      label="Best Trade"
-                      value={formatPct(result.best_trade)}
-                      color="positive"
-                    />
-                    <MetricTile
-                      label="Worst Trade"
-                      value={formatPct(result.worst_trade)}
-                      color="negative"
-                    />
-                    <MetricTile label="Win/Loss" value={`${result.winning_trades}/${result.losing_trades}`} />
-                    <MetricTile
-                      label="Avg Duration"
-                      value={`${result.avg_trade_duration_minutes.toFixed(0)}m`}
-                    />
-                  </div>
-                ) : null}
+                {isRunning ? <div className="empty-chart" role="status">Running backtest with submitted parameters…</div> : result ? <>
+                  <DataContext provenance={result.provenance} />
+                  <p className="mt-3 text-sm text-zinc-300">Actual coverage: {formatMarketTimestamp(result.provenance?.actual_start ?? result.start_date)} → {formatMarketTimestamp(result.provenance?.actual_end ?? result.end_date)}</p>
+                  <p className="panel-caption mt-2">{closedTrades} closed · {result.open_trades ?? 0} open · trade statistics use closed trades</p>
+                  <div className="mt-5"><ChartErrorBoundary chartName="Equity curve"><EquityCurveChart equityCurve={result.equity_curve} initialCash={result.initial_cash ?? runState.submitted?.initial_cash ?? 100000} timestamps={result.equity_timestamps} height={280} /></ChartErrorBoundary></div>
+                  <details className="source-details mt-3"><summary>Submitted parameters & execution assumptions</summary>
+                    {runState.submitted && <dl className="definition-list mt-3">
+                      <dt>Requested dates</dt><dd>{runState.submitted.start_date} → {runState.submitted.end_date}</dd>
+                      <dt>Entry / exit GEX</dt><dd>{formatGEX(runState.submitted.entry_threshold)} / {formatGEX(runState.submitted.exit_threshold)}</dd>
+                      <dt>Initial cash</dt><dd>${runState.submitted.initial_cash.toLocaleString()}</dd>
+                      <dt>Allocation</dt><dd>{formatPct(runState.submitted.position_size)}</dd>
+                    </dl>}
+                    <p>Assumptions: fee {formatPct(result.fees ?? runState.submitted?.fees ?? 0.001)} / side · spread/slippage {formatPct(result.slippage ?? runState.submitted?.slippage ?? 0.001)} / side · delay {result.execution_delay_bars ?? runState.submitted?.execution_delay_bars ?? 1} bars</p>
+                  </details>
+                </> : <div className="empty-chart"><p>Configure parameters and run a backtest</p><p className="panel-caption">Long when net GEX falls below entry; exit above the exit threshold. Captured history or explicit Demo mode is required.</p></div>}
               </CardContent>
             </Card>
+            {result && !isRunning && <Card><CardHeader><CardTitle>Run statistics</CardTitle><span className="panel-caption">{result.provenance?.data_kind === 'synthetic' ? 'Synthetic scenario; no market evidence' : 'Descriptive results for the coverage above'}</span></CardHeader><CardContent>
+              {!tradeStatsAvailable && <p className="research-alert mb-4">No closed trades; trade statistics are unavailable.</p>}
+              <div className="result-metrics">
+                <MetricTile label="Total Return" value={formatPct(result.total_return)} color={result.total_return >= 0 ? 'positive' : 'negative'} />
+                <MetricTile label="Max Drawdown" value={formatPct(result.max_drawdown)} color="negative" />
+                <MetricTile label="Entries" value={String(result.total_trades)} />
+                <MetricTile label="Win Rate" value={tradeStatsAvailable ? formatPct(result.win_rate) : '—'} />
+                <MetricTile label="Sharpe · annualized" value={formatRatio(result.sharpe_ratio)} />
+                <MetricTile label="Sortino · annualized" value={formatRatio(result.sortino_ratio)} />
+                <MetricTile label="Calmar · annualized" value={formatRatio(result.calmar_ratio)} />
+                <MetricTile label="Profit Factor" value={tradeStatsAvailable ? formatRatio(result.profit_factor) : '—'} />
+                <MetricTile label="Best Trade" value={tradeStatsAvailable ? formatPct(result.best_trade) : '—'} />
+                <MetricTile label="Worst Trade" value={tradeStatsAvailable ? formatPct(result.worst_trade) : '—'} />
+                <MetricTile label="Win/Loss" value={tradeStatsAvailable ? `${result.winning_trades}/${result.losing_trades}` : '—'} />
+                <MetricTile label="Avg Duration" value={tradeStatsAvailable ? `${result.avg_trade_duration_minutes.toFixed(0)}m` : '—'} />
+              </div>
+              <p className="panel-caption mt-4">Annualized ratios can be extreme or undefined on short samples. Coverage, data provenance and execution assumptions limit interpretation.</p>
+            </CardContent></Card>}
           </div>
         </div>
-
-        {/* Equity Curve */}
-        {result && (
-          <Card>
-            <CardHeader>
-              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <CardTitle>Equity Curve</CardTitle>
-                <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-500">
-                  <span>
-                    {result.start_date.slice(0, 10)} → {result.end_date.slice(0, 10)}
-                  </span>
-                  <span className={cn(
-                    'font-mono font-semibold',
-                    result.total_return >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                  )}>
-                    {result.total_return >= 0 ? '+' : ''}{formatPct(result.total_return)}
-                  </span>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <ChartErrorBoundary chartName="Equity Curve">
-                <EquityCurveChart
-                  equityCurve={result.equity_curve}
-                  initialCash={result.initial_cash ?? runState.submitted?.initial_cash ?? 100000}
-                  timestamps={result.equity_timestamps}
-                  height={350}
-                />
-              </ChartErrorBoundary>
-            </CardContent>
-          </Card>
-        )}
-
-        {/* Footer */}
-        <div className="mt-8 text-center">
-          <p className="text-xs text-zinc-600">
-            Backtesting engine: vectorbt • {result?.provenance?.data_kind === 'synthetic' ? 'Synthetic demo; no market evidence' : 'Captured history required; results depend on data quality'}
-          </p>
-        </div>
+        <p className="panel-caption mt-5">Dates follow the backend’s weekday session convention; holidays are not resolved. Backtesting engine: vectorbt · Directional long-underlying simulation. These results do not model option strategy P&amp;L or establish future performance.</p>
       </PageShell>
     </div>
   );
@@ -469,9 +371,9 @@ function MetricTile({
         : 'text-zinc-100';
 
   return (
-    <div className="rounded-lg border border-zinc-800 bg-zinc-900/50 p-3">
+    <div className="border-b border-zinc-800 pb-3">
       <p className="text-xs text-zinc-500 mb-1">{label}</p>
-      <p className={cn('text-lg font-bold font-mono', valueColor)}>{value}</p>
+      <p className={cn('text-lg font-medium tabular-nums', valueColor)}>{value}</p>
     </div>
   );
 }

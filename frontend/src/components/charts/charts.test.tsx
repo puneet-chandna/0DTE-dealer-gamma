@@ -131,7 +131,7 @@ describe('MomentumGauge', () => {
     }} />);
     expect(screen.getByText('Squeeze Score')).toBeInTheDocument();
     expect(screen.getByText('70 / 100')).toBeInTheDocument();
-    expect(screen.getByText('⚡ SQUEEZE 70 / 100')).toBeInTheDocument();
+    expect(screen.getByText('Squeeze score 70 / 100')).toBeInTheDocument();
     expect(screen.getByText(/uncalibrated snapshot heuristic/i)).toBeInTheDocument();
     expect(screen.queryByText(/squeeze prob/i)).not.toBeInTheDocument();
   });
@@ -139,9 +139,9 @@ describe('MomentumGauge', () => {
   it('defaults a legacy payload without squeeze_score to zero', () => {
     render(<MomentumGauge data={JSON.parse('{"call_intensity":1.2,"put_intensity":0.4,"net_toxicity":0.8,"squeeze_probability":0.9}')} />);
     expect(screen.getByText('0 / 100')).toBeInTheDocument();
-    expect(screen.queryByText(/NaN|⚡ SQUEEZE/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/NaN|Squeeze score/)).not.toBeInTheDocument();
     expect(screen.getByText(/^baselining$/i)).toBeInTheDocument();
-    expect(screen.getByText(/low confidence/i)).toBeInTheDocument();
+    expect(screen.getByText(/heuristic confidence:/i)).toBeInTheDocument();
   });
 
   it('preserves the waiting state when data is absent', () => {
@@ -167,7 +167,7 @@ describe('MomentumGauge', () => {
     );
 
     expect(screen.getByText(/hawkes-style flow intensity/i)).toBeInTheDocument();
-    expect(screen.getByText(/high confidence/i)).toBeInTheDocument();
+    expect(screen.getByText(/heuristic confidence: 92 \/ 100/i)).toBeInTheDocument();
     expect(screen.getByText(/tradier-rich mode/i)).toBeInTheDocument();
   });
 
@@ -212,7 +212,7 @@ describe('MomentumGauge', () => {
     expect(screen.queryByText(/^baseline ready$/i)).not.toBeInTheDocument();
   });
 
-  it('colors the confidence pill to match a low-confidence state', () => {
+  it('keeps an uncalibrated confidence heuristic visually neutral', () => {
     render(
       <MomentumGauge
         data={{
@@ -228,10 +228,10 @@ describe('MomentumGauge', () => {
       />
     );
 
-    expect(screen.getByText(/low confidence/i)).toHaveClass(
-      'border-rose-500/30',
-      'bg-rose-500/10',
-      'text-rose-300'
+    expect(screen.getByText(/heuristic confidence:/i)).toHaveClass(
+      'border-zinc-700',
+      'bg-zinc-900',
+      'text-zinc-300'
     );
   });
 });
@@ -309,7 +309,7 @@ describe('TechnicalOverlayChart', () => {
     );
 
     expect(
-      screen.getByText(/need more persisted history before atr, rsi, and bollinger bands can be plotted/i)
+      screen.getByText(/more observations are needed before atr, rsi, and bollinger bands can be plotted/i)
     ).toBeInTheDocument();
   });
 

@@ -1,223 +1,62 @@
-/**
- * NavBar — Shared navigation bar across all pages.
- *
- * Industrial dark aesthetic with active page highlighting.
- */
-
 'use client';
 
-import { memo, useState } from 'react';
+import { memo } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { useQueryClient } from '@tanstack/react-query';
+import { Activity, BarChart3, LineChart, Waves, FlaskConical, RefreshCw, Radio } from 'lucide-react';
 import { useMarketStatus } from '@/hooks/useMarketStatus';
-import { cn } from '@/lib/utils';
 import { useUIStore } from '@/stores/uiStore';
-import { ProviderSelector } from '@/components/ui/ProviderSelector';
-import {
-  BarChart3,
-  LineChart,
-  FlaskConical,
-  Activity,
-  Waves,
-  Menu,
-  X,
-} from 'lucide-react';
+import { ProviderSelector } from './ProviderSelector';
+import type { ConnectionState } from '@/types';
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: BarChart3 },
   { href: '/analytics', label: 'Analytics', icon: LineChart },
   { href: '/dealer-flows', label: 'Dealer Flows', icon: Waves },
   { href: '/backtest', label: 'Backtest', icon: FlaskConical },
-] as const;
+];
 
-const marketStatusLabel = {
-  open: 'Open',
-  pre_market: 'Pre-Market',
-  after_hours: 'After Hours',
-  closed_weekend: 'Weekend',
-} as const;
+interface NavBarProps {
+  isConnected?: boolean;
+  isRealtime?: boolean;
+  connectionState?: ConnectionState;
+  retryCount?: number;
+  isLoading?: boolean;
+  lastUpdate?: string;
+  captureTimestampLabel?: string;
+  onRefresh?: () => void;
+}
 
-function NavBarComponent() {
+function NavBarComponent({ isRealtime, connectionState, retryCount = 0, isLoading, lastUpdate, captureTimestampLabel, onRefresh }: NavBarProps) {
   const pathname = usePathname();
-  const { demoModeEnabled, toggleDemoMode } = useUIStore();
+  const queryClient = useQueryClient();
+  const { demoModeEnabled, toggleDemoMode, autoRefreshEnabled, setAutoRefresh } = useUIStore();
   const { data: marketStatus } = useMarketStatus();
-  const currentPath = pathname ?? '/';
-  const [mobileMenuState, setMobileMenuState] = useState(() => ({
-    isOpen: false,
-    path: currentPath,
-  }));
+  const refresh = onRefresh ?? (() => {
+    void queryClient.invalidateQueries({ predicate: query => ['gex', 'analytics', 'iv-surface', 'technical-indicators'].includes(String(query.queryKey[0])) });
+  });
+  const transport = connectionState === 'connecting'
+    ? `Connecting${retryCount ? ` (${retryCount})` : ''}`
+    : isRealtime ? 'Stream connected' : connectionState === 'connected' ? 'Polling connected' : 'REST fallback';
 
-  const statusLabel = demoModeEnabled
-    ? 'Demo'
-    : marketStatus
-      ? marketStatusLabel[marketStatus.status] ?? 'Closed'
-      : 'Checking';
-
-  const statusTone = demoModeEnabled
-    ? 'bg-amber-400'
-    : marketStatus?.is_open
-      ? 'bg-emerald-500'
-      : 'bg-amber-400';
-  const activeItem = navItems.find((item) => pathname === item.href || pathname?.startsWith(`${item.href}/`));
-  const mobileMenuOpen =
-    mobileMenuState.path === currentPath ? mobileMenuState.isOpen : false;
-
-  const closeMobileMenu = () =>
-    setMobileMenuState({
-      isOpen: false,
-      path: currentPath,
-    });
-
-  const toggleMobileMenu = () =>
-    setMobileMenuState((state) => ({
-      isOpen:
-        state.path === currentPath ? !state.isOpen : true,
-      path: currentPath,
-    }));
-
-  const statusPill = (
-    <div className="flex items-center gap-2 rounded-full border border-zinc-800 bg-zinc-900/80 px-3 py-1.5">
-      <span
-        className={cn(
-          'h-2 w-2 rounded-full',
-          statusTone,
-          marketStatus?.is_open && !demoModeEnabled && 'animate-pulse'
-        )}
-      />
-      <span className="text-xs text-zinc-400">{statusLabel}</span>
-    </div>
-  );
-
-  return (
-    <nav className="border-b border-zinc-800 bg-zinc-950/90 backdrop-blur-sm">
-      <div className="mx-auto max-w-[1600px] px-4 sm:px-6 xl:px-8">
-        <div className="flex h-14 items-center justify-between gap-3 md:h-16">
-          <Link href="/" className="group flex items-center gap-2.5">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-violet-500/15 ring-1 ring-violet-500/30 transition-all group-hover:bg-violet-500/25 group-hover:ring-violet-500/50">
-              <Activity className="h-4 w-4 text-violet-400" />
-            </div>
-            <div className="min-w-0">
-              <span className="block text-sm font-semibold tracking-tight text-zinc-200">
-                0DTE GEX
-              </span>
-              <span className="hidden text-[11px] text-zinc-500 sm:block">
-                {activeItem?.label ?? 'Dashboard'}
-              </span>
-            </div>
-          </Link>
-
-          <div className="hidden md:flex md:flex-1 md:items-center md:justify-center">
-            <div className="flex items-center gap-1">
-              {navItems.map(({ href, label, icon: Icon }) => {
-                const isActive = pathname === href || pathname?.startsWith(`${href}/`);
-                return (
-                  <Link
-                    key={href}
-                    href={href}
-                    className={cn(
-                      'flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-all duration-200',
-                      isActive
-                        ? 'bg-violet-500/15 text-violet-300 ring-1 ring-violet-500/20'
-                        : 'text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-200'
-                    )}
-                  >
-                    <Icon className="h-4 w-4" />
-                    {label}
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="hidden md:flex items-center gap-2">
-            <ProviderSelector />
-
-            <button
-              type="button"
-              onClick={toggleDemoMode}
-              className={cn(
-                'rounded-lg px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] transition-all',
-                demoModeEnabled
-                  ? 'bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30'
-                  : 'bg-zinc-800/70 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
-              )}
-            >
-              Demo
-            </button>
-
-            {statusPill}
-          </div>
-
-          <div className="flex items-center gap-2 md:hidden">
-            <span className="rounded-full border border-zinc-800 bg-zinc-900/80 px-2.5 py-1 text-[11px] text-zinc-400">
-              {activeItem?.label ?? 'Menu'}
-            </span>
-            <button
-              type="button"
-              aria-label={mobileMenuOpen ? 'Close navigation menu' : 'Open navigation menu'}
-              aria-expanded={mobileMenuOpen}
-              aria-controls="mobile-navigation"
-              onClick={toggleMobileMenu}
-              className="inline-flex items-center justify-center rounded-lg border border-zinc-800 bg-zinc-900/80 p-2 text-zinc-300 transition-colors hover:bg-zinc-800"
-            >
-              {mobileMenuOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
-            </button>
-          </div>
-        </div>
-
-        {mobileMenuOpen && (
-          <div
-            id="mobile-navigation"
-            role="dialog"
-            aria-label="Mobile navigation"
-            className="border-t border-zinc-800 py-4 md:hidden"
-          >
-            <div className="space-y-4 rounded-2xl border border-zinc-800 bg-zinc-900/70 p-4 shadow-xl shadow-black/20">
-              <div className="flex flex-wrap items-center gap-2">
-                {statusPill}
-                <button
-                  type="button"
-                  onClick={toggleDemoMode}
-                  className={cn(
-                    'rounded-lg px-3 py-1.5 text-xs font-semibold uppercase tracking-[0.18em] transition-all',
-                    demoModeEnabled
-                      ? 'bg-amber-500/15 text-amber-300 ring-1 ring-amber-500/30'
-                      : 'bg-zinc-800/70 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
-                  )}
-                >
-                  Demo
-                </button>
-              </div>
-
-              <ProviderSelector />
-
-              <div className="grid grid-cols-2 gap-2">
-                {navItems.map(({ href, label, icon: Icon }) => {
-                  const isActive = pathname === href || pathname?.startsWith(`${href}/`);
-                  return (
-                    <Link
-                      key={href}
-                      href={href}
-                      onClick={closeMobileMenu}
-                      className={cn(
-                        'flex items-center gap-2 rounded-xl px-3 py-3 text-sm font-medium transition-all duration-200',
-                        isActive
-                          ? 'bg-violet-500/15 text-violet-300 ring-1 ring-violet-500/20'
-                          : 'bg-zinc-950/70 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
-                      )}
-                    >
-                      <Icon className="h-4 w-4" />
-                      {label}
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
-          </div>
-        )}
+  return <header className="research-nav">
+    <a className="sr-only focus:not-sr-only" href="#research-content">Skip to research content</a>
+    <div className="nav-row">
+      <Link href="/dashboard" className="research-brand" aria-label="0DTE Research home"><Activity size={21} aria-hidden="true" /><span>0DTE Research</span></Link>
+      <nav className="page-links" aria-label="Research pages">
+        {navItems.map(({ href, label, icon: Icon }) => <Link key={href} href={href} aria-current={pathname === href ? 'page' : undefined}><Icon size={16} aria-hidden="true" />{label}</Link>)}
+      </nav>
+      <div className="nav-controls">
+        <ProviderSelector />
+        <button type="button" className={`control-button ${demoModeEnabled ? 'demo-active' : ''}`} aria-pressed={demoModeEnabled} onClick={toggleDemoMode} title="Explore captured replay or synthetic examples; each panel identifies its data">Demo</button>
+        {pathname !== '/backtest' && <button type="button" className="control-button" aria-label="Auto poll" aria-pressed={autoRefreshEnabled} onClick={() => setAutoRefresh(!autoRefreshEnabled)} title="Automatically refresh displayed market captures; backend collection continues">Auto poll</button>}
+        <button type="button" className="control-button" aria-label="Refresh data" title="Fetch the latest available data" disabled={isLoading} onClick={refresh}><RefreshCw size={16} aria-hidden="true" /></button>
+        <span className="session-state" title={marketStatus?.next_open ? `Next open: ${marketStatus.next_open}` : undefined}>{marketStatus ? marketStatus.is_open ? 'US session open' : 'US session closed' : 'Checking session'}</span>
       </div>
-    </nav>
-  );
+    </div>
+    {(connectionState || captureTimestampLabel) && <div className="transport-line"><span className="inline-flex items-center gap-2"><Radio size={13} aria-hidden="true" />{transport}</span>{captureTimestampLabel && <span>{captureTimestampLabel}</span>}{!captureTimestampLabel && lastUpdate && <span>Capture time: {lastUpdate}</span>}<span>Connection status does not establish quote freshness.</span></div>}
+  </header>;
 }
 
 export const NavBar = memo(NavBarComponent);

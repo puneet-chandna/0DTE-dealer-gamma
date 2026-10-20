@@ -28,7 +28,7 @@ function formatFlow(value: number): string {
   return value.toFixed(0);
 }
 
-function FlowBar({
+function FlowEstimate({
   label,
   value,
   icon,
@@ -40,39 +40,25 @@ function FlowBar({
   description: string;
 }) {
   const isPositive = value >= 0;
-  const barWidth = Math.min(100, Math.abs(value) / 1e8); // Scale: 100M = full bar
 
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           {icon}
-          <span className="text-sm font-medium text-zinc-300">{label}</span>
+          <span className="text-sm font-medium text-[var(--text-primary)]">{label}</span>
         </div>
         <span
           className={cn(
             'text-sm font-bold tabular-nums',
-            isPositive ? 'text-emerald-400' : 'text-rose-400'
+            isPositive ? 'text-[var(--positive)]' : 'text-[var(--negative)]'
           )}
         >
-          {isPositive ? '+' : ''}${formatFlow(value)}
+          {isPositive ? '+' : '−'}${formatFlow(Math.abs(value))}
         </span>
       </div>
 
-      {/* Flow bar */}
-      <div className="relative h-2 overflow-hidden rounded-full bg-zinc-800">
-        <div
-          className={cn(
-            'h-full rounded-full transition-all duration-700 ease-out',
-            isPositive
-              ? 'bg-gradient-to-r from-emerald-600 to-emerald-400'
-              : 'bg-gradient-to-r from-rose-600 to-rose-400'
-          )}
-          style={{ width: `${Math.max(2, barWidth)}%` }}
-        />
-      </div>
-
-      <p className="text-xs text-zinc-500">{description}</p>
+      <p className="text-sm text-[var(--text-secondary)]">{description}</p>
     </div>
   );
 }
@@ -85,7 +71,7 @@ function HiddenFlowsPanelComponent({ data, isLoading }: HiddenFlowsPanelProps) {
           <CardTitle>Hidden Flows</CardTitle>
         </CardHeader>
         <CardContent>
-          <p className="text-sm text-zinc-500">
+          <p className="text-sm text-[var(--text-secondary)]">
             {isLoading ? 'Calculating hidden flows...' : 'Awaiting analytics data'}
           </p>
         </CardContent>
@@ -102,33 +88,33 @@ function HiddenFlowsPanelComponent({ data, isLoading }: HiddenFlowsPanelProps) {
           <CardTitle>Hidden Dealer Flows</CardTitle>
           <div
             className={cn(
-              'rounded-md px-2 py-0.5 text-xs font-medium',
+              'rounded-md px-2 py-0.5 text-sm font-medium',
               netIsPositive
                 ? 'bg-emerald-900/50 text-emerald-300'
                 : 'bg-rose-900/50 text-rose-300'
             )}
           >
-            {netIsPositive ? '▲ Buy scenario' : '▼ Sell scenario'}
+            {data.net_hidden_flow === 0 ? 'No net adjustment' : netIsPositive ? 'Buy scenario' : 'Sell scenario'}
           </div>
         </div>
       </CardHeader>
       <CardContent className="space-y-5">
-        <FlowBar
+        <FlowEstimate
           label="Charm Flow"
           value={data.charm_flow}
           icon={<Clock className="h-4 w-4 text-amber-400" />}
           description="Hedging pressure from time decay (30 min forward)"
         />
 
-        <FlowBar
+        <FlowEstimate
           label="Vanna Flow"
           value={data.vanna_flow}
           icon={<Waves className="h-4 w-4 text-sky-400" />}
           description="Hedge notional if IV drops 1 percentage point"
         />
 
-        <div className="border-t border-zinc-800 pt-3">
-          <FlowBar
+        <div className="border-t border-[var(--stroke)] pt-3">
+          <FlowEstimate
             label="Net Hidden Flow"
             value={data.net_hidden_flow}
             icon={<ArrowUpDown className="h-4 w-4 text-violet-400" />}
